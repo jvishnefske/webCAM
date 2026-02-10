@@ -1,0 +1,25 @@
+name: Deploy to jvishnefske.github.io/cam
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: jetli/wasm-pack-action@v0.4.0
+      - run: wasm-pack build --target web --out-dir www/pkg --release
+      - uses: peaceiris/actions-gh-pages@v4
+        with:
+          personal_token: ${{ secrets.CAM_DEPLOY_TOKEN }}
+          external_repository: jvishnefske/cam
+          publish_dir: ./www
+          publish_branch: gh-pages
