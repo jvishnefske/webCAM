@@ -76,6 +76,45 @@ fn intersect_triangle_z(a: Vec3, b: Vec3, c: Vec3, z: f64) -> Option<Segment2> {
     }
 }
 
+/// Query the mesh height at an XY point by casting a vertical ray downward.
+///
+/// Returns the highest Z coordinate where the ray intersects the mesh,
+/// or None if the point is outside all triangles.
+pub fn mesh_height_at(mesh: &Mesh, x: f64, y: f64) -> Option<f64> {
+    let mut max_z: Option<f64> = None;
+
+    for tri in &mesh.triangles {
+        if let Some(z) = triangle_z_at_xy(tri.v0, tri.v1, tri.v2, x, y) {
+            max_z = Some(max_z.map_or(z, |current| current.max(z)));
+        }
+    }
+
+    max_z
+}
+
+/// Compute the Z height of a triangle at a given XY point using barycentric coordinates.
+///
+/// Returns None if the point lies outside the triangle's XY projection.
+fn triangle_z_at_xy(v0: Vec3, v1: Vec3, v2: Vec3, x: f64, y: f64) -> Option<f64> {
+    // Compute barycentric coordinates for point (x, y) in the XY projection of the triangle
+    let denom = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y);
+    if denom.abs() < 1e-10 {
+        return None; // Degenerate triangle
+    }
+
+    let u = ((v1.y - v2.y) * (x - v2.x) + (v2.x - v1.x) * (y - v2.y)) / denom;
+    let v = ((v2.y - v0.y) * (x - v2.x) + (v0.x - v2.x) * (y - v2.y)) / denom;
+    let w = 1.0 - u - v;
+
+    // Check if point is inside triangle (with small tolerance for edge cases)
+    let eps = 1e-9;
+    if u >= -eps && v >= -eps && w >= -eps {
+        Some(u * v0.z + v * v1.z + w * v2.z)
+    } else {
+        None
+    }
+}
+
 /// Chain loose segments into closed polylines by matching endpoints.
 fn chain_segments(segments: Vec<Segment2>) -> Vec<Polyline> {
     if segments.is_empty() {
@@ -154,5 +193,104 @@ mod tests {
         let mesh = make_flat_quad_mesh(5.0);
         let contours = slice_at_z(&mesh, 5.0);
         assert!(!contours.is_empty());
+    }
+
+    fn make_box_mesh() -> Mesh {
+        // Simple box from 0,0,0 to 10,10,5 - just the top face for height query
+        let t1 = Triangle {
+            normal: Vec3::new(0.0, 0.0, 1.0),
+            v0: Vec3::new(0.0, 0.0, 5.0),
+            v1: Vec3::new(10.0, 0.0, 5.0),
+            v2: Vec3::new(10.0, 10.0, 5.0),
+        };
+        let t2 = Triangle {
+            normal: Vec3::new(0.0, 0.0, 1.0),
+            v0: Vec3::new(0.0, 0.0, 5.0),
+            v1: Vec3::new(10.0, 10.0, 5.0),
+            v2: Vec3::new(0.0, 10.0, 5.0),
+        };
+        Mesh::new(vec![t1, t2])
+    }
+
+    fn make_ramp_mesh() -> Mesh {
+        // Ramp from z=0 at y=0 to z=10 at y=10
+        let t1 = Triangle {
+            normal: Vec3::new(0.0, -1.0, 1.0),
+            v0: Vec3::new(0.0, 0.0, 0.0),
+            v1: Vec3::new(10.0, 0.0, 0.0),
+            v2: Vec3::new(10.0, 10.0, 10.0),
+        };
+        let t2 = Triangle {
+            normal: Vec3::new(0.0, -1.0, 1.0),
+            v0: Vec3::new(0.0, 0.0, 0.0),
+            v1: Vec3::new(10.0, 10.0, 10.0),
+            v2: Vec3::new(0.0, 10.0, 10.0),
+        };
+        Mesh::new(vec![t1, t2])
+    }
+
+    #[test]
+    fn test_mesh_height_at_box_center() {
+        let mesh = make_box_mesh();
+        let z = mesh_height_at(&mesh, 5.0, 5.0);
+        assert!(z.is_some());
+        assert!((z.unwrap() - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_mesh_height_at_box_corner() {
+        let mesh = make_box_mesh();
+        let z = mesh_height_at(&mesh, 0.0, 0.0);
+        assert!(z.is_some());
+        assert!((z.unwrap() - 5.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_mesh_height_at_outside_bounds() {
+        let mesh = make_box_mesh();
+        let z = mesh_height_at(&mesh, 20.0, 20.0);
+        assert!(z.is_none());
+    }
+
+    #[test]
+    fn test_mesh_height_at_ramp() {
+        let mesh = make_ramp_mesh();
+        // At y=5, z should be 5 (linear interpolation)
+        let z = mesh_height_at(&mesh, 5.0, 5.0);
+        assert!(z.is_some());
+        assert!((z.unwrap() - 5.0).abs() < 0.001);
+
+        // At y=0, z should be 0
+        let z0 = mesh_height_at(&mesh, 5.0, 0.0);
+        assert!(z0.is_some());
+        assert!((z0.unwrap() - 0.0).abs() < 0.001);
+
+        // At y=10, z should be 10
+        let z10 = mesh_height_at(&mesh, 5.0, 10.0);
+        assert!(z10.is_some());
+        assert!((z10.unwrap() - 10.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_mesh_height_at_multiple_heights() {
+        // Two overlapping horizontal triangles at different heights
+        let t_low = Triangle {
+            normal: Vec3::new(0.0, 0.0, 1.0),
+            v0: Vec3::new(0.0, 0.0, 2.0),
+            v1: Vec3::new(10.0, 0.0, 2.0),
+            v2: Vec3::new(5.0, 10.0, 2.0),
+        };
+        let t_high = Triangle {
+            normal: Vec3::new(0.0, 0.0, 1.0),
+            v0: Vec3::new(0.0, 0.0, 8.0),
+            v1: Vec3::new(10.0, 0.0, 8.0),
+            v2: Vec3::new(5.0, 10.0, 8.0),
+        };
+        let mesh = Mesh::new(vec![t_low, t_high]);
+
+        // Should return highest Z (8.0)
+        let z = mesh_height_at(&mesh, 5.0, 3.0);
+        assert!(z.is_some());
+        assert!((z.unwrap() - 8.0).abs() < 0.001);
     }
 }

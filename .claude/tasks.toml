@@ -19,7 +19,7 @@ acceptance = """
 - cargo test passes, no warnings
 """
 deps = []
-status = "pending"
+status = "complete"
 
 [[tasks]]
 id = "task-002"
@@ -57,7 +57,7 @@ acceptance = """
 - Unit tests with simple box and ramp meshes
 """
 deps = []
-status = "pending"
+status = "complete"
 
 [[tasks]]
 id = "task-005"
@@ -182,7 +182,7 @@ acceptance = """
 - Existing strategies still work
 """
 deps = []
-status = "pending"
+status = "complete"
 
 [[tasks]]
 id = "task-015"

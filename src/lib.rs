@@ -24,6 +24,7 @@ pub mod geometry;
 pub mod slicer;
 pub mod stl;
 pub mod svg;
+pub mod tool;
 pub mod toolpath;
 
 use gcode::{emit_gcode, GcodeParams};
@@ -56,15 +57,33 @@ pub struct CamConfig {
     pub strategy: String,
 }
 
-fn default_tool_diameter() -> f64 { 3.175 }
-fn default_step_over() -> f64 { 1.5 }
-fn default_step_down() -> f64 { 1.0 }
-fn default_feed_rate() -> f64 { 800.0 }
-fn default_plunge_rate() -> f64 { 300.0 }
-fn default_spindle_speed() -> f64 { 12000.0 }
-fn default_safe_z() -> f64 { 5.0 }
-fn default_cut_depth() -> f64 { -1.0 }
-fn default_strategy() -> String { "contour".into() }
+fn default_tool_diameter() -> f64 {
+    3.175
+}
+fn default_step_over() -> f64 {
+    1.5
+}
+fn default_step_down() -> f64 {
+    1.0
+}
+fn default_feed_rate() -> f64 {
+    800.0
+}
+fn default_plunge_rate() -> f64 {
+    300.0
+}
+fn default_spindle_speed() -> f64 {
+    12000.0
+}
+fn default_safe_z() -> f64 {
+    5.0
+}
+fn default_cut_depth() -> f64 {
+    -1.0
+}
+fn default_strategy() -> String {
+    "contour".into()
+}
 
 impl Default for CamConfig {
     fn default() -> Self {
@@ -147,7 +166,8 @@ pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
             }
             if all.is_empty() {
                 // Fallback: treat bottom face as a single contour
-                let contours = slicer::slice_at_z(&mesh, mesh.bounds.as_ref().map_or(0.0, |b| b.min.z + 0.01));
+                let contours =
+                    slicer::slice_at_z(&mesh, mesh.bounds.as_ref().map_or(0.0, |b| b.min.z + 0.01));
                 all.extend(strategy.generate(&contours, &cut_params));
             }
             all
