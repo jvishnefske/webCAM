@@ -69,11 +69,20 @@ make release     # dist/rustcam.zip
 | `gcode` | `src/gcode.rs` | G-code emitter |
 | `lib` | `src/lib.rs` | WASM entry points, pipeline orchestration |
 
-## CI / Release
+## CI / Release / Pages
 
-GitHub Actions runs tests on every push. Tag a version (`v0.1.0`) to
-automatically build the WASM bundle and create a GitHub Release with the
-`rustcam.zip` artifact.
+GitHub Actions runs tests on every push. On pushes to `main` (or tags),
+the WASM bundle is built and deployed to **GitHub Pages** automatically.
+
+Live site: **https://jvishnefske.github.io/cam**
+
+To enable Pages for `/cam`:
+1. Create an empty repo `jvishnefske/cam` on GitHub.
+2. Go to **Settings > Pages** and set source to **GitHub Actions**.
+3. Push to `main` here — the deploy job publishes to Pages.
+
+Tag a version (`v0.1.0`) to also create a GitHub Release with the
+`rustcam.zip` download.
 
 ## License
 
