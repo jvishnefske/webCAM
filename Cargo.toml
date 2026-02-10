@@ -1,0 +1,24 @@
+[package]
+name = "rustcam"
+version = "0.1.0"
+edition = "2021"
+description = "Browser-based CAM tool — STL/SVG to G-code via WebAssembly"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[profile.release]
+opt-level = "s"
+lto = true

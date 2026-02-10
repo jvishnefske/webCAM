@@ -1,36 +1,80 @@
-# service-template
+# RustCAM
 
-A modern C++ service template with WebSocket support, SQLite persistence, and structured logging. Provides a production-ready foundation for building real-time backend services.
+Browser-based computer-aided manufacturing tool. Load an **STL** (3-D mesh) or
+**SVG** (2-D vector) file and generate **G-code** — all in WebAssembly, no
+server required.
 
-## Quick Start
+Inspired by [PyCAM](https://pycam.sourceforge.net/); reference implementation
+in Rust targeting `wasm32-unknown-unknown`.
+
+## Swiss Cheese Architecture
+
+The processing pipeline is four independent layers with explicit extension
+points ("holes") where new functionality plugs in without touching existing
+code:
+
+```
+Input ──> Geometry ──> Strategy ──> Output
+(STL,SVG)  (Mesh,Paths)  (Contour,    (G-code)
+                          Pocket,
+ +OBJ,3MF   +NURBS       Slice)       +HPGL
+ +STEP,DXF  +T-spline   +trochoidal   +Marlin
+                         +adaptive     +GRBL
+```
+
+Each layer is a Rust module behind a trait boundary.
+
+## Quick start
 
 ```bash
-make deps      # Install dependencies via vcpkg
-make build     # Build the project
-make test      # Run tests
+# Run unit tests
+make test
+
+# Build WASM (requires wasm-pack)
+make wasm
+
+# Serve locally
+make serve       # http://localhost:8080
+
+# Package for release
+make release     # dist/rustcam.zip
 ```
 
-## Features
+### Requirements
 
-- WebSocket server via uWebSockets
-- SQLite database integration
-- Structured logging with spdlog
-- JSON serialization with nlohmann-json
-- Google Test and Google Benchmark integration
+| Tool | Version |
+|------|---------|
+| Rust | stable  |
+| wasm-pack | 0.12+ |
+| Python 3 | (for `make serve` only) |
 
-## Requirements
+## Usage
 
-- CMake 3.25+
-- C++17 compiler
-- vcpkg package manager
+1. Open the app in a browser (or unzip the release and open `index.html`).
+2. Drop an `.stl` or `.svg` file onto the drop zone.
+3. Select a machining strategy (Contour / Pocket / Slice).
+4. Adjust tool diameter, feed rate, step-down, and other parameters.
+5. Click **Generate G-code**.
+6. Copy or download the `.nc` file.
 
-## Project Structure
+## Modules
 
-```
-service-template/
-├── include/        # Public headers
-├── src/            # Implementation files
-├── test/           # Unit tests and benchmarks
-├── CMakeLists.txt  # Build configuration
-└── vcpkg.json      # Dependency manifest
-```
+| Module | File | Purpose |
+|--------|------|---------|
+| `geometry` | `src/geometry.rs` | Core types: Vec3, Vec2, Triangle, Mesh, Polyline, Toolpath |
+| `stl` | `src/stl.rs` | Binary + ASCII STL parser |
+| `svg` | `src/svg.rs` | SVG path / rect / circle / polygon parser |
+| `slicer` | `src/slicer.rs` | 3-D mesh to 2-D contour slicing |
+| `toolpath` | `src/toolpath.rs` | Contour and pocket toolpath strategies |
+| `gcode` | `src/gcode.rs` | G-code emitter |
+| `lib` | `src/lib.rs` | WASM entry points, pipeline orchestration |
+
+## CI / Release
+
+GitHub Actions runs tests on every push. Tag a version (`v0.1.0`) to
+automatically build the WASM bundle and create a GitHub Release with the
+`rustcam.zip` artifact.
+
+## License
+
+MIT
