@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>RustCAM — Browser CAM Tool</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --border: #2a2d3a;
+  --accent: #4f8cff;
+  --accent-dim: #2d5299;
+  --text: #e0e0e8;
+  --text-dim: #8888a0;
+  --danger: #ff5555;
+  --success: #55ff88;
+  --mono: 'Courier New', monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+header h1 { font-size: 18px; font-weight: 600; }
+header span { color: var(--text-dim); font-size: 13px; }
+.app {
+  display: grid;
+  grid-template-columns: 320px 1fr 1fr;
+  grid-template-rows: 1fr;
+  height: calc(100vh - 49px);
+}
+/* ─ Sidebar ─ */
+.sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 16px;
+  overflow-y: auto;
+}
+.sidebar h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 12px; }
+.sidebar section { margin-bottom: 20px; }
+label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 4px; }
+input[type="number"], select {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+input[type="number"]:focus, select:focus { outline: none; border-color: var(--accent); }
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 32px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  margin-bottom: 12px;
+}
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--accent);
+  background: rgba(79,140,255,0.06);
+}
+.drop-zone p { font-size: 13px; color: var(--text-dim); }
+.drop-zone .filename { color: var(--accent); font-weight: 600; margin-top: 8px; font-size: 14px; }
+.btn {
+  display: inline-block;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-primary { background: var(--accent); color: #fff; width: 100%; }
+.btn-primary:hover { background: var(--accent-dim); }
+.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-secondary { background: var(--border); color: var(--text); margin-top: 8px; width: 100%; }
+.btn-secondary:hover { background: #3a3d4a; }
+.status { font-size: 12px; margin-top: 8px; min-height: 16px; }
+.status.error { color: var(--danger); }
+.status.ok { color: var(--success); }
+/* ─ Preview pane ─ */
+.preview {
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+}
+.preview h2 {
+  font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-dim); padding: 12px 16px; border-bottom: 1px solid var(--border);
+}
+canvas {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+}
+/* ─ Gcode pane ─ */
+.gcode-pane {
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+}
+.gcode-pane .toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.gcode-pane .toolbar h2 {
+  font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--text-dim); flex: 1;
+}
+.gcode-pane .toolbar .btn { width: auto; }
+#gcode-output {
+  flex: 1;
+  background: var(--surface);
+  color: var(--text);
+  border: none;
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  resize: none;
+  overflow: auto;
+}
+/* ─ Responsive ─ */
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 300px 1fr; }
+  .preview, .gcode-pane { border-right: none; border-bottom: 1px solid var(--border); }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>RustCAM</h1>
+  <span>STL / SVG &rarr; G-code &mdash; runs entirely in your browser</span>
+</header>
+
+<div class="app">
+  <!-- Sidebar: file input + parameters -->
+  <div class="sidebar">
+    <section>
+      <h2>Input File</h2>
+      <div class="drop-zone" id="drop-zone">
+        <p>Drop an <b>.stl</b> or <b>.svg</b> file here<br/>or click to browse</p>
+        <div class="filename" id="filename"></div>
+      </div>
+      <input type="file" id="file-input" accept=".stl,.svg" hidden/>
+    </section>
+
+    <section>
+      <h2>Strategy</h2>
+      <select id="strategy">
+        <option value="contour">Contour (profile cut)</option>
+        <option value="pocket">Pocket (area clear)</option>
+        <option value="slice">Slice (layer contour)</option>
+      </select>
+    </section>
+
+    <section>
+      <h2>Tool</h2>
+      <label>Tool diameter (mm)</label>
+      <input type="number" id="tool-diameter" value="3.175" step="0.1" min="0.1"/>
+      <label>Step-over (mm)</label>
+      <input type="number" id="step-over" value="1.5" step="0.1" min="0.1"/>
+    </section>
+
+    <section>
+      <h2>Cutting</h2>
+      <label>Cut depth (mm, negative)</label>
+      <input type="number" id="cut-depth" value="-1" step="0.5"/>
+      <label>Step-down per pass (mm)</label>
+      <input type="number" id="step-down" value="1" step="0.25" min="0.1"/>
+      <label>Feed rate (mm/min)</label>
+      <input type="number" id="feed-rate" value="800" step="50" min="1"/>
+      <label>Plunge rate (mm/min)</label>
+      <input type="number" id="plunge-rate" value="300" step="50" min="1"/>
+      <label>Spindle speed (RPM)</label>
+      <input type="number" id="spindle-speed" value="12000" step="500" min="0"/>
+      <label>Safe Z (mm)</label>
+      <input type="number" id="safe-z" value="5" step="1" min="0.5"/>
+    </section>
+
+    <section>
+      <button class="btn btn-primary" id="generate-btn" disabled>Generate G-code</button>
+      <div class="status" id="status"></div>
+    </section>
+  </div>
+
+  <!-- Preview canvas -->
+  <div class="preview">
+    <h2>Toolpath Preview</h2>
+    <canvas id="preview-canvas"></canvas>
+  </div>
+
+  <!-- G-code output -->
+  <div class="gcode-pane">
+    <div class="toolbar">
+      <h2>G-code Output</h2>
+      <button class="btn btn-secondary" id="copy-btn">Copy</button>
+      <button class="btn btn-secondary" id="download-btn">Download .nc</button>
+    </div>
+    <textarea id="gcode-output" readonly placeholder="G-code will appear here after generation..."></textarea>
+  </div>
+</div>
+
+<script type="module">
+import init, { process_stl, process_svg, preview_stl, preview_svg } from './pkg/rustcam.js';
+
+let wasmReady = false;
+let fileData = null;   // ArrayBuffer (STL) or string (SVG)
+let fileType = null;   // "stl" | "svg"
+
+const dropZone    = document.getElementById('drop-zone');
+const fileInput   = document.getElementById('file-input');
+const filenameEl  = document.getElementById('filename');
+const generateBtn = document.getElementById('generate-btn');
+const statusEl    = document.getElementById('status');
+const gcodeOut    = document.getElementById('gcode-output');
+const canvas      = document.getElementById('preview-canvas');
+const copyBtn     = document.getElementById('copy-btn');
+const downloadBtn = document.getElementById('download-btn');
+
+// ── Initialise WASM ──────────────────────────────────────────────────
+async function boot() {
+  try {
+    await init();
+    wasmReady = true;
+    statusEl.textContent = 'WASM loaded — drop a file to begin.';
+    statusEl.className = 'status ok';
+  } catch(e) {
+    statusEl.textContent = 'Failed to load WASM: ' + e;
+    statusEl.className = 'status error';
+  }
+}
+boot();
+
+// ── File handling ────────────────────────────────────────────────────
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+
+function handleFile(file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (ext === 'stl') {
+    fileType = 'stl';
+    file.arrayBuffer().then(buf => {
+      fileData = new Uint8Array(buf);
+      filenameEl.textContent = file.name;
+      generateBtn.disabled = !wasmReady;
+      tryPreview();
+    });
+  } else if (ext === 'svg') {
+    fileType = 'svg';
+    file.text().then(txt => {
+      fileData = txt;
+      filenameEl.textContent = file.name;
+      generateBtn.disabled = !wasmReady;
+      tryPreview();
+    });
+  } else {
+    statusEl.textContent = 'Unsupported file type: .' + ext;
+    statusEl.className = 'status error';
+  }
+}
+
+// ── Config builder ───────────────────────────────────────────────────
+function getConfig() {
+  return JSON.stringify({
+    tool_diameter:  parseFloat(document.getElementById('tool-diameter').value),
+    step_over:      parseFloat(document.getElementById('step-over').value),
+    step_down:      parseFloat(document.getElementById('step-down').value),
+    feed_rate:      parseFloat(document.getElementById('feed-rate').value),
+    plunge_rate:    parseFloat(document.getElementById('plunge-rate').value),
+    spindle_speed:  parseFloat(document.getElementById('spindle-speed').value),
+    safe_z:         parseFloat(document.getElementById('safe-z').value),
+    cut_depth:      parseFloat(document.getElementById('cut-depth').value),
+    strategy:       document.getElementById('strategy').value,
+  });
+}
+
+// ── Preview ──────────────────────────────────────────────────────────
+function tryPreview() {
+  if (!wasmReady || !fileData) return;
+  try {
+    let json;
+    if (fileType === 'stl') {
+      json = preview_stl(fileData, getConfig());
+    } else {
+      json = preview_svg(fileData);
+    }
+    const paths = JSON.parse(json);
+    drawPreview(paths);
+  } catch(e) {
+    console.warn('Preview error:', e);
+  }
+}
+
+function drawPreview(paths) {
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  canvas.width  = rect.width  * dpr;
+  canvas.height = rect.height * dpr;
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  if (!paths.length) return;
+
+  // Compute bounds
+  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+  for (const path of paths) {
+    for (const [x,y] of path) {
+      if (x<minX) minX=x; if (y<minY) minY=y;
+      if (x>maxX) maxX=x; if (y>maxY) maxY=y;
+    }
+  }
+  const w = maxX-minX || 1, h = maxY-minY || 1;
+  const pad = 30;
+  const scaleX = (rect.width  - pad*2) / w;
+  const scaleY = (rect.height - pad*2) / h;
+  const scale = Math.min(scaleX, scaleY);
+  const offX = pad + (rect.width  - pad*2 - w*scale) / 2;
+  const offY = pad + (rect.height - pad*2 - h*scale) / 2;
+
+  function tx(x) { return offX + (x-minX)*scale; }
+  function ty(y) { return offY + (maxY-y)*scale; } // flip Y
+
+  // Grid
+  ctx.strokeStyle = '#1a1d27';
+  ctx.lineWidth = 0.5;
+  const gridStep = Math.pow(10, Math.floor(Math.log10(Math.max(w,h))));
+  for (let x = Math.floor(minX/gridStep)*gridStep; x <= maxX; x += gridStep) {
+    ctx.beginPath(); ctx.moveTo(tx(x), 0); ctx.lineTo(tx(x), rect.height); ctx.stroke();
+  }
+  for (let y = Math.floor(minY/gridStep)*gridStep; y <= maxY; y += gridStep) {
+    ctx.beginPath(); ctx.moveTo(0, ty(y)); ctx.lineTo(rect.width, ty(y)); ctx.stroke();
+  }
+
+  // Paths
+  ctx.strokeStyle = '#4f8cff';
+  ctx.lineWidth = 1.2;
+  ctx.lineJoin = 'round';
+  for (const path of paths) {
+    if (path.length < 2) continue;
+    ctx.beginPath();
+    ctx.moveTo(tx(path[0][0]), ty(path[0][1]));
+    for (let i=1; i<path.length; i++) {
+      ctx.lineTo(tx(path[i][0]), ty(path[i][1]));
+    }
+    ctx.stroke();
+  }
+}
+
+window.addEventListener('resize', () => tryPreview());
+
+// ── Generate ─────────────────────────────────────────────────────────
+generateBtn.addEventListener('click', () => {
+  if (!wasmReady || !fileData) return;
+  statusEl.textContent = 'Generating...';
+  statusEl.className = 'status';
+  try {
+    let gcode;
+    const cfg = getConfig();
+    if (fileType === 'stl') {
+      gcode = process_stl(fileData, cfg);
+    } else {
+      gcode = process_svg(fileData, cfg);
+    }
+    gcodeOut.value = gcode;
+    const lines = gcode.split('\n').length;
+    statusEl.textContent = `Done — ${lines} lines of G-code generated.`;
+    statusEl.className = 'status ok';
+    tryPreview();
+  } catch(e) {
+    statusEl.textContent = 'Error: ' + e;
+    statusEl.className = 'status error';
+  }
+});
+
+// ── Copy / Download ──────────────────────────────────────────────────
+copyBtn.addEventListener('click', () => {
+  navigator.clipboard.writeText(gcodeOut.value).then(() => {
+    copyBtn.textContent = 'Copied!';
+    setTimeout(() => copyBtn.textContent = 'Copy', 1500);
+  });
+});
+
+downloadBtn.addEventListener('click', () => {
+  const blob = new Blob([gcodeOut.value], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (filenameEl.textContent || 'output').replace(/\.\w+$/, '') + '.nc';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+</script>
+</body>
+</html>
