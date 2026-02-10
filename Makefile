@@ -1,4 +1,4 @@
-.PHONY: build wasm test clean release serve help
+.PHONY: build wasm test clean release serve help verify
 
 WASM_TARGET = wasm32-unknown-unknown
 
@@ -27,3 +27,11 @@ serve: wasm ## Build and serve locally
 clean: ## Remove build artifacts
 	cargo clean
 	rm -rf www/pkg dist
+
+HOST_TARGET := $(shell rustc -vV | grep host | awk '{print $$2}')
+
+verify: ## Run all verification checks (override parent embedded target)
+	cargo fmt --check
+	cargo clippy --target $(HOST_TARGET) --all-targets -- -D warnings
+	cargo test --target $(HOST_TARGET)
+	@command -v wasm-pack >/dev/null && wasm-pack build --target web --out-dir www/pkg --release || echo "Skipping WASM build (wasm-pack not installed)"

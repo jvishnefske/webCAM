@@ -1,0 +1,219 @@
+version = 1
+status = "ready_for_implementation"
+
+[project]
+name = "rustcam-3d-surface"
+description = "Add zigzag 3D surface machining, perimeter strategy, and custom face mill tools"
+worktree_base = ".worktrees"
+
+# ─── Foundation: Tool Definitions ───────────────────────────────────────────
+
+[[tasks]]
+id = "task-001"
+title = "Define Tool struct with geometry types"
+acceptance = """
+- Tool struct with: tool_type (EndMill, BallEnd, FaceMill), diameter, flute_length, corner_radius
+- FaceMill variant includes effective_diameter field
+- All fields have sensible defaults
+- Unit tests verify Tool construction and defaults
+- cargo test passes, no warnings
+"""
+deps = []
+status = "pending"
+
+[[tasks]]
+id = "task-002"
+title = "Extend CutParams to include Tool reference"
+acceptance = """
+- CutParams includes tool: Tool field
+- Existing strategies use tool.diameter instead of tool_diameter
+- Backward compatible: tool_diameter still works via Tool::default()
+- All existing tests pass unchanged
+"""
+deps = ["task-001"]
+status = "pending"
+
+[[tasks]]
+id = "task-003"
+title = "Add tool type to CamConfig JSON schema"
+acceptance = """
+- CamConfig parses tool_type, corner_radius, effective_diameter from JSON
+- Default tool_type is 'end_mill'
+- process_stl and process_svg construct Tool from config
+- Existing JSON configs work without changes (backward compatible)
+"""
+deps = ["task-002"]
+status = "pending"
+
+# ─── 3D Surface Utilities ───────────────────────────────────────────────────
+
+[[tasks]]
+id = "task-004"
+title = "Implement mesh height query at XY point"
+acceptance = """
+- Function: mesh_height_at(mesh: &Mesh, x: f64, y: f64) -> Option<f64>
+- Returns highest Z where ray from (x, y, +inf) intersects mesh
+- Returns None if no intersection (outside mesh bounds)
+- Unit tests with simple box and ramp meshes
+"""
+deps = []
+status = "pending"
+
+[[tasks]]
+id = "task-005"
+title = "Implement surface normal at XY point"
+acceptance = """
+- Function: surface_normal_at(mesh: &Mesh, x: f64, y: f64) -> Option<Vec3>
+- Returns interpolated normal of triangle at XY intersection
+- Used for ball-end tool contact point compensation
+- Unit tests verify normal direction on flat and angled surfaces
+"""
+deps = ["task-004"]
+status = "pending"
+
+# ─── Zigzag Surface Strategy ────────────────────────────────────────────────
+
+[[tasks]]
+id = "task-006"
+title = "Create SurfaceParams struct for 3D strategies"
+acceptance = """
+- SurfaceParams contains mesh reference, cut_params, scan_direction (X/Y)
+- Implements From<(&Mesh, &CutParams)> for easy construction
+- Does not break existing ToolpathStrategy trait
+"""
+deps = ["task-002", "task-004"]
+status = "pending"
+
+[[tasks]]
+id = "task-007"
+title = "Implement ZigzagSurfaceStrategy core loop"
+acceptance = """
+- ZigzagSurfaceStrategy implements new generate_surface method
+- Raster scan across mesh bounding box with step_over spacing
+- Queries mesh_height_at for each XY sample point
+- Skips points outside mesh (no intersection)
+- Alternates row direction for serpentine motion
+"""
+deps = ["task-004", "task-006"]
+status = "pending"
+
+[[tasks]]
+id = "task-008"
+title = "Add ball-end tool compensation to zigzag"
+acceptance = """
+- When tool_type is BallEnd, apply contact point offset
+- Offset = (radius * sin(angle), radius * cos(angle)) based on surface normal
+- Flat surfaces (normal = +Z) have no offset
+- Tests verify offset on 45-degree ramp
+"""
+deps = ["task-005", "task-007"]
+status = "pending"
+
+[[tasks]]
+id = "task-009"
+title = "Wire ZigzagSurfaceStrategy into process_stl"
+acceptance = """
+- 'zigzag' strategy option in CamConfig
+- process_stl selects ZigzagSurfaceStrategy when strategy='zigzag'
+- Generates valid G-code with 3D Z motion
+- Integration test with sample STL file
+"""
+deps = ["task-003", "task-008"]
+status = "pending"
+
+# ─── Perimeter Strategy ─────────────────────────────────────────────────────
+
+[[tasks]]
+id = "task-010"
+title = "Implement PerimeterStrategy basic boundary follow"
+acceptance = """
+- PerimeterStrategy implements ToolpathStrategy
+- Follows outermost contour from slicing
+- Applies tool radius offset perpendicular to path
+- Single pass at specified Z depth
+"""
+deps = ["task-002"]
+status = "pending"
+
+[[tasks]]
+id = "task-011"
+title = "Add climb/conventional cut direction parameter"
+acceptance = """
+- CutParams or PerimeterStrategy config includes climb_cut: bool
+- climb_cut=true: tool left of path (CW for outside)
+- climb_cut=false: tool right of path (CCW for outside)
+- Tests verify direction reversal
+"""
+deps = ["task-010"]
+status = "pending"
+
+[[tasks]]
+id = "task-012"
+title = "Support multiple perimeter passes"
+acceptance = """
+- perimeter_passes: u32 parameter (default 1)
+- Each pass offset by step_over from previous
+- Innermost pass uses full tool offset
+- Generates concentric offset paths
+"""
+deps = ["task-011"]
+status = "pending"
+
+[[tasks]]
+id = "task-013"
+title = "Wire PerimeterStrategy into process_stl"
+acceptance = """
+- 'perimeter' strategy option in CamConfig
+- Slices mesh then applies perimeter to each layer
+- Respects climb_cut and perimeter_passes params
+- Integration test produces valid G-code
+"""
+deps = ["task-003", "task-012"]
+status = "pending"
+
+# ─── Web UI Updates ─────────────────────────────────────────────────────────
+
+[[tasks]]
+id = "task-014"
+title = "Add strategy options to UI dropdown"
+acceptance = """
+- Strategy dropdown includes: Contour, Pocket, Slice, Zigzag Surface, Perimeter
+- Selection updates config.strategy value sent to WASM
+- Existing strategies still work
+"""
+deps = []
+status = "pending"
+
+[[tasks]]
+id = "task-015"
+title = "Add tool type selector to UI"
+acceptance = """
+- Tool type dropdown: End Mill, Ball End, Face Mill
+- Face Mill shows additional 'Effective Diameter' input
+- Ball End shows corner radius (equals radius for ball end)
+- Parameters included in JSON config
+"""
+deps = ["task-014"]
+status = "pending"
+
+[[tasks]]
+id = "task-016"
+title = "Add perimeter-specific parameters to UI"
+acceptance = """
+- When Perimeter selected: show Climb Cut checkbox, Number of Passes input
+- Parameters included in JSON config when present
+- Hidden for non-perimeter strategies
+"""
+deps = ["task-014"]
+status = "pending"
+
+[[tasks]]
+id = "task-017"
+title = "Update preview for 3D toolpaths"
+acceptance = """
+- preview_stl returns toolpath moves, not just contours
+- Canvas draws tool motion with color gradient by Z height
+- Zigzag paths visible as raster lines
+"""
+deps = ["task-009", "task-013"]
+status = "pending"

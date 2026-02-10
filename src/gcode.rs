@@ -40,7 +40,7 @@ pub fn emit_gcode(toolpaths: &[Toolpath], params: &GcodeParams) -> String {
     out.push_str("G90 (absolute positioning)\n");
     out.push_str(&format!("G0 Z{:.3}\n", params.safe_z));
     out.push_str(&format!("M3 S{:.0} (spindle on)\n", params.spindle_speed));
-    out.push_str("\n");
+    out.push('\n');
 
     for (idx, tp) in toolpaths.iter().enumerate() {
         out.push_str(&format!("(Toolpath {})\n", idx + 1));
@@ -63,7 +63,7 @@ pub fn emit_gcode(toolpaths: &[Toolpath], params: &GcodeParams) -> String {
                 last_rapid = false;
             }
         }
-        out.push_str("\n");
+        out.push('\n');
     }
 
     // Footer

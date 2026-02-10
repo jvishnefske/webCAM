@@ -276,8 +276,10 @@ fn subdivide_cubic(out: &mut Vec<Vec2>, p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, 
     for s in 1..=steps {
         let t = s as f64 / steps as f64;
         let u = 1.0 - t;
-        let x = u * u * u * p0.x + 3.0 * u * u * t * p1.x + 3.0 * u * t * t * p2.x + t * t * t * p3.x;
-        let y = u * u * u * p0.y + 3.0 * u * u * t * p1.y + 3.0 * u * t * t * p2.y + t * t * t * p3.y;
+        let x =
+            u * u * u * p0.x + 3.0 * u * u * t * p1.x + 3.0 * u * t * t * p2.x + t * t * t * p3.x;
+        let y =
+            u * u * u * p0.y + 3.0 * u * u * t * p1.y + 3.0 * u * t * t * p2.y + t * t * t * p3.y;
         out.push(Vec2::new(x, y));
     }
 }
@@ -301,10 +303,18 @@ fn extract_rects(svg: &str) -> Vec<Polyline> {
         let rest = &search[idx..];
         if let Some(end) = rest.find("/>").or_else(|| rest.find('>')) {
             let tag = &rest[..end];
-            let x = extract_attr(tag, "x").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-            let y = extract_attr(tag, "y").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-            let w: f64 = extract_attr(tag, "width").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-            let h: f64 = extract_attr(tag, "height").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            let x = extract_attr(tag, "x")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+            let y = extract_attr(tag, "y")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+            let w: f64 = extract_attr(tag, "width")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+            let h: f64 = extract_attr(tag, "height")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
             if w > 0.0 && h > 0.0 {
                 results.push(Polyline::new(
                     vec![
@@ -333,9 +343,15 @@ fn extract_circles(svg: &str) -> Vec<Polyline> {
         let rest = &search[idx..];
         if let Some(end) = rest.find("/>").or_else(|| rest.find('>')) {
             let tag = &rest[..end];
-            let cx: f64 = extract_attr(tag, "cx").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-            let cy: f64 = extract_attr(tag, "cy").and_then(|s| s.parse().ok()).unwrap_or(0.0);
-            let r: f64 = extract_attr(tag, "r").and_then(|s| s.parse().ok()).unwrap_or(0.0);
+            let cx: f64 = extract_attr(tag, "cx")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+            let cy: f64 = extract_attr(tag, "cy")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
+            let r: f64 = extract_attr(tag, "r")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(0.0);
             if r > 0.0 {
                 let segments = 64;
                 let points: Vec<Vec2> = (0..segments)
@@ -389,7 +405,7 @@ fn parse_points_attr(s: &str) -> Result<Vec<Vec2>, String> {
         .map(|s| s.parse::<f64>())
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("points parse error: {e}"))?;
-    if nums.len() % 2 != 0 {
+    if !nums.len().is_multiple_of(2) {
         return Err("Odd number of coordinates in points attribute".into());
     }
     for pair in nums.chunks(2) {
