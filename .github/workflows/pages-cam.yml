@@ -19,7 +19,7 @@ jobs:
       - run: wasm-pack build --target web --out-dir www/pkg --release
       - uses: peaceiris/actions-gh-pages@v4
         with:
-          personal_token: ${{ secrets.CAM_DEPLOY_TOKEN }}
+          deploy_key: ${{ secrets.CAM_DEPLOY_KEY }}
           external_repository: jvishnefske/cam
           publish_dir: ./www
           publish_branch: gh-pages
