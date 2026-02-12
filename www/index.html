@@ -345,7 +345,8 @@ function updateStrategyUI() {
   zigzagOptions.style.display = strategy === 'zigzag' ? 'block' : 'none';
 }
 
-strategySelect.addEventListener('change', updateStrategyUI);
+strategySelect.addEventListener('change', () => { updateStrategyUI(); tryPreview(); });
+document.getElementById('scan-direction').addEventListener('change', tryPreview);
 updateStrategyUI();
 
 // ── Tabs ─────────────────────────────────────────────────────────────
