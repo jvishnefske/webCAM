@@ -1,5 +1,5 @@
 version = 1
-status = "ready_for_implementation"
+status = "complete"
 
 [project]
 name = "rustcam-3d-surface"
@@ -31,7 +31,7 @@ acceptance = """
 - All existing tests pass unchanged
 """
 deps = ["task-001"]
-status = "pending"
+status = "complete"
 
 [[tasks]]
 id = "task-003"
@@ -43,7 +43,7 @@ acceptance = """
 - Existing JSON configs work without changes (backward compatible)
 """
 deps = ["task-002"]
-status = "pending"
+status = "complete"
 
 # ─── 3D Surface Utilities ───────────────────────────────────────────────────
 
@@ -69,7 +69,7 @@ acceptance = """
 - Unit tests verify normal direction on flat and angled surfaces
 """
 deps = ["task-004"]
-status = "pending"
+status = "complete"
 
 # ─── Zigzag Surface Strategy ────────────────────────────────────────────────
 
@@ -82,7 +82,7 @@ acceptance = """
 - Does not break existing ToolpathStrategy trait
 """
 deps = ["task-002", "task-004"]
-status = "pending"
+status = "complete"
 
 [[tasks]]
 id = "task-007"
@@ -95,7 +95,7 @@ acceptance = """
 - Alternates row direction for serpentine motion
 """
 deps = ["task-004", "task-006"]
-status = "pending"
+status = "complete"
 
 [[tasks]]
 id = "task-008"
@@ -107,7 +107,7 @@ acceptance = """
 - Tests verify offset on 45-degree ramp
 """
 deps = ["task-005", "task-007"]
-status = "pending"
+status = "complete"
 
 [[tasks]]
 id = "task-009"
@@ -119,7 +119,7 @@ acceptance = """
 - Integration test with sample STL file
 """
 deps = ["task-003", "task-008"]
-status = "pending"
+status = "complete"
 
 # ─── Perimeter Strategy ─────────────────────────────────────────────────────
 
@@ -133,7 +133,7 @@ acceptance = """
 - Single pass at specified Z depth
 """
 deps = ["task-002"]
-status = "pending"
+status = "complete"
 
 [[tasks]]
 id = "task-011"
@@ -145,7 +145,7 @@ acceptance = """
 - Tests verify direction reversal
 """
 deps = ["task-010"]
-status = "pending"
+status = "complete"
 
 [[tasks]]
 id = "task-012"
@@ -157,7 +157,7 @@ acceptance = """
 - Generates concentric offset paths
 """
 deps = ["task-011"]
-status = "pending"
+status = "complete"
 
 [[tasks]]
 id = "task-013"
@@ -169,7 +169,7 @@ acceptance = """
 - Integration test produces valid G-code
 """
 deps = ["task-003", "task-012"]
-status = "pending"
+status = "complete"
 
 # ─── Web UI Updates ─────────────────────────────────────────────────────────
 
@@ -194,7 +194,7 @@ acceptance = """
 - Parameters included in JSON config
 """
 deps = ["task-014"]
-status = "pending"
+status = "complete"
 
 [[tasks]]
 id = "task-016"
@@ -205,7 +205,7 @@ acceptance = """
 - Hidden for non-perimeter strategies
 """
 deps = ["task-014"]
-status = "pending"
+status = "complete"
 
 [[tasks]]
 id = "task-017"
@@ -216,4 +216,4 @@ acceptance = """
 - Zigzag paths visible as raster lines
 """
 deps = ["task-009", "task-013"]
-status = "pending"
+status = "complete"
