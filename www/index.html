@@ -50,7 +50,7 @@ header span { color: var(--text-dim); font-size: 13px; }
 .sidebar h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 12px; }
 .sidebar section { margin-bottom: 20px; }
 label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 4px; }
-input[type="number"], select {
+input[type="number"], select, input[type="range"] {
   width: 100%;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -60,6 +60,7 @@ input[type="number"], select {
   font-size: 13px;
   margin-bottom: 8px;
 }
+input[type="range"] { padding: 2px 0; border: none; background: transparent; }
 input[type="number"]:focus, select:focus { outline: none; border-color: var(--accent); }
 .drop-zone {
   border: 2px dashed var(--border);
@@ -91,6 +92,7 @@ input[type="number"]:focus, select:focus { outline: none; border-color: var(--ac
 .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 .btn-secondary { background: var(--border); color: var(--text); margin-top: 8px; width: 100%; }
 .btn-secondary:hover { background: #3a3d4a; }
+.btn-sm { padding: 4px 10px; font-size: 12px; width: auto; margin: 0; }
 .status { font-size: 12px; margin-top: 8px; min-height: 16px; }
 .status.error { color: var(--danger); }
 .status.ok { color: var(--success); }
@@ -101,49 +103,67 @@ input[type="number"]:focus, select:focus { outline: none; border-color: var(--ac
   flex-direction: column;
   border-right: 1px solid var(--border);
 }
-.preview h2 {
+.preview .pane-header {
   font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
   color: var(--text-dim); padding: 12px 16px; border-bottom: 1px solid var(--border);
 }
-canvas {
-  flex: 1;
-  width: 100%;
-  height: 100%;
-}
-/* ─ Gcode pane ─ */
-.gcode-pane {
+canvas { flex: 1; width: 100%; height: 100%; display: block; }
+/* ─ Right pane (tabs) ─ */
+.right-pane {
   background: var(--bg);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
-.gcode-pane .toolbar {
+.tab-bar {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 16px;
   border-bottom: 1px solid var(--border);
 }
-.gcode-pane .toolbar h2 {
-  font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--text-dim); flex: 1;
-}
-.gcode-pane .toolbar .btn { width: auto; }
-#gcode-output {
+.tab-bar button {
   flex: 1;
-  background: var(--surface);
-  color: var(--text);
+  background: transparent;
   border: none;
-  padding: 12px;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.6;
-  resize: none;
-  overflow: auto;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 10px 0;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
 }
+.tab-bar button.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.tab-content { flex: 1; display: none; flex-direction: column; overflow: hidden; }
+.tab-content.active { display: flex; }
+/* G-code tab */
+.gcode-toolbar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px; border-bottom: 1px solid var(--border);
+}
+.gcode-toolbar .spacer { flex: 1; }
+#gcode-output {
+  flex: 1; background: var(--surface); color: var(--text); border: none;
+  padding: 12px; font-family: var(--mono); font-size: 12px; line-height: 1.6;
+  resize: none; overflow: auto;
+}
+/* Sim tab */
+.sim-wrap { flex: 1; position: relative; }
+.sim-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.sim-controls {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-top: 1px solid var(--border); background: var(--surface);
+}
+.sim-controls .spacer { flex: 1; }
+.sim-controls .scrubber { flex: 3; }
+.sim-info { font-size: 11px; color: var(--text-dim); min-width: 90px; text-align: right; font-family: var(--mono); }
 /* ─ Responsive ─ */
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; grid-template-rows: auto 300px 1fr; }
-  .preview, .gcode-pane { border-right: none; border-bottom: 1px solid var(--border); }
+  .preview, .right-pane { border-right: none; border-bottom: 1px solid var(--border); }
 }
 </style>
 </head>
@@ -155,7 +175,7 @@ canvas {
 </header>
 
 <div class="app">
-  <!-- Sidebar: file input + parameters -->
+  <!-- Sidebar -->
   <div class="sidebar">
     <section>
       <h2>Input File</h2>
@@ -165,7 +185,6 @@ canvas {
       </div>
       <input type="file" id="file-input" accept=".stl,.svg" hidden/>
     </section>
-
     <section>
       <h2>Strategy</h2>
       <select id="strategy">
@@ -176,7 +195,6 @@ canvas {
         <option value="perimeter">Perimeter</option>
       </select>
     </section>
-
     <section>
       <h2>Tool</h2>
       <label>Tool diameter (mm)</label>
@@ -184,7 +202,6 @@ canvas {
       <label>Step-over (mm)</label>
       <input type="number" id="step-over" value="1.5" step="0.1" min="0.1"/>
     </section>
-
     <section>
       <h2>Cutting</h2>
       <label>Cut depth (mm, negative)</label>
@@ -200,7 +217,6 @@ canvas {
       <label>Safe Z (mm)</label>
       <input type="number" id="safe-z" value="5" step="1" min="0.5"/>
     </section>
-
     <section>
       <button class="btn btn-primary" id="generate-btn" disabled>Generate G-code</button>
       <div class="status" id="status"></div>
@@ -209,27 +225,54 @@ canvas {
 
   <!-- Preview canvas -->
   <div class="preview">
-    <h2>Toolpath Preview</h2>
+    <div class="pane-header">Toolpath Preview</div>
     <canvas id="preview-canvas"></canvas>
   </div>
 
-  <!-- G-code output -->
-  <div class="gcode-pane">
-    <div class="toolbar">
-      <h2>G-code Output</h2>
-      <button class="btn btn-secondary" id="copy-btn">Copy</button>
-      <button class="btn btn-secondary" id="download-btn">Download .nc</button>
+  <!-- Right pane: G-code + Simulation tabs -->
+  <div class="right-pane">
+    <div class="tab-bar">
+      <button class="active" data-tab="gcode-tab">G-code</button>
+      <button data-tab="sim-tab">Simulation</button>
     </div>
-    <textarea id="gcode-output" readonly placeholder="G-code will appear here after generation..."></textarea>
+
+    <!-- G-code tab -->
+    <div class="tab-content active" id="gcode-tab">
+      <div class="gcode-toolbar">
+        <div class="spacer"></div>
+        <button class="btn btn-sm btn-secondary" id="copy-btn">Copy</button>
+        <button class="btn btn-sm btn-secondary" id="download-btn">Download .nc</button>
+      </div>
+      <textarea id="gcode-output" readonly placeholder="G-code will appear here after generation..."></textarea>
+    </div>
+
+    <!-- Simulation tab -->
+    <div class="tab-content" id="sim-tab">
+      <div class="sim-wrap">
+        <canvas id="sim-canvas"></canvas>
+      </div>
+      <div class="sim-controls">
+        <button class="btn btn-sm btn-secondary" id="sim-play">Play</button>
+        <button class="btn btn-sm btn-secondary" id="sim-reset">Reset</button>
+        <label style="margin:0;font-size:11px;min-width:50px">Speed</label>
+        <input type="range" id="sim-speed" min="1" max="200" value="50" style="width:80px;flex:0 0 80px"/>
+        <input type="range" class="scrubber" id="sim-scrub" min="0" max="1" step="0.001" value="0"/>
+        <div class="sim-info" id="sim-info">0 / 0</div>
+      </div>
+    </div>
   </div>
 </div>
 
 <script type="module">
-import init, { process_stl, process_svg, preview_stl, preview_svg } from './pkg/rustcam.js';
+import init, {
+  process_stl, process_svg,
+  preview_stl, preview_svg,
+  sim_moves_stl, sim_moves_svg,
+} from './pkg/rustcam.js';
 
 let wasmReady = false;
-let fileData = null;   // ArrayBuffer (STL) or string (SVG)
-let fileType = null;   // "stl" | "svg"
+let fileData = null;
+let fileType = null;
 
 const dropZone    = document.getElementById('drop-zone');
 const fileInput   = document.getElementById('file-input');
@@ -241,7 +284,18 @@ const canvas      = document.getElementById('preview-canvas');
 const copyBtn     = document.getElementById('copy-btn');
 const downloadBtn = document.getElementById('download-btn');
 
-// ── Initialise WASM ──────────────────────────────────────────────────
+// ── Tabs ─────────────────────────────────────────────────────────────
+document.querySelectorAll('.tab-bar button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'sim-tab') resizeSim();
+  });
+});
+
+// ── Init WASM ────────────────────────────────────────────────────────
 async function boot() {
   try {
     await init();
@@ -290,7 +344,7 @@ function handleFile(file) {
   }
 }
 
-// ── Config builder ───────────────────────────────────────────────────
+// ── Config ───────────────────────────────────────────────────────────
 function getConfig() {
   return JSON.stringify({
     tool_diameter:  parseFloat(document.getElementById('tool-diameter').value),
@@ -310,16 +364,10 @@ function tryPreview() {
   if (!wasmReady || !fileData) return;
   try {
     let json;
-    if (fileType === 'stl') {
-      json = preview_stl(fileData, getConfig());
-    } else {
-      json = preview_svg(fileData);
-    }
-    const paths = JSON.parse(json);
-    drawPreview(paths);
-  } catch(e) {
-    console.warn('Preview error:', e);
-  }
+    if (fileType === 'stl') json = preview_stl(fileData, getConfig());
+    else json = preview_svg(fileData);
+    drawPreview(JSON.parse(json));
+  } catch(e) { console.warn('Preview error:', e); }
 }
 
 function drawPreview(paths) {
@@ -330,55 +378,29 @@ function drawPreview(paths) {
   canvas.height = rect.height * dpr;
   ctx.scale(dpr, dpr);
   ctx.clearRect(0, 0, rect.width, rect.height);
-
   if (!paths.length) return;
 
-  // Compute bounds
   let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
-  for (const path of paths) {
-    for (const [x,y] of path) {
-      if (x<minX) minX=x; if (y<minY) minY=y;
-      if (x>maxX) maxX=x; if (y>maxY) maxY=y;
-    }
+  for (const p of paths) for (const [x,y] of p) {
+    if(x<minX)minX=x; if(y<minY)minY=y; if(x>maxX)maxX=x; if(y>maxY)maxY=y;
   }
-  const w = maxX-minX || 1, h = maxY-minY || 1;
-  const pad = 30;
-  const scaleX = (rect.width  - pad*2) / w;
-  const scaleY = (rect.height - pad*2) / h;
-  const scale = Math.min(scaleX, scaleY);
-  const offX = pad + (rect.width  - pad*2 - w*scale) / 2;
-  const offY = pad + (rect.height - pad*2 - h*scale) / 2;
+  const w=maxX-minX||1, h=maxY-minY||1, pad=30;
+  const scale = Math.min((rect.width-pad*2)/w, (rect.height-pad*2)/h);
+  const offX = pad+(rect.width-pad*2-w*scale)/2;
+  const offY = pad+(rect.height-pad*2-h*scale)/2;
+  const tx = x => offX+(x-minX)*scale;
+  const ty = y => offY+(maxY-y)*scale;
 
-  function tx(x) { return offX + (x-minX)*scale; }
-  function ty(y) { return offY + (maxY-y)*scale; } // flip Y
+  ctx.strokeStyle='#1a1d27'; ctx.lineWidth=0.5;
+  const gs=Math.pow(10,Math.floor(Math.log10(Math.max(w,h))));
+  for(let x=Math.floor(minX/gs)*gs;x<=maxX;x+=gs){ctx.beginPath();ctx.moveTo(tx(x),0);ctx.lineTo(tx(x),rect.height);ctx.stroke();}
+  for(let y=Math.floor(minY/gs)*gs;y<=maxY;y+=gs){ctx.beginPath();ctx.moveTo(0,ty(y));ctx.lineTo(rect.width,ty(y));ctx.stroke();}
 
-  // Grid
-  ctx.strokeStyle = '#1a1d27';
-  ctx.lineWidth = 0.5;
-  const gridStep = Math.pow(10, Math.floor(Math.log10(Math.max(w,h))));
-  for (let x = Math.floor(minX/gridStep)*gridStep; x <= maxX; x += gridStep) {
-    ctx.beginPath(); ctx.moveTo(tx(x), 0); ctx.lineTo(tx(x), rect.height); ctx.stroke();
-  }
-  for (let y = Math.floor(minY/gridStep)*gridStep; y <= maxY; y += gridStep) {
-    ctx.beginPath(); ctx.moveTo(0, ty(y)); ctx.lineTo(rect.width, ty(y)); ctx.stroke();
-  }
-
-  // Paths
-  ctx.strokeStyle = '#4f8cff';
-  ctx.lineWidth = 1.2;
-  ctx.lineJoin = 'round';
-  for (const path of paths) {
-    if (path.length < 2) continue;
-    ctx.beginPath();
-    ctx.moveTo(tx(path[0][0]), ty(path[0][1]));
-    for (let i=1; i<path.length; i++) {
-      ctx.lineTo(tx(path[i][0]), ty(path[i][1]));
-    }
-    ctx.stroke();
-  }
+  ctx.strokeStyle='#4f8cff'; ctx.lineWidth=1.2; ctx.lineJoin='round';
+  for(const p of paths){if(p.length<2)continue;ctx.beginPath();ctx.moveTo(tx(p[0][0]),ty(p[0][1]));for(let i=1;i<p.length;i++)ctx.lineTo(tx(p[i][0]),ty(p[i][1]));ctx.stroke();}
 }
 
-window.addEventListener('resize', () => tryPreview());
+window.addEventListener('resize', () => { tryPreview(); resizeSim(); });
 
 // ── Generate ─────────────────────────────────────────────────────────
 generateBtn.addEventListener('click', () => {
@@ -386,18 +408,15 @@ generateBtn.addEventListener('click', () => {
   statusEl.textContent = 'Generating...';
   statusEl.className = 'status';
   try {
-    let gcode;
     const cfg = getConfig();
-    if (fileType === 'stl') {
-      gcode = process_stl(fileData, cfg);
-    } else {
-      gcode = process_svg(fileData, cfg);
-    }
+    let gcode;
+    if (fileType === 'stl') gcode = process_stl(fileData, cfg);
+    else gcode = process_svg(fileData, cfg);
     gcodeOut.value = gcode;
-    const lines = gcode.split('\n').length;
-    statusEl.textContent = `Done — ${lines} lines of G-code generated.`;
+    statusEl.textContent = `Done — ${gcode.split('\n').length} lines of G-code.`;
     statusEl.className = 'status ok';
     tryPreview();
+    loadSim();
   } catch(e) {
     statusEl.textContent = 'Error: ' + e;
     statusEl.className = 'status error';
@@ -411,15 +430,250 @@ copyBtn.addEventListener('click', () => {
     setTimeout(() => copyBtn.textContent = 'Copy', 1500);
   });
 });
-
 downloadBtn.addEventListener('click', () => {
-  const blob = new Blob([gcodeOut.value], { type: 'text/plain' });
+  const blob = new Blob([gcodeOut.value], {type:'text/plain'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (filenameEl.textContent || 'output').replace(/\.\w+$/, '') + '.nc';
-  a.click();
-  URL.revokeObjectURL(a.href);
+  a.download = (filenameEl.textContent||'output').replace(/\.\w+$/,'') + '.nc';
+  a.click(); URL.revokeObjectURL(a.href);
 });
+
+// =====================================================================
+//  TOOL SIMULATION
+// =====================================================================
+const simCanvas  = document.getElementById('sim-canvas');
+const simPlay    = document.getElementById('sim-play');
+const simReset   = document.getElementById('sim-reset');
+const simSpeed   = document.getElementById('sim-speed');
+const simScrub   = document.getElementById('sim-scrub');
+const simInfo    = document.getElementById('sim-info');
+
+let simMoves   = [];       // [{x,y,z,rapid}, ...]
+let simIdx     = 0;        // current move index (how far we've drawn)
+let simRunning = false;
+let simRaf     = null;
+let simBounds  = null;     // {minX,minY,maxX,maxY,w,h}
+let simScale   = 1;
+let simOffX    = 0;
+let simOffY    = 0;
+
+// Off-screen canvas for accumulated material-removal strokes
+let matCanvas = null;
+let matCtx    = null;
+
+function loadSim() {
+  try {
+    const cfg = getConfig();
+    let json;
+    if (fileType === 'stl') json = sim_moves_stl(fileData, cfg);
+    else json = sim_moves_svg(fileData, cfg);
+    simMoves = JSON.parse(json);
+  } catch(e) { simMoves = []; console.warn('sim_moves error:', e); }
+  simIdx = 0;
+  simScrub.max = Math.max(simMoves.length - 1, 1);
+  simScrub.value = 0;
+  simInfo.textContent = `0 / ${simMoves.length}`;
+  simRunning = false;
+  simPlay.textContent = 'Play';
+  computeSimBounds();
+  initMatCanvas();
+  drawSimFrame();
+}
+
+function computeSimBounds() {
+  let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
+  for (const m of simMoves) {
+    if(m.x<minX)minX=m.x; if(m.y<minY)minY=m.y;
+    if(m.x>maxX)maxX=m.x; if(m.y>maxY)maxY=m.y;
+  }
+  if (!simMoves.length) { minX=0;minY=0;maxX=10;maxY=10; }
+  const w=maxX-minX||1, h=maxY-minY||1;
+  simBounds = {minX,minY,maxX,maxY,w,h};
+}
+
+function resizeSim() {
+  if (!simBounds) return;
+  const rect = simCanvas.getBoundingClientRect();
+  if (rect.width < 1 || rect.height < 1) return;
+  const dpr = window.devicePixelRatio || 1;
+  simCanvas.width  = rect.width  * dpr;
+  simCanvas.height = rect.height * dpr;
+  const pad = 40;
+  simScale = Math.min((rect.width-pad*2)/simBounds.w, (rect.height-pad*2)/simBounds.h);
+  simOffX = pad + (rect.width-pad*2-simBounds.w*simScale)/2;
+  simOffY = pad + (rect.height-pad*2-simBounds.h*simScale)/2;
+  // Rebuild material canvas at new size
+  initMatCanvas();
+  replayMat(simIdx);
+  drawSimFrame();
+}
+
+function initMatCanvas() {
+  const rect = simCanvas.getBoundingClientRect();
+  if (rect.width < 1) return;
+  const dpr = window.devicePixelRatio || 1;
+  matCanvas = document.createElement('canvas');
+  matCanvas.width  = rect.width * dpr;
+  matCanvas.height = rect.height * dpr;
+  matCtx = matCanvas.getContext('2d');
+}
+
+function simTx(x) { return (simOffX + (x - simBounds.minX)*simScale); }
+function simTy(y) { return (simOffY + (simBounds.maxY - y)*simScale); }
+
+// Stamp one material-removal circle between two cut moves
+function stampMat(ax, ay, bx, by, toolR) {
+  if (!matCtx) return;
+  const dpr = window.devicePixelRatio || 1;
+  matCtx.save();
+  matCtx.scale(dpr, dpr);
+  matCtx.strokeStyle = 'rgba(255,80,80,0.35)';
+  matCtx.lineWidth = toolR * simScale * 2;
+  matCtx.lineCap = 'round';
+  matCtx.beginPath();
+  matCtx.moveTo(simTx(ax), simTy(ay));
+  matCtx.lineTo(simTx(bx), simTy(by));
+  matCtx.stroke();
+  matCtx.restore();
+}
+
+// Re-draw material removal from scratch up to index n (used after resize / scrub)
+function replayMat(n) {
+  if (!matCtx) return;
+  matCtx.clearRect(0, 0, matCanvas.width, matCanvas.height);
+  const toolR = parseFloat(document.getElementById('tool-diameter').value) / 2;
+  const safeZ = parseFloat(document.getElementById('safe-z').value);
+  for (let i = 1; i <= n && i < simMoves.length; i++) {
+    const prev = simMoves[i-1];
+    const cur  = simMoves[i];
+    if (!cur.rapid && cur.z < safeZ - 0.01) {
+      stampMat(prev.x, prev.y, cur.x, cur.y, toolR);
+    }
+  }
+}
+
+function drawSimFrame() {
+  const ctx = simCanvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const rect = simCanvas.getBoundingClientRect();
+  if (rect.width < 1) return;
+  ctx.save();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  // Stock outline
+  if (simBounds) {
+    ctx.strokeStyle = '#2a2d3a';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(
+      simTx(simBounds.minX) - 4, simTy(simBounds.maxY) - 4,
+      simBounds.w * simScale + 8, simBounds.h * simScale + 8
+    );
+  }
+
+  // Material removal layer
+  if (matCanvas) ctx.drawImage(matCanvas, 0, 0, matCanvas.width/dpr, matCanvas.height/dpr);
+
+  // Draw completed toolpath lines
+  if (simMoves.length > 1 && simIdx > 0) {
+    const safeZ = parseFloat(document.getElementById('safe-z').value);
+    ctx.lineWidth = 0.8;
+    ctx.lineJoin = 'round';
+    for (let i = 1; i <= simIdx && i < simMoves.length; i++) {
+      const prev = simMoves[i-1];
+      const cur = simMoves[i];
+      ctx.strokeStyle = cur.rapid ? 'rgba(255,255,100,0.25)' : 'rgba(79,140,255,0.6)';
+      ctx.beginPath();
+      ctx.moveTo(simTx(prev.x), simTy(prev.y));
+      ctx.lineTo(simTx(cur.x), simTy(cur.y));
+      ctx.stroke();
+    }
+  }
+
+  // Tool head
+  if (simIdx < simMoves.length) {
+    const m = simMoves[simIdx];
+    const toolR = parseFloat(document.getElementById('tool-diameter').value) / 2;
+    const r = toolR * simScale;
+    const cx = simTx(m.x), cy = simTy(m.y);
+    // Shadow
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + 2, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fill();
+    // Tool body
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    const cutting = !m.rapid && m.z < parseFloat(document.getElementById('safe-z').value) - 0.01;
+    ctx.fillStyle = cutting ? 'rgba(255,80,80,0.7)' : 'rgba(100,200,100,0.5)';
+    ctx.strokeStyle = cutting ? '#ff5555' : '#55ff88';
+    ctx.lineWidth = 1.5;
+    ctx.fill();
+    ctx.stroke();
+    // Centre dot
+    ctx.beginPath();
+    ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    // Z label
+    ctx.fillStyle = '#8888a0';
+    ctx.font = '11px monospace';
+    ctx.fillText(`Z${m.z.toFixed(2)}`, cx + r + 6, cy + 4);
+  }
+
+  ctx.restore();
+  simInfo.textContent = `${simIdx} / ${simMoves.length}`;
+}
+
+// ── Simulation transport ─────────────────────────────────────────────
+simPlay.addEventListener('click', () => {
+  if (!simMoves.length) return;
+  simRunning = !simRunning;
+  simPlay.textContent = simRunning ? 'Pause' : 'Play';
+  if (simRunning) simTick();
+});
+
+simReset.addEventListener('click', () => {
+  simRunning = false;
+  simPlay.textContent = 'Play';
+  if (simRaf) cancelAnimationFrame(simRaf);
+  simIdx = 0;
+  simScrub.value = 0;
+  initMatCanvas();
+  drawSimFrame();
+});
+
+simScrub.addEventListener('input', () => {
+  const target = parseInt(simScrub.value);
+  simIdx = target;
+  replayMat(simIdx);
+  drawSimFrame();
+});
+
+function simTick() {
+  if (!simRunning) return;
+  const speed = parseInt(simSpeed.value);
+  const safeZ = parseFloat(document.getElementById('safe-z').value);
+  const toolR = parseFloat(document.getElementById('tool-diameter').value) / 2;
+  // Advance multiple moves per frame at higher speeds
+  const steps = Math.max(1, Math.round(speed / 10));
+  for (let s = 0; s < steps; s++) {
+    if (simIdx >= simMoves.length - 1) {
+      simRunning = false;
+      simPlay.textContent = 'Play';
+      break;
+    }
+    simIdx++;
+    const prev = simMoves[simIdx - 1];
+    const cur  = simMoves[simIdx];
+    if (!cur.rapid && cur.z < safeZ - 0.01) {
+      stampMat(prev.x, prev.y, cur.x, cur.y, toolR);
+    }
+  }
+  simScrub.value = simIdx;
+  drawSimFrame();
+  if (simRunning) simRaf = requestAnimationFrame(simTick);
+}
 </script>
 </body>
 </html>

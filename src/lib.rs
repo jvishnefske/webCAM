@@ -256,3 +256,91 @@ pub fn preview_svg(svg_text: &str) -> Result<String, JsValue> {
         .collect();
     serde_json::to_string(&preview_paths).map_err(|e| JsValue::from_str(&e.to_string()))
 }
+
+// ── Simulation data ──────────────────────────────────────────────────
+
+/// Return flat move list as JSON for the tool simulation.
+/// Each move: `{ x, y, z, rapid }`.
+#[wasm_bindgen]
+pub fn sim_moves_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
+    let config: CamConfig =
+        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let mesh = stl::parse_stl(data).map_err(|e| JsValue::from_str(&e))?;
+    let toolpaths = build_toolpaths_stl(&mesh, &config);
+    flatten_moves(&toolpaths)
+}
+
+#[wasm_bindgen]
+pub fn sim_moves_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue> {
+    let config: CamConfig =
+        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    let polylines = svg::parse_svg(svg_text).map_err(|e| JsValue::from_str(&e))?;
+    let toolpaths = build_toolpaths_svg(&polylines, &config);
+    flatten_moves(&toolpaths)
+}
+
+fn build_toolpaths_stl(mesh: &geometry::Mesh, config: &CamConfig) -> Vec<Toolpath> {
+    let cut_params = CutParams {
+        tool_diameter: config.tool_diameter,
+        step_over: config.step_over,
+        step_down: config.step_down,
+        feed_rate: config.feed_rate,
+        plunge_rate: config.plunge_rate,
+        safe_z: config.safe_z,
+        cut_z: config.cut_depth,
+    };
+    let layers = slicer::slice_mesh(mesh, config.step_down);
+    let strategy: Box<dyn ToolpathStrategy> = match config.strategy.as_str() {
+        "pocket" => Box::new(PocketStrategy),
+        _ => Box::new(ContourStrategy),
+    };
+    let mut all = Vec::new();
+    for (z, contours) in &layers {
+        let mut p = cut_params.clone();
+        p.cut_z = *z;
+        all.extend(strategy.generate(contours, &p));
+    }
+    if all.is_empty() {
+        let contours =
+            slicer::slice_at_z(mesh, mesh.bounds.as_ref().map_or(0.0, |b| b.min.z + 0.01));
+        all.extend(strategy.generate(&contours, &cut_params));
+    }
+    all
+}
+
+fn build_toolpaths_svg(polylines: &[geometry::Polyline], config: &CamConfig) -> Vec<Toolpath> {
+    let cut_params = CutParams {
+        tool_diameter: config.tool_diameter,
+        step_over: config.step_over,
+        step_down: config.step_down,
+        feed_rate: config.feed_rate,
+        plunge_rate: config.plunge_rate,
+        safe_z: config.safe_z,
+        cut_z: config.cut_depth,
+    };
+    let strategy: Box<dyn ToolpathStrategy> = match config.strategy.as_str() {
+        "pocket" => Box::new(PocketStrategy),
+        _ => Box::new(ContourStrategy),
+    };
+    let mut all = Vec::new();
+    let mut z = 0.0;
+    while z > config.cut_depth - 0.001 {
+        z -= config.step_down;
+        if z < config.cut_depth {
+            z = config.cut_depth;
+        }
+        let mut p = cut_params.clone();
+        p.cut_z = z;
+        all.extend(strategy.generate(polylines, &p));
+        if (z - config.cut_depth).abs() < 0.001 {
+            break;
+        }
+    }
+    all
+}
+
+fn flatten_moves(toolpaths: &[Toolpath]) -> Result<String, JsValue> {
+    let moves: Vec<&geometry::ToolpathMove> =
+        toolpaths.iter().flat_map(|tp| tp.moves.iter()).collect();
+    serde_json::to_string(&moves).map_err(|e| JsValue::from_str(&e.to_string()))
+}
