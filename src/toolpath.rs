@@ -333,7 +333,6 @@ impl ZigzagSurfaceStrategy {
 
         let step = params.cut_params.step_over.max(0.1);
         let safe_z = params.cut_params.safe_z;
-        let mut toolpath = Toolpath::new();
 
         let is_ball_end = matches!(params.cut_params.tool.tool_type, ToolType::BallEnd);
         let tool_radius = params.cut_params.tool.diameter / 2.0;
@@ -400,44 +399,49 @@ impl ZigzagSurfaceStrategy {
             }
         };
 
-        // Build continuous toolpath: only rapid at the very start and retract
-        // at the very end. Between rows, cut directly along the surface.
-        let mut first_row = true;
+        // Build toolpaths: one per row for clear preview rendering.
+        // Between rows, the tool stays on the surface (no retract to safe Z).
+        let mut toolpaths: Vec<Toolpath> = Vec::new();
+        let mut prev_end: Option<(f64, f64, f64)> = None;
+
         for row in &rows {
             if row.is_empty() {
                 continue;
             }
 
+            let mut tp = Toolpath::new();
             let (x0, y0, z0) = row[0];
 
-            if first_row {
-                // Initial approach: rapid to safe Z then plunge
-                toolpath.rapid(x0, y0, safe_z);
-                toolpath.cut(x0, y0, z0);
-                first_row = false;
+            if prev_end.is_none() {
+                // First row: rapid to safe Z then plunge
+                tp.rapid(x0, y0, safe_z);
+                tp.cut(x0, y0, z0);
             } else {
-                // Stay on surface: cut directly from end of previous row
-                // to the start of this row (one step_over apart)
-                toolpath.cut(x0, y0, z0);
+                // Subsequent rows: cut directly from previous row end
+                // (staying on the surface, no retract)
+                let (px, py, pz) = prev_end.unwrap();
+                tp.cut(px, py, pz);
+                tp.cut(x0, y0, z0);
             }
 
             // Cut along this row
             for &(x, y, z) in &row[1..] {
-                toolpath.cut(x, y, z);
+                tp.cut(x, y, z);
+            }
+
+            let last = row.last().unwrap();
+            prev_end = Some(*last);
+            toolpaths.push(tp);
+        }
+
+        // Final retract on last toolpath
+        if let Some(last_tp) = toolpaths.last_mut() {
+            if let Some((x, y, _)) = prev_end {
+                last_tp.rapid(x, y, safe_z);
             }
         }
 
-        // Final retract
-        if !toolpath.moves.is_empty() {
-            let last = toolpath.moves.last().unwrap();
-            toolpath.rapid(last.x, last.y, safe_z);
-        }
-
-        if toolpath.moves.is_empty() {
-            Vec::new()
-        } else {
-            vec![toolpath]
-        }
+        toolpaths
     }
 }
 
@@ -754,8 +758,9 @@ mod tests {
         let strategy = ZigzagSurfaceStrategy;
         let toolpaths = strategy.generate_surface(&surface);
         assert!(!toolpaths.is_empty());
-        // Should have multiple moves sampling across the surface
-        assert!(toolpaths[0].moves.len() > 10);
+        // Should have multiple moves sampling across the surface (across all rows)
+        let total_moves: usize = toolpaths.iter().map(|tp| tp.moves.len()).sum();
+        assert!(total_moves > 10);
     }
 
     #[test]
@@ -766,10 +771,10 @@ mod tests {
         let strategy = ZigzagSurfaceStrategy;
         let toolpaths = strategy.generate_surface(&surface);
         assert!(!toolpaths.is_empty());
-        // Check that Z varies (not all at same height)
-        let z_values: Vec<f64> = toolpaths[0]
-            .moves
+        // Check that Z varies (not all at same height) across all rows
+        let z_values: Vec<f64> = toolpaths
             .iter()
+            .flat_map(|tp| tp.moves.iter())
             .filter(|m| !m.rapid)
             .map(|m| m.z)
             .collect();
