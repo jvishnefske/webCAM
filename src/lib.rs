@@ -69,6 +69,8 @@ pub struct CamConfig {
     pub climb_cut: bool,
     #[serde(default = "default_perimeter_passes")]
     pub perimeter_passes: u32,
+    #[serde(default = "default_scan_direction")]
+    pub scan_direction: String,
 }
 
 fn default_tool_diameter() -> f64 {
@@ -101,6 +103,9 @@ fn default_safe_z() -> f64 {
 fn default_cut_depth() -> f64 {
     -1.0
 }
+fn default_scan_direction() -> String {
+    "x".into()
+}
 fn default_strategy() -> String {
     "contour".into()
 }
@@ -122,7 +127,16 @@ impl Default for CamConfig {
             strategy: default_strategy(),
             climb_cut: false,
             perimeter_passes: default_perimeter_passes(),
+            scan_direction: default_scan_direction(),
         }
+    }
+}
+
+/// Parse scan direction from config string.
+fn scan_direction_from_config(config: &CamConfig) -> ScanDirection {
+    match config.scan_direction.as_str() {
+        "y" | "Y" => ScanDirection::Y,
+        _ => ScanDirection::X,
     }
 }
 
@@ -203,7 +217,7 @@ pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
         "zigzag" => {
             // 3D surface zigzag raster
             let strategy = ZigzagSurfaceStrategy;
-            let surface_params = SurfaceParams::new(&mesh, cut_params, ScanDirection::X);
+            let surface_params = SurfaceParams::new(&mesh, cut_params, scan_direction_from_config(&config));
             strategy.generate_surface(&surface_params)
         }
         "perimeter" => {
@@ -370,7 +384,7 @@ fn build_toolpaths_stl(mesh: &geometry::Mesh, config: &CamConfig) -> Vec<Toolpat
     // Handle zigzag separately (3D surface strategy)
     if config.strategy == "zigzag" {
         let strategy = ZigzagSurfaceStrategy;
-        let surface_params = SurfaceParams::new(mesh, cut_params, ScanDirection::X);
+        let surface_params = SurfaceParams::new(mesh, cut_params, scan_direction_from_config(config));
         return strategy.generate_surface(&surface_params);
     }
 
