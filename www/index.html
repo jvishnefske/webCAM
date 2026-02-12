@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
-<title>RustCAM — Browser CAM Tool</title>
+<title>Wasm Engineered Browser Computer-Aided Manufacturing</title>
 <style>
 :root {
   --bg: #0f1117;
@@ -170,7 +170,7 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
 <body>
 
 <header>
-  <h1>RustCAM</h1>
+  <h1>Wasm Engineered Browser Computer-Aided Manufacturing</h1>
   <span>STL / SVG &rarr; G-code &mdash; runs entirely in your browser</span>
 </header>
 
@@ -197,10 +197,33 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
     </section>
     <section>
       <h2>Tool</h2>
+      <label>Tool type</label>
+      <select id="tool-type">
+        <option value="end_mill">End Mill</option>
+        <option value="ball_end">Ball End</option>
+        <option value="face_mill">Face Mill</option>
+      </select>
       <label>Tool diameter (mm)</label>
       <input type="number" id="tool-diameter" value="3.175" step="0.1" min="0.1"/>
+      <div id="effective-diameter-row" style="display:none;">
+        <label>Effective diameter (mm)</label>
+        <input type="number" id="effective-diameter" value="3.175" step="0.1" min="0.1"/>
+      </div>
+      <div id="corner-radius-row" style="display:none;">
+        <label>Corner radius (mm)</label>
+        <input type="number" id="corner-radius" value="0" step="0.1" min="0"/>
+      </div>
       <label>Step-over (mm)</label>
       <input type="number" id="step-over" value="1.5" step="0.1" min="0.1"/>
+    </section>
+    <section id="perimeter-options" style="display:none;">
+      <h2>Perimeter Options</h2>
+      <label>
+        <input type="checkbox" id="climb-cut"/>
+        Climb cutting
+      </label>
+      <label>Number of passes</label>
+      <input type="number" id="perimeter-passes" value="1" step="1" min="1"/>
     </section>
     <section>
       <h2>Cutting</h2>
@@ -284,6 +307,37 @@ const canvas      = document.getElementById('preview-canvas');
 const copyBtn     = document.getElementById('copy-btn');
 const downloadBtn = document.getElementById('download-btn');
 
+// ── Tool type UI ──────────────────────────────────────────────────────
+const toolTypeSelect = document.getElementById('tool-type');
+const effectiveDiameterRow = document.getElementById('effective-diameter-row');
+const cornerRadiusRow = document.getElementById('corner-radius-row');
+
+function updateToolTypeUI() {
+  const toolType = toolTypeSelect.value;
+  effectiveDiameterRow.style.display = toolType === 'face_mill' ? 'block' : 'none';
+  cornerRadiusRow.style.display = toolType === 'ball_end' ? 'block' : 'none';
+  // For ball end, update corner radius to match radius
+  if (toolType === 'ball_end') {
+    const diameter = parseFloat(document.getElementById('tool-diameter').value);
+    document.getElementById('corner-radius').value = (diameter / 2).toFixed(2);
+  }
+}
+
+toolTypeSelect.addEventListener('change', updateToolTypeUI);
+document.getElementById('tool-diameter').addEventListener('change', updateToolTypeUI);
+
+// ── Strategy UI ───────────────────────────────────────────────────────
+const strategySelect = document.getElementById('strategy');
+const perimeterOptions = document.getElementById('perimeter-options');
+
+function updateStrategyUI() {
+  const strategy = strategySelect.value;
+  perimeterOptions.style.display = strategy === 'perimeter' ? 'block' : 'none';
+}
+
+strategySelect.addEventListener('change', updateStrategyUI);
+updateStrategyUI();
+
 // ── Tabs ─────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab-bar button').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -346,7 +400,8 @@ function handleFile(file) {
 
 // ── Config ───────────────────────────────────────────────────────────
 function getConfig() {
-  return JSON.stringify({
+  const toolType = document.getElementById('tool-type').value;
+  const config = {
     tool_diameter:  parseFloat(document.getElementById('tool-diameter').value),
     step_over:      parseFloat(document.getElementById('step-over').value),
     step_down:      parseFloat(document.getElementById('step-down').value),
@@ -356,7 +411,20 @@ function getConfig() {
     safe_z:         parseFloat(document.getElementById('safe-z').value),
     cut_depth:      parseFloat(document.getElementById('cut-depth').value),
     strategy:       document.getElementById('strategy').value,
-  });
+    tool_type:      toolType,
+  };
+  // Add tool-type-specific parameters
+  if (toolType === 'ball_end') {
+    config.corner_radius = parseFloat(document.getElementById('corner-radius').value) || 0;
+  } else if (toolType === 'face_mill') {
+    config.effective_diameter = parseFloat(document.getElementById('effective-diameter').value) || config.tool_diameter;
+  }
+  // Add perimeter-specific parameters
+  if (config.strategy === 'perimeter') {
+    config.climb_cut = document.getElementById('climb-cut').checked;
+    config.perimeter_passes = parseInt(document.getElementById('perimeter-passes').value) || 1;
+  }
+  return JSON.stringify(config);
 }
 
 // ── Preview ──────────────────────────────────────────────────────────
@@ -380,24 +448,62 @@ function drawPreview(paths) {
   ctx.clearRect(0, 0, rect.width, rect.height);
   if (!paths.length) return;
 
+  // Detect if paths have Z coordinates (3D format)
+  const has3D = paths.some(p => p.length > 0 && p[0].length >= 3);
+
   let minX=Infinity, minY=Infinity, maxX=-Infinity, maxY=-Infinity;
-  for (const p of paths) for (const [x,y] of p) {
+  let minZ=Infinity, maxZ=-Infinity;
+  for (const p of paths) for (const pt of p) {
+    const [x, y, z] = pt;
     if(x<minX)minX=x; if(y<minY)minY=y; if(x>maxX)maxX=x; if(y>maxY)maxY=y;
+    if (has3D && z !== undefined) {
+      if(z<minZ)minZ=z; if(z>maxZ)maxZ=z;
+    }
   }
   const w=maxX-minX||1, h=maxY-minY||1, pad=30;
+  const zRange = (maxZ - minZ) || 1;
   const scale = Math.min((rect.width-pad*2)/w, (rect.height-pad*2)/h);
   const offX = pad+(rect.width-pad*2-w*scale)/2;
   const offY = pad+(rect.height-pad*2-h*scale)/2;
   const tx = x => offX+(x-minX)*scale;
   const ty = y => offY+(maxY-y)*scale;
 
+  // Color gradient by Z height (blue=low, green=mid, yellow=high)
+  const zColor = (z) => {
+    if (!has3D || z === undefined) return '#4f8cff';
+    const t = (z - minZ) / zRange; // 0 to 1
+    // HSL: 240 (blue) -> 120 (green) -> 60 (yellow)
+    const hue = 240 - t * 180;
+    return `hsl(${hue}, 80%, 55%)`;
+  };
+
   ctx.strokeStyle='#1a1d27'; ctx.lineWidth=0.5;
   const gs=Math.pow(10,Math.floor(Math.log10(Math.max(w,h))));
   for(let x=Math.floor(minX/gs)*gs;x<=maxX;x+=gs){ctx.beginPath();ctx.moveTo(tx(x),0);ctx.lineTo(tx(x),rect.height);ctx.stroke();}
   for(let y=Math.floor(minY/gs)*gs;y<=maxY;y+=gs){ctx.beginPath();ctx.moveTo(0,ty(y));ctx.lineTo(rect.width,ty(y));ctx.stroke();}
 
-  ctx.strokeStyle='#4f8cff'; ctx.lineWidth=1.2; ctx.lineJoin='round';
-  for(const p of paths){if(p.length<2)continue;ctx.beginPath();ctx.moveTo(tx(p[0][0]),ty(p[0][1]));for(let i=1;i<p.length;i++)ctx.lineTo(tx(p[i][0]),ty(p[i][1]));ctx.stroke();}
+  ctx.lineWidth=1.2; ctx.lineJoin='round';
+  for(const p of paths){
+    if(p.length<2)continue;
+    if (has3D) {
+      // Draw segments with Z-based color gradient
+      for(let i=1;i<p.length;i++){
+        const z = p[i][2];
+        ctx.strokeStyle = zColor(z);
+        ctx.beginPath();
+        ctx.moveTo(tx(p[i-1][0]),ty(p[i-1][1]));
+        ctx.lineTo(tx(p[i][0]),ty(p[i][1]));
+        ctx.stroke();
+      }
+    } else {
+      // 2D paths: single color
+      ctx.strokeStyle='#4f8cff';
+      ctx.beginPath();
+      ctx.moveTo(tx(p[0][0]),ty(p[0][1]));
+      for(let i=1;i<p.length;i++)ctx.lineTo(tx(p[i][0]),ty(p[i][1]));
+      ctx.stroke();
+    }
+  }
 }
 
 window.addEventListener('resize', () => { tryPreview(); resizeSim(); });

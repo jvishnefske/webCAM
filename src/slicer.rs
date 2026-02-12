@@ -76,6 +76,26 @@ fn intersect_triangle_z(a: Vec3, b: Vec3, c: Vec3, z: f64) -> Option<Segment2> {
     }
 }
 
+/// Query the surface normal at an XY point.
+///
+/// Returns the interpolated normal of the highest triangle at the XY intersection,
+/// or None if the point is outside all triangles.
+pub fn surface_normal_at(mesh: &Mesh, x: f64, y: f64) -> Option<Vec3> {
+    let mut best: Option<(f64, Vec3)> = None;
+
+    for tri in &mesh.triangles {
+        if let Some(z) = triangle_z_at_xy(tri.v0, tri.v1, tri.v2, x, y) {
+            match best {
+                None => best = Some((z, tri.normal)),
+                Some((max_z, _)) if z > max_z => best = Some((z, tri.normal)),
+                _ => {}
+            }
+        }
+    }
+
+    best.map(|(_, normal)| normal)
+}
+
 /// Query the mesh height at an XY point by casting a vertical ray downward.
 ///
 /// Returns the highest Z coordinate where the ray intersects the mesh,
@@ -269,6 +289,40 @@ mod tests {
         let z10 = mesh_height_at(&mesh, 5.0, 10.0);
         assert!(z10.is_some());
         assert!((z10.unwrap() - 10.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_req_005_surface_normal_flat() {
+        // Flat horizontal surface should have normal pointing up (+Z)
+        let mesh = make_box_mesh();
+        let normal = surface_normal_at(&mesh, 5.0, 5.0);
+        assert!(normal.is_some());
+        let n = normal.unwrap();
+        assert!(
+            (n.z - 1.0).abs() < 0.001,
+            "Z normal should be 1.0, got {}",
+            n.z
+        );
+    }
+
+    #[test]
+    fn test_req_005_surface_normal_ramp() {
+        // Ramp surface should have angled normal
+        let mesh = make_ramp_mesh();
+        let normal = surface_normal_at(&mesh, 5.0, 5.0);
+        assert!(normal.is_some());
+        let n = normal.unwrap();
+        // Ramp goes up in Y direction, so normal has negative Y and positive Z
+        assert!(n.y < 0.0, "Y normal should be negative for ramp");
+        assert!(n.z > 0.0, "Z normal should be positive");
+    }
+
+    #[test]
+    fn test_req_005_surface_normal_outside() {
+        // Point outside mesh should return None
+        let mesh = make_box_mesh();
+        let normal = surface_normal_at(&mesh, 20.0, 20.0);
+        assert!(normal.is_none());
     }
 
     #[test]

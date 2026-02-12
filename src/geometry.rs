@@ -24,6 +24,19 @@ impl Vec3 {
             z: a.z + (b.z - a.z) * t,
         }
     }
+    /// Normalize to unit length.
+    pub fn normalize(self) -> Self {
+        let len = (self.x * self.x + self.y * self.y + self.z * self.z).sqrt();
+        if len < 1e-10 {
+            self
+        } else {
+            Self {
+                x: self.x / len,
+                y: self.y / len,
+                z: self.z / len,
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

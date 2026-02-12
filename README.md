@@ -1,4 +1,4 @@
-# RustCAM
+# Rust webCAM
 
 Browser-based computer-aided manufacturing tool. Load an **STL** (3-D mesh) or
 **SVG** (2-D vector) file and generate **G-code** — all in WebAssembly, no
