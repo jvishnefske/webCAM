@@ -298,7 +298,33 @@ fn ball_end_offset(normal: Vec3, radius: f64) -> (f64, f64, f64) {
 pub struct ZigzagSurfaceStrategy;
 
 impl ZigzagSurfaceStrategy {
+    /// Sample a surface point with optional ball-end compensation.
+    fn sample_point(
+        mesh: &Mesh,
+        x: f64,
+        y: f64,
+        is_ball_end: bool,
+        tool_radius: f64,
+    ) -> Option<(f64, f64, f64)> {
+        mesh_height_at(mesh, x, y).map(|z| {
+            if is_ball_end {
+                if let Some(normal) = surface_normal_at(mesh, x, y) {
+                    let (dx, dy, dz) = ball_end_offset(normal, tool_radius);
+                    (x + dx, y + dy, z + dz)
+                } else {
+                    (x, y, z)
+                }
+            } else {
+                (x, y, z)
+            }
+        })
+    }
+
     /// Generate 3D surface toolpath from mesh.
+    ///
+    /// The tool stays on the surface between rows, cutting directly from the
+    /// end of one row to the start of the next instead of retracting to safe Z.
+    /// This produces a continuous back-and-forth surface movement.
     pub fn generate_surface(&self, params: &SurfaceParams) -> Vec<Toolpath> {
         let bounds = match &params.mesh.bounds {
             Some(b) => b,
@@ -309,133 +335,102 @@ impl ZigzagSurfaceStrategy {
         let safe_z = params.cut_params.safe_z;
         let mut toolpath = Toolpath::new();
 
-        // Check if ball-end compensation is needed
         let is_ball_end = matches!(params.cut_params.tool.tool_type, ToolType::BallEnd);
         let tool_radius = params.cut_params.tool.diameter / 2.0;
 
-        match params.scan_direction {
+        // Collect all rows/columns of surface points
+        let rows: Vec<Vec<(f64, f64, f64)>> = match params.scan_direction {
             ScanDirection::X => {
-                // Scan along X for each Y row
                 let y_min = bounds.min.y;
                 let y_max = bounds.max.y;
                 let x_min = bounds.min.x;
                 let x_max = bounds.max.x;
-
+                let mut rows = Vec::new();
                 let mut y = y_min;
                 let mut forward = true;
 
                 while y <= y_max {
-                    let mut row_points: Vec<(f64, f64, f64)> = Vec::new();
-
-                    let x_range: Box<dyn Iterator<Item = f64>> = if forward {
-                        Box::new(float_range(x_min, x_max, step))
+                    let x_range: Vec<f64> = if forward {
+                        float_range(x_min, x_max, step).collect()
                     } else {
-                        Box::new(
-                            float_range(x_min, x_max, step)
-                                .collect::<Vec<_>>()
-                                .into_iter()
-                                .rev(),
-                        )
+                        float_range(x_min, x_max, step).collect::<Vec<_>>().into_iter().rev().collect()
                     };
 
-                    for x in x_range {
-                        if let Some(z) = mesh_height_at(params.mesh, x, y) {
-                            // Apply ball-end compensation if needed
-                            let (tx, ty, tz) = if is_ball_end {
-                                if let Some(normal) = surface_normal_at(params.mesh, x, y) {
-                                    let (dx, dy, dz) = ball_end_offset(normal, tool_radius);
-                                    (x + dx, y + dy, z + dz)
-                                } else {
-                                    (x, y, z)
-                                }
-                            } else {
-                                (x, y, z)
-                            };
-                            row_points.push((tx, ty, tz));
-                        }
+                    let row: Vec<(f64, f64, f64)> = x_range
+                        .into_iter()
+                        .filter_map(|x| Self::sample_point(params.mesh, x, y, is_ball_end, tool_radius))
+                        .collect();
+
+                    if !row.is_empty() {
+                        rows.push(row);
                     }
-
-                    if !row_points.is_empty() {
-                        // Rapid to start of row
-                        let (x0, y0, z0) = row_points[0];
-                        toolpath.rapid(x0, y0, safe_z);
-                        toolpath.cut(x0, y0, z0);
-
-                        // Cut along row
-                        for &(x, y, z) in &row_points[1..] {
-                            toolpath.cut(x, y, z);
-                        }
-
-                        // Retract at end of row
-                        let (xl, yl, _) = row_points[row_points.len() - 1];
-                        toolpath.rapid(xl, yl, safe_z);
-                    }
-
                     forward = !forward;
                     y += step;
                 }
+                rows
             }
             ScanDirection::Y => {
-                // Scan along Y for each X column
                 let x_min = bounds.min.x;
                 let x_max = bounds.max.x;
                 let y_min = bounds.min.y;
                 let y_max = bounds.max.y;
-
+                let mut rows = Vec::new();
                 let mut x = x_min;
                 let mut forward = true;
 
                 while x <= x_max {
-                    let mut col_points: Vec<(f64, f64, f64)> = Vec::new();
-
-                    let y_range: Box<dyn Iterator<Item = f64>> = if forward {
-                        Box::new(float_range(y_min, y_max, step))
+                    let y_range: Vec<f64> = if forward {
+                        float_range(y_min, y_max, step).collect()
                     } else {
-                        Box::new(
-                            float_range(y_min, y_max, step)
-                                .collect::<Vec<_>>()
-                                .into_iter()
-                                .rev(),
-                        )
+                        float_range(y_min, y_max, step).collect::<Vec<_>>().into_iter().rev().collect()
                     };
 
-                    for y in y_range {
-                        if let Some(z) = mesh_height_at(params.mesh, x, y) {
-                            // Apply ball-end compensation if needed
-                            let (tx, ty, tz) = if is_ball_end {
-                                if let Some(normal) = surface_normal_at(params.mesh, x, y) {
-                                    let (dx, dy, dz) = ball_end_offset(normal, tool_radius);
-                                    (x + dx, y + dy, z + dz)
-                                } else {
-                                    (x, y, z)
-                                }
-                            } else {
-                                (x, y, z)
-                            };
-                            col_points.push((tx, ty, tz));
-                        }
+                    let col: Vec<(f64, f64, f64)> = y_range
+                        .into_iter()
+                        .filter_map(|y| Self::sample_point(params.mesh, x, y, is_ball_end, tool_radius))
+                        .collect();
+
+                    if !col.is_empty() {
+                        rows.push(col);
                     }
-
-                    if !col_points.is_empty() {
-                        // Rapid to start of column
-                        let (x0, y0, z0) = col_points[0];
-                        toolpath.rapid(x0, y0, safe_z);
-                        toolpath.cut(x0, y0, z0);
-
-                        // Cut along column
-                        for &(x, y, z) in &col_points[1..] {
-                            toolpath.cut(x, y, z);
-                        }
-
-                        // Retract at end of column
-                        let (xl, yl, _) = col_points[col_points.len() - 1];
-                        toolpath.rapid(xl, yl, safe_z);
-                    }
-
                     forward = !forward;
                     x += step;
                 }
+                rows
             }
+        };
+
+        // Build continuous toolpath: only rapid at the very start and retract
+        // at the very end. Between rows, cut directly along the surface.
+        let mut first_row = true;
+        for row in &rows {
+            if row.is_empty() {
+                continue;
+            }
+
+            let (x0, y0, z0) = row[0];
+
+            if first_row {
+                // Initial approach: rapid to safe Z then plunge
+                toolpath.rapid(x0, y0, safe_z);
+                toolpath.cut(x0, y0, z0);
+                first_row = false;
+            } else {
+                // Stay on surface: cut directly from end of previous row
+                // to the start of this row (one step_over apart)
+                toolpath.cut(x0, y0, z0);
+            }
+
+            // Cut along this row
+            for &(x, y, z) in &row[1..] {
+                toolpath.cut(x, y, z);
+            }
+        }
+
+        // Final retract
+        if !toolpath.moves.is_empty() {
+            let last = toolpath.moves.last().unwrap();
+            toolpath.rapid(last.x, last.y, safe_z);
         }
 
         if toolpath.moves.is_empty() {
