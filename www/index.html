@@ -475,11 +475,20 @@ function drawPreview(paths) {
       if(z<minZ)minZ=z; if(z>maxZ)maxZ=z;
     }
   }
-  const w=maxX-minX||1, h=maxY-minY||1, pad=30;
+  let w=maxX-minX, h=maxY-minY;
+  // Handle degenerate bounds (single point or line): expand the flat
+  // dimension so the plot is centered rather than scaled to 1 model-unit.
+  if (w === 0 && h === 0) { w = 1; h = 1; }
+  else if (w === 0) { w = h; minX -= w/2; maxX += w/2; }
+  else if (h === 0) { h = w; minY -= h/2; maxY += h/2; }
   const zRange = (maxZ - minZ) || 1;
-  const scale = Math.min((rect.width-pad*2)/w, (rect.height-pad*2)/h);
-  const offX = pad+(rect.width-pad*2-w*scale)/2;
-  const offY = pad+(rect.height-pad*2-h*scale)/2;
+  // Use percentage-based padding that won't overwhelm small canvases
+  const pad = Math.max(8, Math.min(30, Math.min(rect.width, rect.height) * 0.08));
+  const availW = Math.max(rect.width - pad*2, 1);
+  const availH = Math.max(rect.height - pad*2, 1);
+  const scale = Math.min(availW/w, availH/h);
+  const offX = pad+(availW-w*scale)/2;
+  const offY = pad+(availH-h*scale)/2;
   const tx = x => offX+(x-minX)*scale;
   const ty = y => offY+(maxY-y)*scale;
 
@@ -608,7 +617,10 @@ function computeSimBounds() {
     if(m.x>maxX)maxX=m.x; if(m.y>maxY)maxY=m.y;
   }
   if (!simMoves.length) { minX=0;minY=0;maxX=10;maxY=10; }
-  const w=maxX-minX||1, h=maxY-minY||1;
+  let w=maxX-minX, h=maxY-minY;
+  if (w === 0 && h === 0) { w = 1; h = 1; }
+  else if (w === 0) { w = h; minX -= w/2; maxX += w/2; }
+  else if (h === 0) { h = w; minY -= h/2; maxY += h/2; }
   simBounds = {minX,minY,maxX,maxY,w,h};
 }
 
@@ -619,10 +631,12 @@ function resizeSim() {
   const dpr = window.devicePixelRatio || 1;
   simCanvas.width  = rect.width  * dpr;
   simCanvas.height = rect.height * dpr;
-  const pad = 40;
-  simScale = Math.min((rect.width-pad*2)/simBounds.w, (rect.height-pad*2)/simBounds.h);
-  simOffX = pad + (rect.width-pad*2-simBounds.w*simScale)/2;
-  simOffY = pad + (rect.height-pad*2-simBounds.h*simScale)/2;
+  const pad = Math.max(8, Math.min(40, Math.min(rect.width, rect.height) * 0.08));
+  const availW = Math.max(rect.width - pad*2, 1);
+  const availH = Math.max(rect.height - pad*2, 1);
+  simScale = Math.min(availW/simBounds.w, availH/simBounds.h);
+  simOffX = pad + (availW-simBounds.w*simScale)/2;
+  simOffY = pad + (availH-simBounds.h*simScale)/2;
   // Rebuild material canvas at new size
   initMatCanvas();
   replayMat(simIdx);
