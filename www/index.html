@@ -532,24 +532,79 @@ function drawPreview(paths) {
 
 window.addEventListener('resize', () => { tryPreview(); resizeSim(); });
 
-// ── Generate ─────────────────────────────────────────────────────────
+// ── Generate (via Web Worker for progress reporting) ─────────────────
+let genWorker = null;
+let genStartTime = 0;
+
+function initWorker() {
+  genWorker = new Worker('./generate-worker.js', { type: 'module' });
+  genWorker.onmessage = (evt) => {
+    const msg = evt.data;
+    if (msg.type === 'ready') {
+      // Worker WASM loaded — nothing to do, main WASM already controls the button
+    } else if (msg.type === 'progress') {
+      const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
+      statusEl.textContent = `Generating... layer ${msg.completed} / ${msg.total}  (${elapsed}s)`;
+      statusEl.className = 'status';
+    } else if (msg.type === 'done') {
+      gcodeOut.value = msg.gcode;
+      const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
+      statusEl.textContent = `Done — ${msg.gcode.split('\n').length} lines of G-code in ${elapsed}s.`;
+      statusEl.className = 'status ok';
+      generateBtn.disabled = false;
+      tryPreview();
+      loadSim();
+    } else if (msg.type === 'error') {
+      statusEl.textContent = 'Error: ' + msg.error;
+      statusEl.className = 'status error';
+      generateBtn.disabled = false;
+    }
+  };
+  genWorker.onerror = (e) => {
+    statusEl.textContent = 'Worker error: ' + e.message;
+    statusEl.className = 'status error';
+    generateBtn.disabled = false;
+  };
+}
+
+// Try to start the worker; if module workers aren't supported, fall back
+// to running generation on the main thread (old behaviour).
+let workerSupported = true;
+try {
+  initWorker();
+} catch(e) {
+  workerSupported = false;
+  console.warn('Module workers not supported, using main-thread generation:', e);
+}
+
 generateBtn.addEventListener('click', () => {
   if (!wasmReady || !fileData) return;
-  statusEl.textContent = 'Generating...';
+  generateBtn.disabled = true;
+  statusEl.textContent = 'Generating... layer 0 / ?';
   statusEl.className = 'status';
-  try {
-    const cfg = getConfig();
-    let gcode;
-    if (fileType === 'stl') gcode = process_stl(fileData, cfg);
-    else gcode = process_svg(fileData, cfg);
-    gcodeOut.value = gcode;
-    statusEl.textContent = `Done — ${gcode.split('\n').length} lines of G-code.`;
-    statusEl.className = 'status ok';
-    tryPreview();
-    loadSim();
-  } catch(e) {
-    statusEl.textContent = 'Error: ' + e;
-    statusEl.className = 'status error';
+  genStartTime = performance.now();
+
+  const cfg = getConfig();
+
+  if (workerSupported && genWorker) {
+    genWorker.postMessage({ fileData, fileType, configJson: cfg });
+  } else {
+    // Fallback: run synchronously on main thread
+    try {
+      let gcode;
+      if (fileType === 'stl') gcode = process_stl(fileData, cfg);
+      else gcode = process_svg(fileData, cfg);
+      gcodeOut.value = gcode;
+      const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
+      statusEl.textContent = `Done — ${gcode.split('\n').length} lines of G-code in ${elapsed}s.`;
+      statusEl.className = 'status ok';
+      tryPreview();
+      loadSim();
+    } catch(e) {
+      statusEl.textContent = 'Error: ' + e;
+      statusEl.className = 'status error';
+    }
+    generateBtn.disabled = false;
   }
 });
 
