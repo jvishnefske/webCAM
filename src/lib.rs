@@ -21,6 +21,7 @@
 
 pub mod gcode;
 pub mod geometry;
+pub mod linuxcnc;
 pub mod slicer;
 pub mod stl;
 pub mod svg;
@@ -610,6 +611,55 @@ fn flatten_moves(toolpaths: &[Toolpath]) -> Result<String, JsValue> {
     let moves: Vec<&geometry::ToolpathMove> =
         toolpaths.iter().flat_map(|tp| tp.moves.iter()).collect();
     serde_json::to_string(&moves).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+// ── LinuxCNC interpreter WASM entry points ───────────────────────────
+
+/// Parse and interpret a G-code program, returning planned motion segments as JSON.
+///
+/// Returns JSON: `{ "segments": [...], "state": {...}, "diagnostics": [...],
+///                  "total_time": <seconds> }`
+#[wasm_bindgen]
+pub fn linuxcnc_interpret(gcode_text: &str, planner_json: &str) -> Result<String, JsValue> {
+    let planner_config: linuxcnc::PlannerConfig = if planner_json.is_empty() {
+        linuxcnc::PlannerConfig::default()
+    } else {
+        serde_json::from_str(planner_json).map_err(|e| JsValue::from_str(&e.to_string()))?
+    };
+
+    let blocks = linuxcnc::parse_program(gcode_text)
+        .map_err(|(line, e)| JsValue::from_str(&format!("line {line}: {e}")))?;
+
+    let diagnostics = linuxcnc::validate(&blocks);
+
+    let (segments, state) = linuxcnc::interpret(&blocks)
+        .map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    let planned = linuxcnc::plan_trajectory(&segments, &planner_config);
+    let total_time = linuxcnc::total_time(&planned);
+
+    #[derive(Serialize)]
+    struct InterpResult {
+        segments: Vec<linuxcnc::PlannedSegment>,
+        state: linuxcnc::MachineState,
+        diagnostics: Vec<linuxcnc::Diagnostic>,
+        total_time: f64,
+    }
+
+    let result = InterpResult { segments: planned, state, diagnostics, total_time };
+    serde_json::to_string(&result).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Validate a G-code program and return diagnostics as JSON.
+///
+/// Returns JSON array of `{ "line": <n>, "severity": "...", "message": "..." }`.
+#[wasm_bindgen]
+pub fn linuxcnc_validate(gcode_text: &str) -> Result<String, JsValue> {
+    let blocks = linuxcnc::parse_program(gcode_text)
+        .map_err(|(line, e)| JsValue::from_str(&format!("line {line}: {e}")))?;
+
+    let diagnostics = linuxcnc::validate(&blocks);
+    serde_json::to_string(&diagnostics).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[cfg(test)]
