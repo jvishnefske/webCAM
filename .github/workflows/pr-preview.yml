@@ -1,0 +1,47 @@
+name: PR Preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: jetli/wasm-pack-action@v0.4.0
+
+      - run: cargo test --all
+
+      - run: wasm-pack build --target web --out-dir www/pkg --release
+
+      # Deploy into a pr/<number>/ subfolder on gh-pages so the
+      # production root is never touched by PR builds.
+      - name: Deploy preview to gh-pages/pr/${{ github.event.pull_request.number }}
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./www
+          destination_dir: pr/${{ github.event.pull_request.number }}
+          # Keep the rest of gh-pages intact (other PR previews + production root)
+          keep_files: true
+
+      - name: Post preview link on PR
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pr-preview
+          message: |
+            ### Preview deploy ready
+
+            **[Open preview](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/pr/${{ github.event.pull_request.number }}/)**
+
+            Built from ${{ github.sha }} — push again to update.
