@@ -20,23 +20,27 @@
 //! without touching existing code.
 
 pub mod gcode;
+pub mod gcode_parser;
 pub mod geometry;
+pub mod machine;
 pub mod slicer;
 pub mod stl;
 pub mod svg;
 pub mod tool;
 pub mod toolpath;
+pub mod units;
 
-use gcode::{emit_gcode, GcodeParams};
+use gcode::{emit_gcode, emit_gcode_with_profile, GcodeParams, LaserParams};
 use geometry::Toolpath;
+use js_sys::Function;
+use machine::{MachineProfile, MachineType};
 use serde::{Deserialize, Serialize};
 use tool::Tool;
 use toolpath::{
-    ContourStrategy, CutParams, PerimeterStrategy, PocketStrategy, ScanDirection, SurfaceParams,
-    ToolpathStrategy, ZigzagSurfaceStrategy,
+    ContourStrategy, CutParams, LaserCutStrategy, LaserEngraveStrategy, PerimeterStrategy,
+    PocketStrategy, ScanDirection, SurfaceParams, ToolpathStrategy, ZigzagSurfaceStrategy,
 };
 use wasm_bindgen::prelude::*;
-use js_sys::Function;
 
 // ── Public parameter struct (JSON from JS) ───────────────────────────
 
@@ -72,6 +76,14 @@ pub struct CamConfig {
     pub perimeter_passes: u32,
     #[serde(default = "default_scan_direction")]
     pub scan_direction: String,
+    #[serde(default = "default_machine_type")]
+    pub machine_type: String,
+    #[serde(default)]
+    pub laser_power: Option<f64>,
+    #[serde(default)]
+    pub passes: Option<u32>,
+    #[serde(default)]
+    pub air_assist: Option<bool>,
 }
 
 fn default_tool_diameter() -> f64 {
@@ -110,6 +122,9 @@ fn default_scan_direction() -> String {
 fn default_strategy() -> String {
     "contour".into()
 }
+fn default_machine_type() -> String {
+    "cnc_mill".into()
+}
 
 impl Default for CamConfig {
     fn default() -> Self {
@@ -129,6 +144,10 @@ impl Default for CamConfig {
             climb_cut: false,
             perimeter_passes: default_perimeter_passes(),
             scan_direction: default_scan_direction(),
+            machine_type: default_machine_type(),
+            laser_power: None,
+            passes: None,
+            air_assist: None,
         }
     }
 }
@@ -159,6 +178,69 @@ fn tool_from_config(config: &CamConfig) -> Tool {
     }
 }
 
+/// Resolve a MachineProfile from the config's machine_type field.
+fn profile_from_config(config: &CamConfig) -> MachineProfile {
+    match config.machine_type.as_str() {
+        "laser_cutter" => MachineProfile::laser_cutter(),
+        _ => MachineProfile::cnc_mill(),
+    }
+}
+
+/// Build LaserParams from config, if applicable.
+fn laser_params_from_config(config: &CamConfig) -> Option<LaserParams> {
+    if config.machine_type == "laser_cutter" {
+        Some(LaserParams {
+            power: config.laser_power.unwrap_or(100.0),
+            passes: config.passes.unwrap_or(1),
+        })
+    } else {
+        None
+    }
+}
+
+/// Select the right strategy based on config and profile.
+fn strategy_from_config(config: &CamConfig) -> Box<dyn ToolpathStrategy> {
+    match config.strategy.as_str() {
+        "pocket" => Box::new(PocketStrategy),
+        "perimeter" => Box::new(PerimeterStrategy),
+        "laser_cut" => Box::new(LaserCutStrategy::new(config.laser_power.unwrap_or(100.0))),
+        "laser_engrave" => Box::new(LaserEngraveStrategy::new(
+            config.laser_power.unwrap_or(100.0),
+            config.step_over,
+        )),
+        _ => Box::new(ContourStrategy),
+    }
+}
+
+// ── New WASM API ─────────────────────────────────────────────────────
+
+/// Return JSON list of available machine profiles.
+#[wasm_bindgen]
+pub fn available_profiles() -> String {
+    let profiles = vec![MachineProfile::cnc_mill(), MachineProfile::laser_cutter()];
+    serde_json::to_string(&profiles).unwrap_or_else(|_| "[]".into())
+}
+
+/// Return a default config JSON for the given machine type.
+#[wasm_bindgen]
+pub fn default_config(machine_type: &str) -> String {
+    let config = if machine_type == "laser_cutter" {
+        CamConfig {
+            machine_type: machine_type.into(),
+            strategy: "laser_cut".into(),
+            laser_power: Some(100.0),
+            passes: Some(1),
+            ..CamConfig::default()
+        }
+    } else {
+        CamConfig {
+            machine_type: machine_type.into(),
+            ..CamConfig::default()
+        }
+    };
+    serde_json::to_string(&config).unwrap_or_else(|_| "{}".into())
+}
+
 // ── WASM entry points ────────────────────────────────────────────────
 
 /// Process an STL file (binary bytes) and return G-code.
@@ -166,6 +248,11 @@ fn tool_from_config(config: &CamConfig) -> Tool {
 pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
     let config: CamConfig =
         serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    let profile = profile_from_config(&config);
+    profile
+        .validate_strategy(&config.strategy)
+        .map_err(|e| JsValue::from_str(&e))?;
 
     let mesh = stl::parse_stl(data).map_err(|e| JsValue::from_str(&e))?;
 
@@ -218,7 +305,8 @@ pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
         "zigzag" => {
             // 3D surface zigzag raster
             let strategy = ZigzagSurfaceStrategy;
-            let surface_params = SurfaceParams::new(&mesh, cut_params, scan_direction_from_config(&config));
+            let surface_params =
+                SurfaceParams::new(&mesh, cut_params, scan_direction_from_config(&config));
             strategy.generate_surface(&surface_params)
         }
         "perimeter" => {
@@ -253,7 +341,13 @@ pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
         }
     };
 
-    Ok(emit_gcode(&toolpaths, &gcode_params))
+    let laser = laser_params_from_config(&config);
+    Ok(emit_gcode_with_profile(
+        &toolpaths,
+        &gcode_params,
+        &profile,
+        laser.as_ref(),
+    ))
 }
 
 /// Process an SVG string and return G-code.
@@ -261,6 +355,11 @@ pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
 pub fn process_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue> {
     let config: CamConfig =
         serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    let profile = profile_from_config(&config);
+    profile
+        .validate_strategy(&config.strategy)
+        .map_err(|e| JsValue::from_str(&e))?;
 
     let polylines = svg::parse_svg(svg_text).map_err(|e| JsValue::from_str(&e))?;
 
@@ -285,29 +384,38 @@ pub fn process_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue>
         unit_mm: true,
     };
 
-    let strategy: Box<dyn ToolpathStrategy> = match config.strategy.as_str() {
-        "pocket" => Box::new(PocketStrategy),
-        "perimeter" => Box::new(PerimeterStrategy),
-        _ => Box::new(ContourStrategy),
-    };
+    let strategy = strategy_from_config(&config);
 
-    // For 2-D SVG, step down from 0 to cut_depth
+    // Laser strategies run single pass at Z=0
+    let is_laser = profile.machine_type == MachineType::LaserCutter;
     let mut all_toolpaths = Vec::new();
-    let mut z = 0.0;
-    while z > config.cut_depth - 0.001 {
-        z -= config.step_down;
-        if z < config.cut_depth {
-            z = config.cut_depth;
-        }
-        let mut p = cut_params.clone();
-        p.cut_z = z;
-        all_toolpaths.extend(strategy.generate(&polylines, &p));
-        if (z - config.cut_depth).abs() < 0.001 {
-            break;
+
+    if is_laser {
+        all_toolpaths.extend(strategy.generate(&polylines, &cut_params));
+    } else {
+        // For 2-D SVG, step down from 0 to cut_depth
+        let mut z = 0.0;
+        while z > config.cut_depth - 0.001 {
+            z -= config.step_down;
+            if z < config.cut_depth {
+                z = config.cut_depth;
+            }
+            let mut p = cut_params.clone();
+            p.cut_z = z;
+            all_toolpaths.extend(strategy.generate(&polylines, &p));
+            if (z - config.cut_depth).abs() < 0.001 {
+                break;
+            }
         }
     }
 
-    Ok(emit_gcode(&all_toolpaths, &gcode_params))
+    let laser = laser_params_from_config(&config);
+    Ok(emit_gcode_with_profile(
+        &all_toolpaths,
+        &gcode_params,
+        &profile,
+        laser.as_ref(),
+    ))
 }
 
 /// Helper: call a JS progress callback with (completed, total).
@@ -381,10 +489,8 @@ pub fn process_stl_progress(
                 report_progress(on_progress, (i + 1) as u32, total);
             }
             if all.is_empty() && other != "pocket" && other != "perimeter" {
-                let contours = slicer::slice_at_z(
-                    &mesh,
-                    mesh.bounds.as_ref().map_or(0.0, |b| b.min.z + 0.01),
-                );
+                let contours =
+                    slicer::slice_at_z(&mesh, mesh.bounds.as_ref().map_or(0.0, |b| b.min.z + 0.01));
                 all.extend(strategy.generate(&contours, &cut_params));
             }
             all
@@ -547,7 +653,8 @@ fn build_toolpaths_stl(mesh: &geometry::Mesh, config: &CamConfig) -> Vec<Toolpat
     // Handle zigzag separately (3D surface strategy)
     if config.strategy == "zigzag" {
         let strategy = ZigzagSurfaceStrategy;
-        let surface_params = SurfaceParams::new(mesh, cut_params, scan_direction_from_config(config));
+        let surface_params =
+            SurfaceParams::new(mesh, cut_params, scan_direction_from_config(config));
         return strategy.generate_surface(&surface_params);
     }
 
@@ -584,23 +691,25 @@ fn build_toolpaths_svg(polylines: &[geometry::Polyline], config: &CamConfig) -> 
         climb_cut: config.climb_cut,
         perimeter_passes: config.perimeter_passes,
     };
-    let strategy: Box<dyn ToolpathStrategy> = match config.strategy.as_str() {
-        "pocket" => Box::new(PocketStrategy),
-        "perimeter" => Box::new(PerimeterStrategy),
-        _ => Box::new(ContourStrategy),
-    };
+    let strategy = strategy_from_config(config);
+    let is_laser = config.machine_type == "laser_cutter";
+
     let mut all = Vec::new();
-    let mut z = 0.0;
-    while z > config.cut_depth - 0.001 {
-        z -= config.step_down;
-        if z < config.cut_depth {
-            z = config.cut_depth;
-        }
-        let mut p = cut_params.clone();
-        p.cut_z = z;
-        all.extend(strategy.generate(polylines, &p));
-        if (z - config.cut_depth).abs() < 0.001 {
-            break;
+    if is_laser {
+        all.extend(strategy.generate(polylines, &cut_params));
+    } else {
+        let mut z = 0.0;
+        while z > config.cut_depth - 0.001 {
+            z -= config.step_down;
+            if z < config.cut_depth {
+                z = config.cut_depth;
+            }
+            let mut p = cut_params.clone();
+            p.cut_z = z;
+            all.extend(strategy.generate(polylines, &p));
+            if (z - config.cut_depth).abs() < 0.001 {
+                break;
+            }
         }
     }
     all
@@ -682,5 +791,127 @@ mod tests {
         };
         let tool = tool_from_config(&config);
         assert!((tool.effective_diameter() - 40.0).abs() < 0.001);
+    }
+
+    // ── Machine profile integration tests ─────────────────────────────
+
+    #[test]
+    fn test_config_machine_type_default() {
+        let config = CamConfig::default();
+        assert_eq!(config.machine_type, "cnc_mill");
+    }
+
+    #[test]
+    fn test_config_parses_laser() {
+        let json = r#"{"machine_type": "laser_cutter", "laser_power": 80, "passes": 3}"#;
+        let config: CamConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.machine_type, "laser_cutter");
+        assert_eq!(config.laser_power, Some(80.0));
+        assert_eq!(config.passes, Some(3));
+    }
+
+    #[test]
+    fn test_profile_from_config_cnc() {
+        let config = CamConfig::default();
+        let profile = profile_from_config(&config);
+        assert_eq!(profile.machine_type, MachineType::CncMill);
+    }
+
+    #[test]
+    fn test_profile_from_config_laser() {
+        let config = CamConfig {
+            machine_type: "laser_cutter".into(),
+            ..CamConfig::default()
+        };
+        let profile = profile_from_config(&config);
+        assert_eq!(profile.machine_type, MachineType::LaserCutter);
+    }
+
+    #[test]
+    fn test_laser_rejects_stl_3d_strategy() {
+        let config = CamConfig {
+            machine_type: "laser_cutter".into(),
+            strategy: "zigzag".into(),
+            ..CamConfig::default()
+        };
+        let profile = profile_from_config(&config);
+        assert!(profile.validate_strategy(&config.strategy).is_err());
+    }
+
+    #[test]
+    fn test_laser_rejects_slice_strategy() {
+        let config = CamConfig {
+            machine_type: "laser_cutter".into(),
+            strategy: "slice".into(),
+            ..CamConfig::default()
+        };
+        let profile = profile_from_config(&config);
+        assert!(profile.validate_strategy(&config.strategy).is_err());
+    }
+
+    #[test]
+    fn test_svg_laser_cut_produces_gcode() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+            <rect x="10" y="10" width="80" height="80"/>
+        </svg>"#;
+        let config_json =
+            r#"{"machine_type": "laser_cutter", "strategy": "laser_cut", "laser_power": 80}"#;
+        let result = process_svg(svg, config_json);
+        assert!(result.is_ok());
+        let gcode = result.unwrap();
+        assert!(gcode.contains("M4 S0"), "Should have laser dynamic mode");
+        assert!(gcode.contains("S80"), "Should have power commands");
+        assert!(gcode.contains("M5"), "Should turn off laser at end");
+    }
+
+    #[test]
+    fn test_svg_laser_engrave_produces_scanlines() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+            <rect x="10" y="10" width="80" height="80"/>
+        </svg>"#;
+        let config_json = r#"{"machine_type": "laser_cutter", "strategy": "laser_engrave", "laser_power": 60, "step_over": 2.0}"#;
+        let result = process_svg(svg, config_json);
+        assert!(result.is_ok());
+        let gcode = result.unwrap();
+        assert!(gcode.contains("S60"), "Should have engrave power");
+    }
+
+    #[test]
+    fn test_svg_cnc_mill_still_works() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+            <rect x="10" y="10" width="80" height="80"/>
+        </svg>"#;
+        let config_json = r#"{"strategy": "contour"}"#;
+        let result = process_svg(svg, config_json);
+        assert!(result.is_ok());
+        let gcode = result.unwrap();
+        assert!(gcode.contains("M3 S12000"), "Should have spindle on");
+    }
+
+    #[test]
+    fn test_available_profiles() {
+        let json = available_profiles();
+        let profiles: Vec<MachineProfile> = serde_json::from_str(&json).unwrap();
+        assert_eq!(profiles.len(), 2);
+        assert_eq!(profiles[0].machine_type, MachineType::CncMill);
+        assert_eq!(profiles[1].machine_type, MachineType::LaserCutter);
+    }
+
+    #[test]
+    fn test_default_config_cnc() {
+        let json = default_config("cnc_mill");
+        let config: CamConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(config.machine_type, "cnc_mill");
+        assert_eq!(config.strategy, "contour");
+    }
+
+    #[test]
+    fn test_default_config_laser() {
+        let json = default_config("laser_cutter");
+        let config: CamConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(config.machine_type, "laser_cutter");
+        assert_eq!(config.strategy, "laser_cut");
+        assert_eq!(config.laser_power, Some(100.0));
+        assert_eq!(config.passes, Some(1));
     }
 }

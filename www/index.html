@@ -186,6 +186,13 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
       <input type="file" id="file-input" accept=".stl,.svg" hidden/>
     </section>
     <section>
+      <h2>Machine</h2>
+      <select id="machine-type">
+        <option value="cnc_mill">CNC Mill</option>
+        <option value="laser_cutter">Laser Cutter</option>
+      </select>
+    </section>
+    <section>
       <h2>Strategy</h2>
       <select id="strategy">
         <option value="contour">Contour (profile cut)</option>
@@ -193,6 +200,8 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
         <option value="slice">Slice (layer contour)</option>
         <option value="zigzag">Zigzag Surface</option>
         <option value="perimeter">Perimeter</option>
+        <option value="laser_cut">Laser Cut</option>
+        <option value="laser_engrave">Laser Engrave</option>
       </select>
     </section>
     <section>
@@ -233,7 +242,7 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
       <label>Number of passes</label>
       <input type="number" id="perimeter-passes" value="1" step="1" min="1"/>
     </section>
-    <section>
+    <section id="cnc-params">
       <h2>Cutting</h2>
       <label>Cut depth (mm, negative)</label>
       <input type="number" id="cut-depth" value="-1" step="0.5"/>
@@ -247,6 +256,19 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
       <input type="number" id="spindle-speed" value="12000" step="500" min="0"/>
       <label>Safe Z (mm)</label>
       <input type="number" id="safe-z" value="5" step="1" min="0.5"/>
+    </section>
+    <section id="laser-params" style="display:none;">
+      <h2>Laser</h2>
+      <label>Laser power (%)</label>
+      <input type="number" id="laser-power" value="100" step="5" min="0" max="100"/>
+      <label>Feed rate (mm/min)</label>
+      <input type="number" id="laser-feed-rate" value="1000" step="50" min="1"/>
+      <label>Number of passes</label>
+      <input type="number" id="laser-passes" value="1" step="1" min="1"/>
+      <label>
+        <input type="checkbox" id="air-assist"/>
+        Air assist
+      </label>
     </section>
     <section>
       <button class="btn btn-primary" id="generate-btn" disabled>Generate G-code</button>
@@ -299,6 +321,7 @@ import init, {
   process_stl, process_svg,
   preview_stl, preview_svg,
   sim_moves_stl, sim_moves_svg,
+  available_profiles, default_config,
 } from './pkg/rustcam.js';
 
 let wasmReady = false;
@@ -334,6 +357,35 @@ function updateToolTypeUI() {
 toolTypeSelect.addEventListener('change', updateToolTypeUI);
 document.getElementById('tool-diameter').addEventListener('change', updateToolTypeUI);
 
+// ── Machine type UI ───────────────────────────────────────────────────
+const machineTypeSelect = document.getElementById('machine-type');
+const cncParamsSection = document.getElementById('cnc-params');
+const laserParamsSection = document.getElementById('laser-params');
+
+const cncStrategies = ['contour', 'pocket', 'slice', 'zigzag', 'perimeter'];
+const laserStrategies = ['contour', 'pocket', 'perimeter', 'laser_cut', 'laser_engrave'];
+
+function updateMachineTypeUI() {
+  const isLaser = machineTypeSelect.value === 'laser_cutter';
+  cncParamsSection.style.display = isLaser ? 'none' : 'block';
+  laserParamsSection.style.display = isLaser ? 'block' : 'none';
+
+  // Update available strategies
+  const strategySelect = document.getElementById('strategy');
+  const current = strategySelect.value;
+  const allowed = isLaser ? laserStrategies : cncStrategies;
+  for (const opt of strategySelect.options) {
+    opt.hidden = !allowed.includes(opt.value);
+  }
+  // If current strategy is not available, switch to first available
+  if (!allowed.includes(current)) {
+    strategySelect.value = isLaser ? 'laser_cut' : 'contour';
+  }
+  updateStrategyUI();
+}
+
+machineTypeSelect.addEventListener('change', () => { updateMachineTypeUI(); tryPreview(); });
+
 // ── Strategy UI ───────────────────────────────────────────────────────
 const strategySelect = document.getElementById('strategy');
 const perimeterOptions = document.getElementById('perimeter-options');
@@ -347,7 +399,7 @@ function updateStrategyUI() {
 
 strategySelect.addEventListener('change', () => { updateStrategyUI(); tryPreview(); });
 document.getElementById('scan-direction').addEventListener('change', tryPreview);
-updateStrategyUI();
+updateMachineTypeUI();
 
 // ── Tabs ─────────────────────────────────────────────────────────────
 document.querySelectorAll('.tab-bar button').forEach(btn => {
@@ -412,18 +464,33 @@ function handleFile(file) {
 // ── Config ───────────────────────────────────────────────────────────
 function getConfig() {
   const toolType = document.getElementById('tool-type').value;
+  const isLaser = machineTypeSelect.value === 'laser_cutter';
   const config = {
     tool_diameter:  parseFloat(document.getElementById('tool-diameter').value),
     step_over:      parseFloat(document.getElementById('step-over').value),
-    step_down:      parseFloat(document.getElementById('step-down').value),
-    feed_rate:      parseFloat(document.getElementById('feed-rate').value),
-    plunge_rate:    parseFloat(document.getElementById('plunge-rate').value),
-    spindle_speed:  parseFloat(document.getElementById('spindle-speed').value),
-    safe_z:         parseFloat(document.getElementById('safe-z').value),
-    cut_depth:      parseFloat(document.getElementById('cut-depth').value),
     strategy:       document.getElementById('strategy').value,
     tool_type:      toolType,
+    machine_type:   machineTypeSelect.value,
   };
+
+  if (isLaser) {
+    config.feed_rate = parseFloat(document.getElementById('laser-feed-rate').value);
+    config.plunge_rate = config.feed_rate;
+    config.spindle_speed = 0;
+    config.safe_z = 0;
+    config.cut_depth = 0;
+    config.step_down = 1;
+    config.laser_power = parseFloat(document.getElementById('laser-power').value);
+    config.passes = parseInt(document.getElementById('laser-passes').value) || 1;
+    config.air_assist = document.getElementById('air-assist').checked;
+  } else {
+    config.step_down = parseFloat(document.getElementById('step-down').value);
+    config.feed_rate = parseFloat(document.getElementById('feed-rate').value);
+    config.plunge_rate = parseFloat(document.getElementById('plunge-rate').value);
+    config.spindle_speed = parseFloat(document.getElementById('spindle-speed').value);
+    config.safe_z = parseFloat(document.getElementById('safe-z').value);
+    config.cut_depth = parseFloat(document.getElementById('cut-depth').value);
+  }
   // Add tool-type-specific parameters
   if (toolType === 'ball_end') {
     config.corner_radius = parseFloat(document.getElementById('corner-radius').value) || 0;
@@ -492,8 +559,16 @@ function drawPreview(paths) {
   const tx = x => offX+(x-minX)*scale;
   const ty = y => offY+(maxY-y)*scale;
 
+  // Color scheme depends on machine type
+  const isLaserPreview = machineTypeSelect.value === 'laser_cutter';
+
   // Color gradient by Z height (blue=low, green=mid, yellow=high)
+  // or red opacity for laser power
   const zColor = (z) => {
+    if (isLaserPreview) {
+      // For laser: red with varying opacity
+      return 'rgba(255, 60, 40, 0.85)';
+    }
     if (!has3D || z === undefined) return '#4f8cff';
     const t = (z - minZ) / zRange; // 0 to 1
     // HSL: 240 (blue) -> 120 (green) -> 60 (yellow)
@@ -520,8 +595,8 @@ function drawPreview(paths) {
         ctx.stroke();
       }
     } else {
-      // 2D paths: single color
-      ctx.strokeStyle='#4f8cff';
+      // 2D paths: blue for CNC, red for laser
+      ctx.strokeStyle = isLaserPreview ? 'rgba(255, 60, 40, 0.85)' : '#4f8cff';
       ctx.beginPath();
       ctx.moveTo(tx(p[0][0]),ty(p[0][1]));
       for(let i=1;i<p.length;i++)ctx.lineTo(tx(p[i][0]),ty(p[i][1]));
