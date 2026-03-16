@@ -5,18 +5,17 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+    types: [opened, reopened, synchronize, closed]
 
 permissions:
   contents: write
   pages: write
   id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
+  pull-requests: write
 
 jobs:
   build:
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +43,9 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-pages
+      cancel-in-progress: true
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -55,6 +57,8 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-external
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -68,3 +72,33 @@ jobs:
           external_repository: jvishnefske/cam
           publish_dir: ./www
           publish_branch: gh-pages
+          keep_files: true
+
+  deploy-preview:
+    needs: build
+    if: >-
+      always() &&
+      github.event_name == 'pull_request' &&
+      (needs.build.result == 'success' || github.event.action == 'closed')
+    runs-on: ubuntu-latest
+    concurrency:
+      group: pr-preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        if: github.event.action != 'closed'
+        with:
+          name: rustcam
+      - run: mkdir -p www && cd www && unzip -o ../rustcam.zip
+        if: github.event.action != 'closed'
+
+      - uses: rossjrw/pr-preview-action@v1
+        with:
+          source-dir: www
+          deploy-repository: jvishnefske/cam
+          deploy-key: ${{ secrets.CAM_DEPLOY_KEY }}
+          preview-branch: gh-pages
+          umbrella-dir: pr-preview
+          action: auto
