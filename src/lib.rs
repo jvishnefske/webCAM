@@ -23,6 +23,7 @@ pub mod gcode;
 pub mod gcode_parser;
 pub mod geometry;
 pub mod machine;
+pub mod sketch_actor;
 pub mod slicer;
 pub mod stl;
 pub mod svg;
@@ -720,6 +721,156 @@ fn flatten_moves(toolpaths: &[Toolpath]) -> Result<String, JsValue> {
     let moves: Vec<&geometry::ToolpathMove> =
         toolpaths.iter().flat_map(|tp| tp.moves.iter()).collect();
     serde_json::to_string(&moves).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+// ── Sketch Actor WASM API ────────────────────────────────────────────
+
+use std::cell::RefCell;
+thread_local! {
+    static SKETCH: RefCell<sketch_actor::SketchActor> = RefCell::new(sketch_actor::SketchActor::new());
+}
+
+/// Reset the sketch actor to a blank state.
+#[wasm_bindgen]
+pub fn sketch_reset() {
+    SKETCH.with(|s| *s.borrow_mut() = sketch_actor::SketchActor::new());
+}
+
+/// Add a free point. Returns JSON `{"id": <u32>}`.
+#[wasm_bindgen]
+pub fn sketch_add_point(x: f64, y: f64) -> String {
+    SKETCH.with(|s| {
+        let id = s.borrow_mut().add_point(x, y);
+        format!(r#"{{"id":{id}}}"#)
+    })
+}
+
+/// Add a fixed point. Returns JSON `{"id": <u32>}`.
+#[wasm_bindgen]
+pub fn sketch_add_fixed_point(x: f64, y: f64) -> String {
+    SKETCH.with(|s| {
+        let id = s.borrow_mut().add_point_fixed(x, y);
+        format!(r#"{{"id":{id}}}"#)
+    })
+}
+
+/// Move a point to new coordinates.
+#[wasm_bindgen]
+pub fn sketch_move_point(id: u32, x: f64, y: f64) {
+    SKETCH.with(|s| s.borrow_mut().move_point(id, x, y));
+}
+
+/// Remove a point and all its constraints.
+#[wasm_bindgen]
+pub fn sketch_remove_point(id: u32) {
+    SKETCH.with(|s| s.borrow_mut().remove_point(id));
+}
+
+/// Set a point's fixed flag.
+#[wasm_bindgen]
+pub fn sketch_set_fixed(id: u32, fixed: bool) {
+    SKETCH.with(|s| {
+        if let Some(p) = s.borrow_mut().points.get_mut(&id) {
+            p.fixed = fixed;
+        }
+    });
+}
+
+/// Add a constraint. `kind` is one of: "coincident", "distance",
+/// "horizontal", "vertical", "fixed", "angle", "radius",
+/// "perpendicular", "parallel", "midpoint", "equal_length", "symmetric".
+///
+/// `ids` is a JSON array of point ids, `value` is the numeric parameter
+/// (distance, angle, radius, x, y — depends on constraint type).
+/// For "fixed", pass `value` as x and `value2` as y.
+///
+/// Returns JSON `{"id": <u32>}`.
+#[wasm_bindgen]
+pub fn sketch_add_constraint(
+    kind: &str,
+    ids_json: &str,
+    value: f64,
+    value2: f64,
+) -> Result<String, JsValue> {
+    let ids: Vec<u32> =
+        serde_json::from_str(ids_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    let constraint = match kind {
+        "coincident" if ids.len() >= 2 => sketch_actor::Constraint::Coincident(ids[0], ids[1]),
+        "distance" if ids.len() >= 2 => sketch_actor::Constraint::Distance(ids[0], ids[1], value),
+        "horizontal" if ids.len() >= 2 => sketch_actor::Constraint::Horizontal(ids[0], ids[1]),
+        "vertical" if ids.len() >= 2 => sketch_actor::Constraint::Vertical(ids[0], ids[1]),
+        "fixed" if !ids.is_empty() => {
+            sketch_actor::Constraint::FixedPosition(ids[0], value, value2)
+        }
+        "angle" if ids.len() >= 2 => sketch_actor::Constraint::Angle(ids[0], ids[1], value),
+        "radius" if ids.len() >= 2 => sketch_actor::Constraint::Radius(ids[0], ids[1], value),
+        "perpendicular" if ids.len() >= 4 => {
+            sketch_actor::Constraint::Perpendicular(ids[0], ids[1], ids[2], ids[3])
+        }
+        "parallel" if ids.len() >= 4 => {
+            sketch_actor::Constraint::Parallel(ids[0], ids[1], ids[2], ids[3])
+        }
+        "midpoint" if ids.len() >= 3 => {
+            sketch_actor::Constraint::Midpoint(ids[0], ids[1], ids[2])
+        }
+        "equal_length" if ids.len() >= 4 => {
+            sketch_actor::Constraint::EqualLength(ids[0], ids[1], ids[2], ids[3])
+        }
+        "symmetric" if ids.len() >= 4 => {
+            sketch_actor::Constraint::Symmetric(ids[0], ids[1], ids[2], ids[3])
+        }
+        _ => {
+            return Err(JsValue::from_str(&format!(
+                "Unknown constraint '{kind}' or wrong number of ids"
+            )));
+        }
+    };
+
+    SKETCH.with(|s| {
+        let id = s.borrow_mut().add_constraint(constraint);
+        Ok(format!(r#"{{"id":{id}}}"#))
+    })
+}
+
+/// Remove a constraint by id.
+#[wasm_bindgen]
+pub fn sketch_remove_constraint(id: u32) {
+    SKETCH.with(|s| {
+        s.borrow_mut().constraints.remove(&id);
+    });
+}
+
+/// Run the constraint solver and return a full snapshot as JSON.
+/// The snapshot includes points, constraints, DOF, solve status,
+/// and per-point coloring status.
+#[wasm_bindgen]
+pub fn sketch_solve() -> Result<String, JsValue> {
+    SKETCH.with(|s| {
+        let mut actor = s.borrow_mut();
+        actor.solve(200);
+        let snap = actor.snapshot();
+        serde_json::to_string(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
+    })
+}
+
+/// Process queued messages and return snapshot JSON.
+#[wasm_bindgen]
+pub fn sketch_pump() -> Result<String, JsValue> {
+    SKETCH.with(|s| {
+        let mut actor = s.borrow_mut();
+        let (_last_id, snap) = actor.pump();
+        serde_json::to_string(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
+    })
+}
+
+/// Get current snapshot without solving (read-only query).
+#[wasm_bindgen]
+pub fn sketch_snapshot() -> Result<String, JsValue> {
+    SKETCH.with(|s| {
+        let snap = s.borrow().snapshot();
+        serde_json::to_string(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
+    })
 }
 
 #[cfg(test)]
