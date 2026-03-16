@@ -94,11 +94,49 @@ jobs:
       - run: mkdir -p www && cd www && unzip -o ../rustcam.zip
         if: github.event.action != 'closed'
 
-      - uses: rossjrw/pr-preview-action@v1
+      - uses: peaceiris/actions-gh-pages@v4
+        if: github.event.action != 'closed'
         with:
-          source-dir: www
-          deploy-repository: jvishnefske/cam
-          deploy-key: ${{ secrets.CAM_DEPLOY_KEY }}
-          preview-branch: gh-pages
-          umbrella-dir: pr-preview
-          action: auto
+          deploy_key: ${{ secrets.CAM_DEPLOY_KEY }}
+          external_repository: jvishnefske/cam
+          publish_dir: ./www
+          publish_branch: gh-pages
+          destination_dir: pr-preview/pr-${{ github.event.pull_request.number }}
+          keep_files: true
+
+      - uses: actions/github-script@v7
+        if: github.event.action != 'closed'
+        with:
+          script: |
+            const marker = '<!-- pr-preview -->';
+            const url = `https://jvishnefske.github.io/cam/pr-preview/pr-${context.issue.number}/`;
+            const body = `${marker}\n**Preview:** ${url}`;
+            const { data: comments } = await github.rest.issues.listComments({
+              ...context.repo, issue_number: context.issue.number
+            });
+            const existing = comments.find(c => c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                ...context.repo, comment_id: existing.id, body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: context.issue.number, body
+              });
+            }
+
+      - name: Remove preview
+        if: github.event.action == 'closed'
+        env:
+          DEPLOY_KEY: ${{ secrets.CAM_DEPLOY_KEY }}
+        run: |
+          PR=${{ github.event.pull_request.number }}
+          mkdir -p ~/.ssh && echo "$DEPLOY_KEY" > ~/.ssh/key && chmod 600 ~/.ssh/key
+          export GIT_SSH_COMMAND="ssh -i ~/.ssh/key -o StrictHostKeyChecking=no"
+          git clone --branch gh-pages --depth 1 git@github.com:jvishnefske/cam.git _cam
+          cd _cam
+          if [ -d "pr-preview/pr-$PR" ]; then
+            git rm -rf "pr-preview/pr-$PR"
+            git commit -m "Remove preview for PR #$PR"
+            git push
+          fi
