@@ -82,6 +82,8 @@ pub fn emit_gcode(toolpaths: &[Toolpath], params: &GcodeParams) -> String {
 pub struct LaserParams {
     pub power: f64,
     pub passes: u32,
+    #[serde(default)]
+    pub air_assist: bool,
 }
 
 impl Default for LaserParams {
@@ -89,6 +91,7 @@ impl Default for LaserParams {
         Self {
             power: 100.0,
             passes: 1,
+            air_assist: false,
         }
     }
 }
@@ -173,6 +176,9 @@ fn emit_gcode_laser(
         out.push_str(line);
         out.push('\n');
     }
+    if laser_params.air_assist {
+        out.push_str("M8 (air assist on)\n");
+    }
     out.push('\n');
 
     for pass in 0..laser_params.passes {
@@ -200,6 +206,9 @@ fn emit_gcode_laser(
         }
     }
 
+    if laser_params.air_assist {
+        out.push_str("M9 (air assist off)\n");
+    }
     for line in &profile.output_config.postamble {
         out.push_str(line);
         out.push('\n');
@@ -316,6 +325,7 @@ mod tests {
         let laser = LaserParams {
             power: 80.0,
             passes: 1,
+            ..Default::default()
         };
         let code = emit_gcode_with_profile(&[tp], &GcodeParams::default(), &profile, Some(&laser));
         assert!(code.contains("M4 S0"), "Should have dynamic laser mode");
@@ -332,6 +342,7 @@ mod tests {
         let laser = LaserParams {
             power: 50.0,
             passes: 3,
+            ..Default::default()
         };
         let code = emit_gcode_with_profile(&[tp], &GcodeParams::default(), &profile, Some(&laser));
         assert!(code.contains("Pass 1 of 3"));
@@ -346,6 +357,7 @@ mod tests {
         let laser = LaserParams {
             power: 80.0,
             passes: 1,
+            ..Default::default()
         };
         let code = emit_gcode_with_profile(&[tp], &GcodeParams::default(), &profile, Some(&laser));
         assert!(
@@ -380,6 +392,7 @@ mod tests {
         let laser = LaserParams {
             power: 80.0,
             passes: 1,
+            ..Default::default()
         };
         let code = emit_gcode_with_profile(&[tp], &GcodeParams::default(), &profile, Some(&laser));
         let warnings = validate_gcode(&code, &profile);
@@ -401,5 +414,31 @@ mod tests {
             .filter(|w| w.message.contains("Z movement"))
             .collect();
         assert!(!z_warnings.is_empty(), "Should warn about Z in laser mode");
+    }
+
+    #[test]
+    fn test_laser_air_assist() {
+        let profile = MachineProfile::laser_cutter();
+        let mut tp = Toolpath::new();
+        tp.cut(10.0, 0.0, 0.0);
+        let laser = LaserParams {
+            power: 80.0,
+            passes: 1,
+            air_assist: true,
+        };
+        let code = emit_gcode_with_profile(&[tp], &GcodeParams::default(), &profile, Some(&laser));
+        assert!(code.contains("M8 (air assist on)"), "Should enable air assist");
+        assert!(code.contains("M9 (air assist off)"), "Should disable air assist");
+    }
+
+    #[test]
+    fn test_laser_no_air_assist_by_default() {
+        let profile = MachineProfile::laser_cutter();
+        let mut tp = Toolpath::new();
+        tp.cut(10.0, 0.0, 0.0);
+        let laser = LaserParams::default();
+        let code = emit_gcode_with_profile(&[tp], &GcodeParams::default(), &profile, Some(&laser));
+        assert!(!code.contains("M8"), "Should not have air assist by default");
+        assert!(!code.contains("M9"), "Should not have M9 by default");
     }
 }

@@ -192,6 +192,7 @@ fn laser_params_from_config(config: &CamConfig) -> Option<LaserParams> {
         Some(LaserParams {
             power: config.laser_power.unwrap_or(100.0),
             passes: config.passes.unwrap_or(1),
+            air_assist: config.air_assist.unwrap_or(false),
         })
     } else {
         None
