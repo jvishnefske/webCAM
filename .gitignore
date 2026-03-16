@@ -1,6 +1,9 @@
 /target
 /dist
-/www/pkg
+/www/node_modules
+/www/dist
+/www/pkg/*
+!/www/pkg/rustcam.d.ts
 *.swp
 *.swo
 *~
