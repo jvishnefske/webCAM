@@ -174,6 +174,10 @@ pub struct ToolpathMove {
     pub y: f64,
     pub z: f64,
     pub rapid: bool,
+    /// Laser power level (0-100). None means no change from current power.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub power: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +195,7 @@ impl Toolpath {
             y,
             z,
             rapid: true,
+            power: None,
         });
     }
     pub fn cut(&mut self, x: f64, y: f64, z: f64) {
@@ -199,6 +204,17 @@ impl Toolpath {
             y,
             z,
             rapid: false,
+            power: None,
+        });
+    }
+    /// Add a cutting move with laser power metadata.
+    pub fn cut_with_power(&mut self, x: f64, y: f64, z: f64, power: f64) {
+        self.moves.push(ToolpathMove {
+            x,
+            y,
+            z,
+            rapid: false,
+            power: Some(power),
         });
     }
 }
