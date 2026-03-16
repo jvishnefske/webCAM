@@ -160,6 +160,23 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
 .sim-controls .spacer { flex: 1; }
 .sim-controls .scrubber { flex: 3; }
 .sim-info { font-size: 11px; color: var(--text-dim); min-width: 90px; text-align: right; font-family: var(--mono); }
+/* ─ Mode switcher ─ */
+.mode-switcher {
+  display: flex; gap: 2px; margin-left: auto;
+  background: var(--bg); border-radius: 6px; padding: 2px;
+}
+.mode-switcher button {
+  background: transparent; border: none; color: var(--text-dim);
+  font-size: 13px; font-weight: 600; padding: 6px 16px;
+  border-radius: 4px; cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.mode-switcher button.active { background: var(--accent); color: #fff; }
+/* ─ Sketch mode ─ */
+.app.sketch-mode { grid-template-columns: 320px 1fr; }
+.app.sketch-mode .right-pane { display: none; }
+.sketch-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 12px; }
+.btn-tool { text-align: center; }
+.btn-tool.active { background: var(--accent) !important; color: #fff !important; }
 /* ─ Responsive ─ */
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; grid-template-rows: auto 300px 1fr; }
@@ -172,11 +189,16 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
 <header>
   <h1>Wasm Engineered Browser Computer-Aided Manufacturing</h1>
   <span>STL / SVG &rarr; G-code &mdash; runs entirely in your browser</span>
+  <div class="mode-switcher" id="mode-switcher">
+    <button class="active" data-mode="cam">CAM</button>
+    <button data-mode="sketch">2D Sketch</button>
+  </div>
 </header>
 
 <div class="app">
   <!-- Sidebar -->
   <div class="sidebar">
+    <div id="cam-sidebar-content">
     <section>
       <h2>Input File</h2>
       <div class="drop-zone" id="drop-zone">
@@ -274,12 +296,46 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
       <button class="btn btn-primary" id="generate-btn" disabled>Generate G-code</button>
       <div class="status" id="status"></div>
     </section>
+    </div><!-- cam-sidebar-content -->
+
+    <div id="sketch-sidebar-content" style="display:none">
+      <section>
+        <h2>Drawing Tools</h2>
+        <div class="sketch-tools">
+          <button class="btn btn-secondary btn-tool active" data-tool="line">Line</button>
+          <button class="btn btn-secondary btn-tool" data-tool="rect">Rectangle</button>
+          <button class="btn btn-secondary btn-tool" data-tool="circle">Circle</button>
+          <button class="btn btn-secondary btn-tool" data-tool="polyline">Polyline</button>
+        </div>
+      </section>
+      <section>
+        <h2>Canvas</h2>
+        <label>Grid snap (mm)</label>
+        <input type="number" id="grid-snap" value="1" step="0.5" min="0"/>
+        <label>Canvas size (mm)</label>
+        <input type="number" id="canvas-size" value="100" step="10" min="10"/>
+      </section>
+      <section>
+        <h2>Shapes (<span id="shape-count">0</span>)</h2>
+        <div id="shape-list" style="max-height:200px;overflow-y:auto;font-size:12px;color:var(--text-dim)"></div>
+      </section>
+      <section>
+        <button class="btn btn-secondary" id="sketch-undo">Undo Last Shape</button>
+        <button class="btn btn-secondary" id="sketch-clear" style="margin-top:4px">Clear All</button>
+        <button class="btn btn-primary" id="sketch-to-cam" style="margin-top:12px">Use Sketch in CAM &rarr;</button>
+        <div class="status" id="sketch-status"></div>
+      </section>
+    </div><!-- sketch-sidebar-content -->
   </div>
 
   <!-- Preview canvas -->
   <div class="preview">
-    <div class="pane-header">Toolpath Preview</div>
+    <div class="pane-header" id="preview-header">Toolpath Preview</div>
     <canvas id="preview-canvas"></canvas>
+    <div id="sketch-canvas-wrap" style="display:none;flex:1;position:relative;flex-direction:column;">
+      <canvas id="sketch-canvas" style="flex:1;width:100%;height:100%;display:block;cursor:crosshair"></canvas>
+      <div style="position:absolute;top:8px;right:12px;font-size:11px;color:var(--text-dim);font-family:var(--mono)" id="sketch-cursor-pos"></div>
+    </div>
   </div>
 
   <!-- Right pane: G-code + Simulation tabs -->
@@ -605,7 +661,10 @@ function drawPreview(paths) {
   }
 }
 
-window.addEventListener('resize', () => { tryPreview(); resizeSim(); });
+window.addEventListener('resize', () => {
+  tryPreview(); resizeSim();
+  if (currentMode === 'sketch') { resizeSketchCanvas(); redrawSketch(); }
+});
 
 // ── Generate (via Web Worker for progress reporting) ─────────────────
 let genWorker = null;
@@ -939,6 +998,344 @@ function simTick() {
   drawSimFrame();
   if (simRunning) simRaf = requestAnimationFrame(simTick);
 }
+
+// =====================================================================
+//  MODE SWITCHER (CAM ↔ 2D Sketch)
+// =====================================================================
+let currentMode = 'cam';
+
+function setMode(mode) {
+  currentMode = mode;
+  document.querySelectorAll('#mode-switcher button').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === mode));
+  document.getElementById('cam-sidebar-content').style.display = mode === 'cam' ? 'block' : 'none';
+  document.getElementById('sketch-sidebar-content').style.display = mode === 'sketch' ? 'block' : 'none';
+  document.getElementById('preview-canvas').style.display = mode === 'cam' ? 'block' : 'none';
+  document.getElementById('preview-header').style.display = mode === 'cam' ? 'block' : 'none';
+  document.getElementById('sketch-canvas-wrap').style.display = mode === 'sketch' ? 'flex' : 'none';
+  document.querySelector('.app').classList.toggle('sketch-mode', mode === 'sketch');
+  if (mode === 'sketch') { resizeSketchCanvas(); redrawSketch(); }
+  else { tryPreview(); }
+}
+
+document.querySelectorAll('#mode-switcher button').forEach(btn =>
+  btn.addEventListener('click', () => setMode(btn.dataset.mode)));
+
+// =====================================================================
+//  2D SKETCH ENGINE
+// =====================================================================
+const sketchShapes = [];
+let sketchTool = 'line';
+let sketchDraft = null;
+let sketchPolyPts = [];  // points accumulator for polyline tool
+
+const sketchCvs = document.getElementById('sketch-canvas');
+const sketchCtx2d = sketchCvs.getContext('2d');
+const sketchCursorEl = document.getElementById('sketch-cursor-pos');
+
+// ── Tool selection ───────────────────────────────────────────────────
+document.querySelectorAll('.btn-tool').forEach(btn => {
+  btn.addEventListener('click', () => {
+    finishPolyline();
+    sketchDraft = null;
+    sketchTool = btn.dataset.tool;
+    document.querySelectorAll('.btn-tool').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    redrawSketch();
+  });
+});
+
+// ── Coordinate helpers ───────────────────────────────────────────────
+function sketchCanvasSize() {
+  return parseFloat(document.getElementById('canvas-size').value) || 100;
+}
+function sketchGridSnap() {
+  return parseFloat(document.getElementById('grid-snap').value) || 0;
+}
+function sketchScreenToWorld(clientX, clientY) {
+  const rect = sketchCvs.getBoundingClientRect();
+  const size = sketchCanvasSize();
+  const pad = 20;
+  const avail = Math.min(rect.width, rect.height) - pad * 2;
+  const scale = avail / size;
+  const offX = (rect.width - size * scale) / 2;
+  const offY = (rect.height - size * scale) / 2;
+  let x = (clientX - rect.left - offX) / scale;
+  let y = (clientY - rect.top - offY) / scale;
+  // SVG/CAM Y is up, screen Y is down — keep screen convention for sketch
+  // (SVG viewBox will match sketch coordinates directly)
+  const snap = sketchGridSnap();
+  if (snap > 0) {
+    x = Math.round(x / snap) * snap;
+    y = Math.round(y / snap) * snap;
+  }
+  return { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 };
+}
+
+function resizeSketchCanvas() {
+  const dpr = window.devicePixelRatio || 1;
+  const rect = sketchCvs.getBoundingClientRect();
+  if (rect.width < 1) return;
+  sketchCvs.width = rect.width * dpr;
+  sketchCvs.height = rect.height * dpr;
+}
+
+// ── Drawing ──────────────────────────────────────────────────────────
+function redrawSketch() {
+  const ctx = sketchCtx2d;
+  const dpr = window.devicePixelRatio || 1;
+  const rect = sketchCvs.getBoundingClientRect();
+  if (rect.width < 1) return;
+  ctx.save();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  const size = sketchCanvasSize();
+  const pad = 20;
+  const avail = Math.min(rect.width, rect.height) - pad * 2;
+  const scale = avail / size;
+  const offX = (rect.width - size * scale) / 2;
+  const offY = (rect.height - size * scale) / 2;
+  const tx = v => offX + v * scale;
+  const ty = v => offY + v * scale;
+
+  // Grid
+  ctx.strokeStyle = '#1a1d27';
+  ctx.lineWidth = 0.5;
+  const snap = sketchGridSnap() || (size / 10);
+  const maxLines = 200;
+  if (size / snap <= maxLines) {
+    for (let v = 0; v <= size; v += snap) {
+      ctx.beginPath(); ctx.moveTo(tx(v), ty(0)); ctx.lineTo(tx(v), ty(size)); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(tx(0), ty(v)); ctx.lineTo(tx(size), ty(v)); ctx.stroke();
+    }
+  }
+
+  // Canvas border
+  ctx.strokeStyle = '#2a2d3a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(tx(0), ty(0), size * scale, size * scale);
+
+  // Origin label
+  ctx.fillStyle = '#8888a0';
+  ctx.font = '10px monospace';
+  ctx.fillText('0,0', tx(0) + 2, ty(0) - 4);
+  ctx.fillText(`${size},${size}`, tx(size) - 40, ty(size) + 12);
+
+  // Committed shapes
+  for (const s of sketchShapes) drawShape(ctx, s, '#4f8cff', tx, ty, scale);
+
+  // Draft shape
+  if (sketchDraft) drawShape(ctx, sketchDraft, '#55ff88', tx, ty, scale);
+
+  // Polyline in-progress points
+  if (sketchTool === 'polyline' && sketchPolyPts.length > 0) {
+    ctx.strokeStyle = '#55ff88';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(tx(sketchPolyPts[0].x), ty(sketchPolyPts[0].y));
+    for (let i = 1; i < sketchPolyPts.length; i++)
+      ctx.lineTo(tx(sketchPolyPts[i].x), ty(sketchPolyPts[i].y));
+    if (sketchDraft && sketchDraft._cursor)
+      ctx.lineTo(tx(sketchDraft._cursor.x), ty(sketchDraft._cursor.y));
+    ctx.stroke();
+    // Points
+    ctx.fillStyle = '#55ff88';
+    for (const p of sketchPolyPts) {
+      ctx.beginPath(); ctx.arc(tx(p.x), ty(p.y), 3, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  ctx.restore();
+}
+
+function drawShape(ctx, s, color, tx, ty, scale) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.5;
+  switch (s.type) {
+    case 'line':
+      ctx.beginPath();
+      ctx.moveTo(tx(s.p1.x), ty(s.p1.y));
+      ctx.lineTo(tx(s.p2.x), ty(s.p2.y));
+      ctx.stroke();
+      break;
+    case 'rect':
+      ctx.strokeRect(tx(Math.min(s.x, s.x + s.w)), ty(Math.min(s.y, s.y + s.h)),
+        Math.abs(s.w) * scale, Math.abs(s.h) * scale);
+      break;
+    case 'circle':
+      ctx.beginPath();
+      ctx.arc(tx(s.cx), ty(s.cy), s.r * scale, 0, Math.PI * 2);
+      ctx.stroke();
+      break;
+    case 'polyline':
+      if (s.points.length < 2) break;
+      ctx.beginPath();
+      ctx.moveTo(tx(s.points[0].x), ty(s.points[0].y));
+      for (let i = 1; i < s.points.length; i++)
+        ctx.lineTo(tx(s.points[i].x), ty(s.points[i].y));
+      ctx.stroke();
+      break;
+  }
+}
+
+// ── Mouse interaction ────────────────────────────────────────────────
+let sketchMouseDown = false;
+let sketchStart = null;
+
+sketchCvs.addEventListener('mousedown', (e) => {
+  if (currentMode !== 'sketch') return;
+  if (sketchTool === 'polyline') return; // handled by click
+  const p = sketchScreenToWorld(e.clientX, e.clientY);
+  sketchMouseDown = true;
+  sketchStart = p;
+  if (sketchTool === 'line') sketchDraft = { type: 'line', p1: p, p2: p };
+  else if (sketchTool === 'rect') sketchDraft = { type: 'rect', x: p.x, y: p.y, w: 0, h: 0 };
+  else if (sketchTool === 'circle') sketchDraft = { type: 'circle', cx: p.x, cy: p.y, r: 0 };
+});
+
+sketchCvs.addEventListener('mousemove', (e) => {
+  if (currentMode !== 'sketch') return;
+  const p = sketchScreenToWorld(e.clientX, e.clientY);
+  sketchCursorEl.textContent = `${p.x}, ${p.y} mm`;
+  if (sketchTool === 'polyline' && sketchPolyPts.length > 0) {
+    sketchDraft = { _cursor: p };
+    redrawSketch();
+    return;
+  }
+  if (!sketchMouseDown || !sketchDraft) return;
+  if (sketchTool === 'line') sketchDraft.p2 = p;
+  else if (sketchTool === 'rect') { sketchDraft.w = p.x - sketchStart.x; sketchDraft.h = p.y - sketchStart.y; }
+  else if (sketchTool === 'circle') {
+    const dx = p.x - sketchStart.x, dy = p.y - sketchStart.y;
+    sketchDraft.r = Math.round(Math.sqrt(dx * dx + dy * dy) * 100) / 100;
+  }
+  redrawSketch();
+});
+
+sketchCvs.addEventListener('mouseup', (e) => {
+  if (currentMode !== 'sketch' || !sketchMouseDown) return;
+  sketchMouseDown = false;
+  if (!sketchDraft) return;
+  // Reject zero-size shapes
+  if (sketchTool === 'line') {
+    if (sketchDraft.p1.x === sketchDraft.p2.x && sketchDraft.p1.y === sketchDraft.p2.y) { sketchDraft = null; return; }
+  } else if (sketchTool === 'rect') {
+    if (sketchDraft.w === 0 || sketchDraft.h === 0) { sketchDraft = null; return; }
+  } else if (sketchTool === 'circle') {
+    if (sketchDraft.r === 0) { sketchDraft = null; return; }
+  }
+  sketchShapes.push(sketchDraft);
+  sketchDraft = null;
+  updateShapeList();
+  redrawSketch();
+});
+
+// Polyline tool: click to add points, double-click to finish
+sketchCvs.addEventListener('click', (e) => {
+  if (currentMode !== 'sketch' || sketchTool !== 'polyline') return;
+  const p = sketchScreenToWorld(e.clientX, e.clientY);
+  sketchPolyPts.push(p);
+  redrawSketch();
+});
+
+sketchCvs.addEventListener('dblclick', (e) => {
+  if (currentMode !== 'sketch' || sketchTool !== 'polyline') return;
+  // Remove the duplicate point added by the second click of dblclick
+  if (sketchPolyPts.length > 0) sketchPolyPts.pop();
+  finishPolyline();
+});
+
+function finishPolyline() {
+  if (sketchPolyPts.length >= 2) {
+    sketchShapes.push({ type: 'polyline', points: [...sketchPolyPts] });
+    updateShapeList();
+  }
+  sketchPolyPts = [];
+  sketchDraft = null;
+  redrawSketch();
+}
+
+window.addEventListener('keydown', (e) => {
+  if (currentMode !== 'sketch') return;
+  if (e.key === 'Escape') { sketchPolyPts = []; sketchDraft = null; redrawSketch(); }
+  if (e.key === 'Enter' && sketchTool === 'polyline') finishPolyline();
+});
+
+// ── Shape list ───────────────────────────────────────────────────────
+function updateShapeList() {
+  const list = document.getElementById('shape-list');
+  const count = document.getElementById('shape-count');
+  count.textContent = sketchShapes.length;
+  list.innerHTML = sketchShapes.map((s, i) => {
+    let desc = '';
+    if (s.type === 'line') desc = `Line (${s.p1.x},${s.p1.y}) → (${s.p2.x},${s.p2.y})`;
+    else if (s.type === 'rect') desc = `Rect ${Math.abs(s.w)}×${Math.abs(s.h)} at (${Math.min(s.x, s.x+s.w)},${Math.min(s.y, s.y+s.h)})`;
+    else if (s.type === 'circle') desc = `Circle r=${s.r} at (${s.cx},${s.cy})`;
+    else if (s.type === 'polyline') desc = `Polyline ${s.points.length} pts`;
+    return `<div>${i + 1}. ${desc}</div>`;
+  }).join('');
+}
+
+// ── Undo / Clear ─────────────────────────────────────────────────────
+document.getElementById('sketch-undo').addEventListener('click', () => {
+  sketchShapes.pop();
+  updateShapeList();
+  redrawSketch();
+});
+document.getElementById('sketch-clear').addEventListener('click', () => {
+  sketchShapes.length = 0;
+  updateShapeList();
+  redrawSketch();
+});
+
+// ── Canvas size change ───────────────────────────────────────────────
+document.getElementById('canvas-size').addEventListener('change', redrawSketch);
+document.getElementById('grid-snap').addEventListener('change', redrawSketch);
+
+// ── Sketch → SVG → CAM ──────────────────────────────────────────────
+function sketchToSvg() {
+  const size = sketchCanvasSize();
+  let elements = '';
+  for (const s of sketchShapes) {
+    switch (s.type) {
+      case 'line':
+        elements += `<path d="M ${s.p1.x} ${s.p1.y} L ${s.p2.x} ${s.p2.y}"/>`;
+        break;
+      case 'rect': {
+        const rx = Math.min(s.x, s.x + s.w), ry = Math.min(s.y, s.y + s.h);
+        elements += `<rect x="${rx}" y="${ry}" width="${Math.abs(s.w)}" height="${Math.abs(s.h)}"/>`;
+        break;
+      }
+      case 'circle':
+        elements += `<circle cx="${s.cx}" cy="${s.cy}" r="${s.r}"/>`;
+        break;
+      case 'polyline': {
+        const pts = s.points.map(p => `${p.x},${p.y}`).join(' ');
+        elements += `<polyline points="${pts}"/>`;
+        break;
+      }
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}">${elements}</svg>`;
+}
+
+document.getElementById('sketch-to-cam').addEventListener('click', () => {
+  if (sketchShapes.length === 0) {
+    document.getElementById('sketch-status').textContent = 'Draw at least one shape first.';
+    document.getElementById('sketch-status').className = 'status error';
+    return;
+  }
+  const svgText = sketchToSvg();
+  fileData = svgText;
+  fileType = 'svg';
+  filenameEl.textContent = 'sketch.svg';
+  generateBtn.disabled = !wasmReady;
+  setMode('cam');
+  tryPreview();
+  statusEl.textContent = 'Sketch loaded — configure and generate.';
+  statusEl.className = 'status ok';
+});
 </script>
 </body>
 </html>
