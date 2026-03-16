@@ -22,7 +22,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+          components: clippy
       - uses: jetli/wasm-pack-action@v0.4.0
+      - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all
       - run: wasm-pack build --target web --out-dir www/pkg --release
       - run: cd www && zip -r ../rustcam.zip .
