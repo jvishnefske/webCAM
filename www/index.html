@@ -177,6 +177,8 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
 .sketch-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 12px; }
 .btn-tool { text-align: center; }
 .btn-tool.active { background: var(--accent) !important; color: #fff !important; }
+.btn-cst { font-size: 11px; padding: 2px 6px; text-align: center; }
+.btn-cst.active { background: #ff9800 !important; color: #fff !important; }
 /* ─ Responsive ─ */
 @media (max-width: 900px) {
   .app { grid-template-columns: 1fr; grid-template-rows: auto 300px 1fr; }
@@ -318,6 +320,22 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
       <section>
         <h2>Shapes (<span id="shape-count">0</span>)</h2>
         <div id="shape-list" style="max-height:200px;overflow-y:auto;font-size:12px;color:var(--text-dim)"></div>
+      </section>
+      <section>
+        <h2>Constraints</h2>
+        <div class="sketch-tools">
+          <button class="btn btn-secondary btn-cst" data-cst="coincident" title="Merge two points">Coincident</button>
+          <button class="btn btn-secondary btn-cst" data-cst="horizontal" title="Same Y">Horiz</button>
+          <button class="btn btn-secondary btn-cst" data-cst="vertical" title="Same X">Vert</button>
+          <button class="btn btn-secondary btn-cst" data-cst="distance" title="Fixed distance">Distance</button>
+          <button class="btn btn-secondary btn-cst" data-cst="fixed" title="Lock point position">Fix</button>
+          <button class="btn btn-secondary btn-cst" data-cst="perpendicular" title="90 degrees">Perp</button>
+          <button class="btn btn-secondary btn-cst" data-cst="parallel" title="Same angle">Parallel</button>
+          <button class="btn btn-secondary btn-cst" data-cst="equal_length" title="Equal segment lengths">Equal</button>
+        </div>
+        <div id="cst-status" style="font-size:11px;color:var(--text-dim);margin-top:4px"></div>
+        <div id="cst-dof" style="font-size:12px;margin-top:4px;font-weight:600"></div>
+        <div id="cst-list" style="max-height:150px;overflow-y:auto;font-size:11px;color:var(--text-dim);margin-top:4px"></div>
       </section>
       <section>
         <button class="btn btn-secondary" id="sketch-undo">Undo Last Shape</button>
@@ -1341,6 +1359,235 @@ document.getElementById('sketch-to-cam').addEventListener('click', () => {
   statusEl.textContent = 'Sketch loaded — configure and generate.';
   statusEl.className = 'status ok';
 });
+
+// =====================================================================
+//  CONSTRAINT ENGINE (WASM sketch_actor bridge)
+// =====================================================================
+
+// Point-and-click state for constraint mode
+let cstMode = null;     // current constraint type being added, or null
+let cstPicks = [];      // picked point ids for current constraint
+let cstPointMap = {};   // pointId → {x,y} from last snapshot
+let cstLastSnap = null; // last SketchSnapshot from WASM
+
+const cstStatusEl = document.getElementById('cst-status');
+const cstDofEl    = document.getElementById('cst-dof');
+const cstListEl   = document.getElementById('cst-list');
+
+// How many point picks each constraint type needs
+const CST_PICK_COUNT = {
+  coincident: 2, horizontal: 2, vertical: 2, distance: 2,
+  fixed: 1, perpendicular: 4, parallel: 4, equal_length: 4,
+};
+
+// Constraint tool buttons
+document.querySelectorAll('.btn-cst').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const type = btn.dataset.cst;
+    if (cstMode === type) { cancelCstPick(); return; }
+    cstMode = type;
+    cstPicks = [];
+    document.querySelectorAll('.btn-cst').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    cstStatusEl.textContent = `Pick ${CST_PICK_COUNT[type]} point(s) on canvas…`;
+  });
+});
+
+function cancelCstPick() {
+  cstMode = null;
+  cstPicks = [];
+  document.querySelectorAll('.btn-cst').forEach(b => b.classList.remove('active'));
+  cstStatusEl.textContent = '';
+}
+
+// Sync shapes → WASM points whenever shapes change.
+// Each shape decomposes into points: line→2, rect→4, circle→2 (center+edge).
+let shapePointIds = [];  // [{shapeIdx, pointIds: [id,...]}]
+
+function syncShapesToActor() {
+  if (typeof sketch_reset !== 'function' && (!wasm || !wasm.sketch_reset)) return;
+  const mod = wasm || window;
+  mod.sketch_reset();
+  shapePointIds = [];
+
+  for (let i = 0; i < sketchShapes.length; i++) {
+    const s = sketchShapes[i];
+    const ids = [];
+    if (s.type === 'line') {
+      ids.push(JSON.parse(mod.sketch_add_point(s.p1.x, s.p1.y)).id);
+      ids.push(JSON.parse(mod.sketch_add_point(s.p2.x, s.p2.y)).id);
+    } else if (s.type === 'rect') {
+      const rx = Math.min(s.x, s.x+s.w), ry = Math.min(s.y, s.y+s.h);
+      const w = Math.abs(s.w), h = Math.abs(s.h);
+      ids.push(JSON.parse(mod.sketch_add_point(rx,     ry    )).id); // BL
+      ids.push(JSON.parse(mod.sketch_add_point(rx + w, ry    )).id); // BR
+      ids.push(JSON.parse(mod.sketch_add_point(rx + w, ry + h)).id); // TR
+      ids.push(JSON.parse(mod.sketch_add_point(rx,     ry + h)).id); // TL
+    } else if (s.type === 'circle') {
+      ids.push(JSON.parse(mod.sketch_add_point(s.cx, s.cy)).id);           // center
+      ids.push(JSON.parse(mod.sketch_add_point(s.cx + s.r, s.cy)).id);     // edge
+    } else if (s.type === 'polyline') {
+      for (const p of s.points) {
+        ids.push(JSON.parse(mod.sketch_add_point(p.x, p.y)).id);
+      }
+    }
+    shapePointIds.push({ shapeIdx: i, pointIds: ids });
+  }
+  solveAndRender();
+}
+
+function solveAndRender() {
+  const mod = wasm || window;
+  if (!mod.sketch_solve) return;
+  try {
+    const json = mod.sketch_solve();
+    cstLastSnap = JSON.parse(json);
+    // Update point map
+    cstPointMap = {};
+    for (const [id, pt] of cstLastSnap.points) {
+      cstPointMap[id] = pt;
+    }
+    // Update DOF display
+    const d = cstLastSnap.dof;
+    const status = cstLastSnap.dof_status;
+    const color = status === 'FullyConstrained' ? '#4caf50'
+                : status === 'OverConstrained' ? '#f44336' : '#ff9800';
+    cstDofEl.style.color = color;
+    cstDofEl.textContent = `DOF: ${d} (${status.replace(/([A-Z])/g, ' $1').trim()})`;
+    // Update constraint list
+    cstListEl.innerHTML = cstLastSnap.constraints.map(([id, c]) => {
+      const type = Object.keys(c)[0] || 'unknown';
+      return `<div>${id}. ${type} <button onclick="removeCst(${id})" style="font-size:10px;cursor:pointer;background:none;border:none;color:#f44336">✕</button></div>`;
+    }).join('');
+    redrawSketch();
+  } catch (e) {
+    cstStatusEl.textContent = `Solve error: ${e}`;
+  }
+}
+
+function removeCst(id) {
+  const mod = wasm || window;
+  mod.sketch_remove_constraint(id);
+  solveAndRender();
+}
+
+// Find nearest point to a world coordinate
+function findNearestPoint(wx, wy, maxDist) {
+  let best = null, bestD = maxDist || Infinity;
+  for (const entry of shapePointIds) {
+    for (const pid of entry.pointIds) {
+      const pt = cstPointMap[pid];
+      if (!pt) continue;
+      const d = Math.sqrt((pt.x - wx) ** 2 + (pt.y - wy) ** 2);
+      if (d < bestD) { bestD = d; best = pid; }
+    }
+  }
+  return best;
+}
+
+// Handle constraint point picking on canvas click
+sketchCvs.addEventListener('click', (e) => {
+  if (currentMode !== 'sketch' || !cstMode) return;
+  const p = sketchScreenToWorld(e.clientX, e.clientY);
+  const snapDist = (sketchGridSnap() || 1) * 2;
+  const pid = findNearestPoint(p.x, p.y, snapDist);
+  if (pid == null) {
+    cstStatusEl.textContent = `No point nearby — click closer to a shape vertex.`;
+    return;
+  }
+  cstPicks.push(pid);
+  const needed = CST_PICK_COUNT[cstMode];
+  cstStatusEl.textContent = `Picked ${cstPicks.length}/${needed} points…`;
+
+  if (cstPicks.length >= needed) {
+    applyConstraint();
+  }
+});
+
+function applyConstraint() {
+  const mod = wasm || window;
+  let value = 0, value2 = 0;
+
+  if (cstMode === 'distance') {
+    const a = cstPointMap[cstPicks[0]], b = cstPointMap[cstPicks[1]];
+    const cur = Math.sqrt((b.x - a.x) ** 2 + (b.y - a.y) ** 2);
+    const input = prompt(`Distance (current: ${cur.toFixed(2)} mm):`, cur.toFixed(2));
+    if (input == null) { cancelCstPick(); return; }
+    value = parseFloat(input);
+    if (isNaN(value) || value <= 0) { cancelCstPick(); return; }
+  } else if (cstMode === 'fixed') {
+    const pt = cstPointMap[cstPicks[0]];
+    value = pt.x;
+    value2 = pt.y;
+  }
+
+  try {
+    mod.sketch_add_constraint(cstMode, JSON.stringify(cstPicks), value, value2);
+    solveAndRender();
+    cstStatusEl.textContent = `Added ${cstMode} constraint.`;
+  } catch (e) {
+    cstStatusEl.textContent = `Error: ${e}`;
+  }
+  cstMode = null;
+  cstPicks = [];
+  document.querySelectorAll('.btn-cst').forEach(b => b.classList.remove('active'));
+}
+
+// Re-sync actor when shapes change
+const origUpdateShapeList = updateShapeList;
+updateShapeList = function() {
+  origUpdateShapeList();
+  syncShapesToActor();
+};
+
+// Draw constraint points on the sketch canvas
+const origRedrawSketch = redrawSketch;
+redrawSketch = function() {
+  origRedrawSketch();
+  if (!cstLastSnap || currentMode !== 'sketch') return;
+  const ctx = sketchCtx2d;
+  const dpr = window.devicePixelRatio || 1;
+  const rect = sketchCvs.getBoundingClientRect();
+  if (rect.width < 1) return;
+  ctx.save();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const size = sketchCanvasSize();
+  const pad = 20;
+  const avail = Math.min(rect.width, rect.height) - pad * 2;
+  const scale = avail / size;
+  const offX = (rect.width - size * scale) / 2;
+  const offY = (rect.height - size * scale) / 2;
+  const tx = v => offX + v * scale;
+  const ty = v => offY + v * scale;
+
+  // Draw points colored by constraint status
+  for (const [id, pt] of cstLastSnap.points) {
+    const status = cstLastSnap.point_status[id] || 'UnderConstrained';
+    const color = status === 'FullyConstrained' ? '#4caf50'
+                : status === 'OverConstrained' ? '#f44336' : '#ff9800';
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(tx(pt.x), ty(pt.y), 4, 0, Math.PI * 2);
+    ctx.fill();
+    // Point id label
+    ctx.fillStyle = '#8888a0';
+    ctx.font = '9px monospace';
+    ctx.fillText(String(id), tx(pt.x) + 5, ty(pt.y) - 5);
+  }
+
+  // Highlight picked points
+  ctx.strokeStyle = '#ffeb3b';
+  ctx.lineWidth = 2;
+  for (const pid of cstPicks) {
+    const pt = cstPointMap[pid];
+    if (!pt) continue;
+    ctx.beginPath();
+    ctx.arc(tx(pt.x), ty(pt.y), 7, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+};
 </script>
 </body>
 </html>
