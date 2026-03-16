@@ -1,14 +1,10 @@
-// Web Worker for G-code generation.
-// Runs WASM off the main thread so the UI stays responsive and can
-// display a live progress counter.
+/** Web Worker for off-thread G-code generation. */
 
-import init, {
-  process_stl_progress, process_svg_progress,
-} from './pkg/rustcam.js';
+import init, { process_stl_progress, process_svg_progress } from '../pkg/rustcam.js';
 
 let wasmReady = false;
 
-async function boot() {
+async function boot(): Promise<void> {
   await init();
   wasmReady = true;
   self.postMessage({ type: 'ready' });
@@ -18,19 +14,19 @@ boot().catch(e => {
   self.postMessage({ type: 'error', error: 'Worker WASM init failed: ' + e });
 });
 
-self.onmessage = (evt) => {
+self.onmessage = (evt: MessageEvent) => {
   const { fileData, fileType, configJson } = evt.data;
   if (!wasmReady) {
     self.postMessage({ type: 'error', error: 'WASM not ready' });
     return;
   }
 
-  const onProgress = (completed, total) => {
+  const onProgress = (completed: number, total: number): void => {
     self.postMessage({ type: 'progress', completed, total });
   };
 
   try {
-    let gcode;
+    let gcode: string;
     if (fileType === 'stl') {
       gcode = process_stl_progress(fileData, configJson, onProgress);
     } else {
