@@ -24,9 +24,15 @@ jobs:
           targets: wasm32-unknown-unknown
           components: clippy
       - uses: jetli/wasm-pack-action@v0.4.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: www/package-lock.json
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all
       - run: wasm-pack build --target web --out-dir www/pkg --release
+      - run: cd www && npm ci && npm run typecheck && npm run build
       - run: cd www && zip -r ../rustcam.zip .
       - uses: actions/upload-artifact@v4
         with:
@@ -67,7 +73,13 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
       - uses: jetli/wasm-pack-action@v0.4.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: www/package-lock.json
       - run: wasm-pack build --target web --out-dir www/pkg --release
+      - run: cd www && npm ci && npm run build
       - uses: peaceiris/actions-gh-pages@v4
         with:
           deploy_key: ${{ secrets.CAM_DEPLOY_KEY }}
