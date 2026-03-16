@@ -666,6 +666,11 @@ window.addEventListener('resize', () => {
   if (currentMode === 'sketch') { resizeSketchCanvas(); redrawSketch(); }
 });
 
+// Resize sketch canvas when its container resizes (e.g. panel drag)
+new ResizeObserver(() => {
+  if (currentMode === 'sketch') { resizeSketchCanvas(); redrawSketch(); }
+}).observe(document.getElementById('sketch-canvas-wrap'));
+
 // ── Generate (via Web Worker for progress reporting) ─────────────────
 let genWorker = null;
 let genStartTime = 0;
