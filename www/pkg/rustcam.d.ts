@@ -37,3 +37,16 @@ export function sketch_remove_constraint(id: number): void;
 export function sketch_solve(): string;
 export function sketch_pump(): string;
 export function sketch_snapshot(): string;
+
+// Dataflow simulator API
+export function dataflow_new(dt: number): number;
+export function dataflow_destroy(graph_id: number): void;
+export function dataflow_add_block(graph_id: number, block_type: string, config_json: string): number;
+export function dataflow_remove_block(graph_id: number, block_id: number): void;
+export function dataflow_connect(graph_id: number, from_block: number, from_port: number, to_block: number, to_port: number): number;
+export function dataflow_disconnect(graph_id: number, channel_id: number): void;
+export function dataflow_advance(graph_id: number, elapsed: number): string;
+export function dataflow_run(graph_id: number, steps: number, dt: number): string;
+export function dataflow_set_speed(graph_id: number, speed: number): void;
+export function dataflow_snapshot(graph_id: number): string;
+export function dataflow_block_types(): string;
