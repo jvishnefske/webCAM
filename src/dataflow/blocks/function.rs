@@ -1,0 +1,179 @@
+//! Function blocks: math operations on float inputs.
+
+use crate::dataflow::block::{Block, PortDef, PortKind, Value};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FunctionOp {
+    Gain,
+    Add,
+    Multiply,
+    Clamp,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionConfig {
+    pub op: FunctionOp,
+    #[serde(default)]
+    pub param1: f64,
+    #[serde(default)]
+    pub param2: f64,
+}
+
+pub struct FunctionBlock {
+    config: FunctionConfig,
+}
+
+impl FunctionBlock {
+    pub fn from_config(cfg: FunctionConfig) -> Self {
+        Self { config: cfg }
+    }
+
+    /// Single-input gain: out = in * factor.
+    pub fn gain(factor: f64) -> Self {
+        Self {
+            config: FunctionConfig {
+                op: FunctionOp::Gain,
+                param1: factor,
+                param2: 0.0,
+            },
+        }
+    }
+
+    /// Two-input addition: out = a + b.
+    pub fn add() -> Self {
+        Self {
+            config: FunctionConfig {
+                op: FunctionOp::Add,
+                param1: 0.0,
+                param2: 0.0,
+            },
+        }
+    }
+
+    /// Two-input multiplication: out = a * b.
+    pub fn multiply() -> Self {
+        Self {
+            config: FunctionConfig {
+                op: FunctionOp::Multiply,
+                param1: 0.0,
+                param2: 0.0,
+            },
+        }
+    }
+
+    /// Single-input clamp: out = clamp(in, min, max).
+    pub fn clamp(min: f64, max: f64) -> Self {
+        Self {
+            config: FunctionConfig {
+                op: FunctionOp::Clamp,
+                param1: min,
+                param2: max,
+            },
+        }
+    }
+}
+
+impl Block for FunctionBlock {
+    fn name(&self) -> &str {
+        match self.config.op {
+            FunctionOp::Gain => "Gain",
+            FunctionOp::Add => "Add",
+            FunctionOp::Multiply => "Multiply",
+            FunctionOp::Clamp => "Clamp",
+        }
+    }
+
+    fn block_type(&self) -> &str {
+        match self.config.op {
+            FunctionOp::Gain => "gain",
+            FunctionOp::Add => "add",
+            FunctionOp::Multiply => "multiply",
+            FunctionOp::Clamp => "clamp",
+        }
+    }
+
+    fn input_ports(&self) -> Vec<PortDef> {
+        match self.config.op {
+            FunctionOp::Gain | FunctionOp::Clamp => {
+                vec![PortDef::new("in", PortKind::Float)]
+            }
+            FunctionOp::Add | FunctionOp::Multiply => {
+                vec![
+                    PortDef::new("a", PortKind::Float),
+                    PortDef::new("b", PortKind::Float),
+                ]
+            }
+        }
+    }
+
+    fn output_ports(&self) -> Vec<PortDef> {
+        vec![PortDef::new("out", PortKind::Float)]
+    }
+
+    fn tick(&mut self, inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        let result = match self.config.op {
+            FunctionOp::Gain => {
+                let v = inputs.first().and_then(|i| i.and_then(|v| v.as_float()));
+                v.map(|x| x * self.config.param1)
+            }
+            FunctionOp::Add => {
+                let a = inputs.first().and_then(|i| i.and_then(|v| v.as_float()));
+                let b = inputs.get(1).and_then(|i| i.and_then(|v| v.as_float()));
+                match (a, b) {
+                    (Some(a), Some(b)) => Some(a + b),
+                    (Some(a), None) => Some(a),
+                    (None, Some(b)) => Some(b),
+                    (None, None) => None,
+                }
+            }
+            FunctionOp::Multiply => {
+                let a = inputs.first().and_then(|i| i.and_then(|v| v.as_float()));
+                let b = inputs.get(1).and_then(|i| i.and_then(|v| v.as_float()));
+                match (a, b) {
+                    (Some(a), Some(b)) => Some(a * b),
+                    _ => None,
+                }
+            }
+            FunctionOp::Clamp => {
+                let v = inputs.first().and_then(|i| i.and_then(|v| v.as_float()));
+                v.map(|x| x.clamp(self.config.param1, self.config.param2))
+            }
+        };
+        vec![result.map(Value::Float)]
+    }
+
+    fn config_json(&self) -> String {
+        serde_json::to_string(&self.config).unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gain_block() {
+        let mut b = FunctionBlock::gain(3.0);
+        let input = Value::Float(4.0);
+        let out = b.tick(&[Some(&input)], 0.01);
+        assert_eq!(out[0].as_ref().unwrap().as_float(), Some(12.0));
+    }
+
+    #[test]
+    fn add_block() {
+        let mut b = FunctionBlock::add();
+        let a = Value::Float(2.0);
+        let bv = Value::Float(3.0);
+        let out = b.tick(&[Some(&a), Some(&bv)], 0.01);
+        assert_eq!(out[0].as_ref().unwrap().as_float(), Some(5.0));
+    }
+
+    #[test]
+    fn clamp_block() {
+        let mut b = FunctionBlock::clamp(0.0, 10.0);
+        let input = Value::Float(15.0);
+        let out = b.tick(&[Some(&input)], 0.01);
+        assert_eq!(out[0].as_ref().unwrap().as_float(), Some(10.0));
+    }
+}

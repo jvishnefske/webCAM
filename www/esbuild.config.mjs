@@ -17,7 +17,7 @@ const appCtx = await esbuild.context({
   entryPoints: ['src/main.ts'],
   outfile: 'dist/main.js',
   // WASM is loaded at runtime, treat as external
-  external: ['../pkg/rustcam.js'],
+  external: ['../pkg/rustcam.js', '../../pkg/rustcam.js'],
 });
 
 // Web Worker bundle
@@ -25,7 +25,7 @@ const workerCtx = await esbuild.context({
   ...shared,
   entryPoints: ['src/worker.ts'],
   outfile: 'dist/worker.js',
-  external: ['../pkg/rustcam.js'],
+  external: ['../pkg/rustcam.js', '../../pkg/rustcam.js'],
 });
 
 if (watch) {

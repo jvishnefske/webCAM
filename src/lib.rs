@@ -30,6 +30,7 @@ pub mod svg;
 pub mod tool;
 pub mod toolpath;
 pub mod units;
+pub mod dataflow;
 
 use gcode::{emit_gcode, emit_gcode_with_profile, GcodeParams, LaserParams};
 use geometry::Toolpath;
@@ -1066,4 +1067,178 @@ mod tests {
         assert_eq!(config.laser_power, Some(100.0));
         assert_eq!(config.passes, Some(1));
     }
+}
+
+// ── Dataflow Simulator WASM API ─────────────────────────────────────
+
+thread_local! {
+    #[allow(clippy::missing_const_for_thread_local)]
+    static DATAFLOW_GRAPHS: RefCell<std::collections::HashMap<u32, dataflow::DataflowGraph>> =
+        RefCell::new(std::collections::HashMap::new());
+    static DATAFLOW_NEXT_ID: RefCell<u32> = const { RefCell::new(1) };
+    #[allow(clippy::missing_const_for_thread_local)]
+    static DATAFLOW_SCHEDULERS: RefCell<std::collections::HashMap<u32, dataflow::Scheduler>> =
+        RefCell::new(std::collections::HashMap::new());
+}
+
+/// Create a new dataflow graph. Returns its id.
+#[wasm_bindgen]
+pub fn dataflow_new(dt: f64) -> u32 {
+    DATAFLOW_NEXT_ID.with(|next| {
+        let id = *next.borrow();
+        *next.borrow_mut() = id + 1;
+        DATAFLOW_GRAPHS.with(|g| g.borrow_mut().insert(id, dataflow::DataflowGraph::new()));
+        DATAFLOW_SCHEDULERS.with(|s| {
+            s.borrow_mut()
+                .insert(id, dataflow::Scheduler::new(dt))
+        });
+        id
+    })
+}
+
+/// Destroy a dataflow graph.
+#[wasm_bindgen]
+pub fn dataflow_destroy(graph_id: u32) {
+    DATAFLOW_GRAPHS.with(|g| g.borrow_mut().remove(&graph_id));
+    DATAFLOW_SCHEDULERS.with(|s| s.borrow_mut().remove(&graph_id));
+}
+
+/// Add a block to a graph. Returns block id.
+#[wasm_bindgen]
+pub fn dataflow_add_block(
+    graph_id: u32,
+    block_type: &str,
+    config_json: &str,
+) -> Result<u32, JsValue> {
+    let block = dataflow::blocks::create_block(block_type, config_json)
+        .map_err(|e| JsValue::from_str(&e))?;
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        let id = graph.add_block(block);
+        Ok(id.0)
+    })
+}
+
+/// Remove a block from a graph.
+#[wasm_bindgen]
+pub fn dataflow_remove_block(graph_id: u32, block_id: u32) -> Result<(), JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        graph.remove_block(dataflow::BlockId(block_id));
+        Ok(())
+    })
+}
+
+/// Connect an output port to an input port. Returns channel id.
+#[wasm_bindgen]
+pub fn dataflow_connect(
+    graph_id: u32,
+    from_block: u32,
+    from_port: u32,
+    to_block: u32,
+    to_port: u32,
+) -> Result<u32, JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        let ch = graph
+            .connect(
+                dataflow::BlockId(from_block),
+                from_port as usize,
+                dataflow::BlockId(to_block),
+                to_port as usize,
+            )
+            .map_err(|e| JsValue::from_str(&e))?;
+        Ok(ch.0)
+    })
+}
+
+/// Disconnect a channel.
+#[wasm_bindgen]
+pub fn dataflow_disconnect(graph_id: u32, channel_id: u32) -> Result<(), JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        graph.disconnect(dataflow::ChannelId(channel_id));
+        Ok(())
+    })
+}
+
+/// Advance the graph by wall-clock elapsed seconds (realtime mode).
+/// Returns snapshot JSON.
+#[wasm_bindgen]
+pub fn dataflow_advance(graph_id: u32, elapsed: f64) -> Result<String, JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        DATAFLOW_SCHEDULERS.with(|s| {
+            let mut graphs = g.borrow_mut();
+            let mut schedulers = s.borrow_mut();
+            let graph = graphs
+                .get_mut(&graph_id)
+                .ok_or_else(|| JsValue::from_str("graph not found"))?;
+            let sched = schedulers
+                .get_mut(&graph_id)
+                .ok_or_else(|| JsValue::from_str("scheduler not found"))?;
+            let ticks = sched.advance(elapsed);
+            graph.run(ticks, sched.dt);
+            let snap = graph.snapshot();
+            serde_json::to_string(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
+        })
+    })
+}
+
+/// Run a fixed number of ticks (non-realtime batch mode).
+/// Returns snapshot JSON.
+#[wasm_bindgen]
+pub fn dataflow_run(graph_id: u32, steps: u32, dt: f64) -> Result<String, JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        graph.run(steps as u64, dt);
+        let snap = graph.snapshot();
+        serde_json::to_string(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
+    })
+}
+
+/// Set the simulation speed multiplier.
+#[wasm_bindgen]
+pub fn dataflow_set_speed(graph_id: u32, speed: f64) -> Result<(), JsValue> {
+    DATAFLOW_SCHEDULERS.with(|s| {
+        let mut schedulers = s.borrow_mut();
+        let sched = schedulers
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("scheduler not found"))?;
+        sched.speed = speed;
+        Ok(())
+    })
+}
+
+/// Get a snapshot of the graph without ticking.
+#[wasm_bindgen]
+pub fn dataflow_snapshot(graph_id: u32) -> Result<String, JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let graphs = g.borrow();
+        let graph = graphs
+            .get(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        let snap = graph.snapshot();
+        serde_json::to_string(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
+    })
+}
+
+/// List available block types as JSON.
+#[wasm_bindgen]
+pub fn dataflow_block_types() -> String {
+    serde_json::to_string(&dataflow::blocks::available_block_types()).unwrap_or_default()
 }
