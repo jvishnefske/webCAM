@@ -2,218 +2,224 @@ version = 1
 status = "complete"
 
 [project]
-name = "rustcam-3d-surface"
-description = "Add zigzag 3D surface machining, perimeter strategy, and custom face mill tools"
+name = "webcam-cadcam-mvp"
+description = "CAD/CAM MVP with machine tool profiles (CNC mill, laser cutter), porting useful Rust code from cnc-sender, all running in WASM"
 worktree_base = ".worktrees"
 
-# ─── Foundation: Tool Definitions ───────────────────────────────────────────
+# ============================================================================
+# Phase 1: Port cnc-sender Foundation Types (parallel, no deps)
+# ============================================================================
 
 [[tasks]]
 id = "task-001"
-title = "Define Tool struct with geometry types"
+title = "Port type-safe unit system from cnc-sender"
 acceptance = """
-- Tool struct with: tool_type (EndMill, BallEnd, FaceMill), diameter, flute_length, corner_radius
-- FaceMill variant includes effective_diameter field
-- All fields have sensible defaults
-- Unit tests verify Tool construction and defaults
-- cargo test passes, no warnings
+- src/units.rs with Distance<Mm>/Distance<Inch>, FeedRate<U>, SpindleSpeed phantom types
+- Ported from ../cnc-sender/crates/cnc-types/src/units.rs
+- Compile-time unit safety prevents mixing mm and inch values
+- Conversion methods: Distance<Mm>::to_inches(), Distance<Inch>::to_mm()
+- Existing CamConfig/CutParams fields annotated or wrapped with typed units
+- All existing tests pass, new unit tests for conversions and Display
+- Builds for both native and wasm32-unknown-unknown targets
 """
 deps = []
 status = "complete"
+spec_file = "specs/task-001.md"
 
 [[tasks]]
 id = "task-002"
-title = "Extend CutParams to include Tool reference"
+title = "Port G-code parser and validator from cnc-sender"
 acceptance = """
-- CutParams includes tool: Tool field
-- Existing strategies use tool.diameter instead of tool_diameter
-- Backward compatible: tool_diameter still works via Tool::default()
-- All existing tests pass unchanged
+- src/gcode_parser.rs ported from ../cnc-sender/crates/cnc-gcode/src/parser.rs
+- parse_line() returns GCodeCommand enum (G0/G1/G2/G3, G20/G21, G90/G91, M3/M4/M5, M7-M9, S, F)
+- Comment stripping (semicolon and parenthetical)
+- src/gcode_validator.rs ported from ../cnc-sender/crates/cnc-gcode/src/validator.rs
+- ValidationConfig with configurable max feed, max spindle, travel bounds
+- Unit tests covering all supported G-codes and edge cases
+- WASM-compatible (no std::io, no std::fs)
 """
-deps = ["task-001"]
+deps = []
 status = "complete"
+spec_file = "specs/task-002.md"
+
+# ============================================================================
+# Phase 2: Machine Profile System
+# ============================================================================
 
 [[tasks]]
 id = "task-003"
-title = "Add tool type to CamConfig JSON schema"
+title = "Define MachineProfile and MachineType configuration"
 acceptance = """
-- CamConfig parses tool_type, corner_radius, effective_diameter from JSON
-- Default tool_type is 'end_mill'
-- process_stl and process_svg construct Tool from config
-- Existing JSON configs work without changes (backward compatible)
+- src/machine.rs with MachineType enum: CncMill, LaserCutter
+- MachineProfile struct: name, machine_type, capabilities, output_config
+- MachineCapabilities: available_strategies vec, has_spindle, has_laser_power, has_z_axis, max_feed_rate, max_spindle_rpm, max_laser_power
+- OutputConfig: preamble lines, postamble lines, unit_mode (G20/G21), distance_mode (G90/G91)
+- Serde Serialize/Deserialize for JSON config passing through WASM boundary
+- Default profiles: MachineProfile::cnc_mill(), MachineProfile::laser_cutter()
+- Unit tests for serialization roundtrip and default construction
 """
-deps = ["task-002"]
+deps = []
 status = "complete"
-
-# ─── 3D Surface Utilities ───────────────────────────────────────────────────
+spec_file = "specs/task-003.md"
 
 [[tasks]]
 id = "task-004"
-title = "Implement mesh height query at XY point"
+title = "Implement CNC mill profile with existing strategies"
 acceptance = """
-- Function: mesh_height_at(mesh: &Mesh, x: f64, y: f64) -> Option<f64>
-- Returns highest Z where ray from (x, y, +inf) intersects mesh
-- Returns None if no intersection (outside mesh bounds)
-- Unit tests with simple box and ramp meshes
+- CNC mill profile wraps existing behavior: spindle, Z-axis, all current strategies
+- CamConfig gains optional machine_type field (defaults to CncMill for backward compat)
+- Mill output config: G21 G90, M3 S{rpm}, optional M8 coolant, M5 M9 M30 end
+- process_stl/process_svg with machine_type='cnc_mill' produces identical output to current
+- Integration test: same STL input → identical G-code with and without explicit profile
 """
-deps = []
+deps = ["task-003"]
 status = "complete"
+spec_file = "specs/task-004.md"
 
 [[tasks]]
 id = "task-005"
-title = "Implement surface normal at XY point"
+title = "Implement laser cutter profile"
 acceptance = """
-- Function: surface_normal_at(mesh: &Mesh, x: f64, y: f64) -> Option<Vec3>
-- Returns interpolated normal of triangle at XY intersection
-- Used for ball-end tool contact point compensation
-- Unit tests verify normal direction on flat and angled surfaces
+- Laser profile: power (0-1000 S-value), dynamic power mode (M4), no Z-axis moves
+- Laser-specific CamConfig fields: laser_power, passes, air_assist bool
+- Laser output config: G21 G90, M4 S0 (dynamic power on), S{power} during cuts, M5 M30 end
+- Profile rejects 3D strategies (zigzag_surface, slice) with clear error message
+- Supports 2D strategies: contour, pocket (reused as engrave fill)
+- Rapid moves use S0 (power off) + G0 instead of Z retract
+- Unit tests for laser G-code output format
 """
-deps = ["task-004"]
+deps = ["task-003"]
 status = "complete"
-
-# ─── Zigzag Surface Strategy ────────────────────────────────────────────────
+spec_file = "specs/task-005.md"
 
 [[tasks]]
 id = "task-006"
-title = "Create SurfaceParams struct for 3D strategies"
+title = "Profile-aware G-code emitter"
 acceptance = """
-- SurfaceParams contains mesh reference, cut_params, scan_direction (X/Y)
-- Implements From<(&Mesh, &CutParams)> for easy construction
-- Does not break existing ToolpathStrategy trait
+- Refactored src/gcode.rs accepts MachineProfile for output formatting
+- emit_gcode(toolpath, profile) → String with correct preamble/postamble
+- CNC mill: G21 G90, M3 S{rpm}, rapids use safe_z retract, M5 M9 M30 end
+- Laser: G21 G90, M4 S0, rapids use S0 + G0 (no Z), S{power} during cuts, M5 M30 end
+- Existing gcode::emit() function delegates to profile-aware version with CncMill default
+- Tests comparing same toolpath output under both profiles
 """
-deps = ["task-002", "task-004"]
+deps = ["task-004", "task-005"]
 status = "complete"
+spec_file = "specs/task-006.md"
+
+# ============================================================================
+# Phase 3: Laser-Specific CAM Strategies
+# ============================================================================
 
 [[tasks]]
 id = "task-007"
-title = "Implement ZigzagSurfaceStrategy core loop"
+title = "Implement laser cut strategy (2D contour with power)"
 acceptance = """
-- ZigzagSurfaceStrategy implements new generate_surface method
-- Raster scan across mesh bounding box with step_over spacing
-- Queries mesh_height_at for each XY sample point
-- Skips points outside mesh (no intersection)
-- Alternates row direction for serpentine motion
+- LaserCutStrategy follows SVG contour paths with laser power metadata
+- Multi-pass support: repeat path N times (configurable passes parameter)
+- Lead-in overcut: small extension past path start for clean edge closure
+- ToolpathMove gains optional power: Option<f64> field for laser S-value
+- Generates flat (Z=0) toolpath with power on during cuts, power off during rapids
+- Unit tests: rectangle path → expected G-code with M4/S values
 """
-deps = ["task-004", "task-006"]
+deps = ["task-005"]
 status = "complete"
+spec_file = "specs/task-007.md"
 
 [[tasks]]
 id = "task-008"
-title = "Add ball-end tool compensation to zigzag"
+title = "Implement laser engrave strategy (raster fill)"
 acceptance = """
-- When tool_type is BallEnd, apply contact point offset
-- Offset = (radius * sin(angle), radius * cos(angle)) based on surface normal
-- Flat surfaces (normal = +Z) have no offset
-- Tests verify offset on 45-degree ramp
+- LaserEngraveStrategy: scanline fill of closed SVG paths
+- Bidirectional scanning (serpentine pattern, alternating row direction)
+- Configurable line spacing in mm (maps to DPI: spacing = 25.4/DPI)
+- Power level configurable per-job (uniform fill for MVP)
+- Efficient toolpath: minimizes laser-off travel between scanlines
+- Unit tests: filled 10x10mm rectangle at 0.1mm spacing → 100 scanlines
 """
-deps = ["task-005", "task-007"]
+deps = ["task-005"]
 status = "complete"
+spec_file = "specs/task-008.md"
+
+# ============================================================================
+# Phase 4: WASM API & UI Integration
+# ============================================================================
 
 [[tasks]]
 id = "task-009"
-title = "Wire ZigzagSurfaceStrategy into process_stl"
+title = "Update WASM API for machine profile selection"
 acceptance = """
-- 'zigzag' strategy option in CamConfig
-- process_stl selects ZigzagSurfaceStrategy when strategy='zigzag'
-- Generates valid G-code with 3D Z motion
-- Integration test with sample STL file
+- process_stl/process_svg config JSON accepts machine_type field
+- Omitting machine_type defaults to 'cnc_mill' (backward compatible)
+- New WASM export: available_profiles() → JSON [{name, machine_type, capabilities}]
+- New WASM export: default_config(machine_type) → JSON default config for that profile
+- preview functions respect profile (laser preview: no Z, power as metadata)
+- All existing www/index.html usage works without changes
 """
-deps = ["task-003", "task-008"]
+deps = ["task-006"]
 status = "complete"
-
-# ─── Perimeter Strategy ─────────────────────────────────────────────────────
+spec_file = "specs/task-009.md"
 
 [[tasks]]
 id = "task-010"
-title = "Implement PerimeterStrategy basic boundary follow"
+title = "Add machine profile selector to web UI"
 acceptance = """
-- PerimeterStrategy implements ToolpathStrategy
-- Follows outermost contour from slicing
-- Applies tool radius offset perpendicular to path
-- Single pass at specified Z depth
+- Machine type dropdown at top of parameter panel: 'CNC Mill', 'Laser Cutter'
+- Selecting profile shows/hides relevant parameter sections dynamically
+- CNC mill shows: spindle speed, plunge rate, step-down, safe-Z, tool type, coolant
+- Laser shows: power (0-100%), cut speed, passes, line spacing (for engrave), air assist
+- Strategy dropdown filtered to only valid strategies for selected profile
+- Profile persists in localStorage across page reloads
 """
-deps = ["task-002"]
+deps = ["task-009"]
 status = "complete"
+spec_file = "specs/task-010.md"
 
 [[tasks]]
 id = "task-011"
-title = "Add climb/conventional cut direction parameter"
+title = "Profile-aware canvas preview rendering"
 acceptance = """
-- CutParams or PerimeterStrategy config includes climb_cut: bool
-- climb_cut=true: tool left of path (CW for outside)
-- climb_cut=false: tool right of path (CCW for outside)
-- Tests verify direction reversal
+- CNC preview: existing Z-height color gradient (blue=safe, red=deep cut)
+- Laser preview: cut paths as red lines (opacity = power level), travel as gray dashed
+- Laser engrave preview: filled scanlines visible with power-based opacity
+- Preview updates immediately when switching profiles
+- Legend/key shows color meaning per profile type
 """
-deps = ["task-010"]
+deps = ["task-009"]
 status = "complete"
+spec_file = "specs/task-011.md"
+
+# ============================================================================
+# Phase 5: Integration & Validation
+# ============================================================================
 
 [[tasks]]
 id = "task-012"
-title = "Support multiple perimeter passes"
+title = "End-to-end integration tests for both profiles"
 acceptance = """
-- perimeter_passes: u32 parameter (default 1)
-- Each pass offset by step_over from previous
-- Innermost pass uses full tool offset
-- Generates concentric offset paths
+- Test: SVG rectangle → CNC mill contour → G-code with M3, Z moves, F rates
+- Test: SVG rectangle → laser cut → G-code with M4, S values, no Z moves
+- Test: SVG filled shape → laser engrave → G-code with scanlines and S values
+- Test: STL mesh → CNC zigzag surface → valid G-code (laser rejects STL gracefully)
+- Test: config JSON roundtrip for each profile type
+- Test: WASM build succeeds, exports available_profiles and default_config
+- All pass in `make verify`
 """
-deps = ["task-011"]
+deps = ["task-007", "task-008", "task-009"]
 status = "complete"
+spec_file = "specs/task-012.md"
 
 [[tasks]]
 id = "task-013"
-title = "Wire PerimeterStrategy into process_stl"
+title = "Post-generation G-code validation using ported parser"
 acceptance = """
-- 'perimeter' strategy option in CamConfig
-- Slices mesh then applies perimeter to each layer
-- Respects climb_cut and perimeter_passes params
-- Integration test produces valid G-code
+- Generated G-code piped through validator before returning to caller
+- Validator checks per profile: feed rate presence on G1, valid S range, expected axes
+- Laser: warns on any Z move (except focus), S within max_laser_power
+- CNC: warns on missing plunge rate for Z moves, S within max_spindle_rpm
+- Warnings returned as JSON array alongside G-code string (non-blocking)
+- Unit tests for each validation rule
 """
-deps = ["task-003", "task-012"]
+deps = ["task-002", "task-012"]
 status = "complete"
-
-# ─── Web UI Updates ─────────────────────────────────────────────────────────
-
-[[tasks]]
-id = "task-014"
-title = "Add strategy options to UI dropdown"
-acceptance = """
-- Strategy dropdown includes: Contour, Pocket, Slice, Zigzag Surface, Perimeter
-- Selection updates config.strategy value sent to WASM
-- Existing strategies still work
-"""
-deps = []
-status = "complete"
-
-[[tasks]]
-id = "task-015"
-title = "Add tool type selector to UI"
-acceptance = """
-- Tool type dropdown: End Mill, Ball End, Face Mill
-- Face Mill shows additional 'Effective Diameter' input
-- Ball End shows corner radius (equals radius for ball end)
-- Parameters included in JSON config
-"""
-deps = ["task-014"]
-status = "complete"
-
-[[tasks]]
-id = "task-016"
-title = "Add perimeter-specific parameters to UI"
-acceptance = """
-- When Perimeter selected: show Climb Cut checkbox, Number of Passes input
-- Parameters included in JSON config when present
-- Hidden for non-perimeter strategies
-"""
-deps = ["task-014"]
-status = "complete"
-
-[[tasks]]
-id = "task-017"
-title = "Update preview for 3D toolpaths"
-acceptance = """
-- preview_stl returns toolpath moves, not just contours
-- Canvas draws tool motion with color gradient by Z height
-- Zigzag paths visible as raster lines
-"""
-deps = ["task-009", "task-013"]
-status = "complete"
+spec_file = "specs/task-013.md"
