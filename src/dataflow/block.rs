@@ -33,7 +33,7 @@ impl PortDef {
 }
 
 /// A value flowing through a channel.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum Value {
     Float(f64),
