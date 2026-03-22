@@ -4,232 +4,55 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Wasm Engineered Browser Computer-Aided Manufacturing</title>
+<link rel="stylesheet" href="./dist/styles.css"/>
 <style>
-:root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --border: #2a2d3a;
-  --accent: #4f8cff;
-  --accent-dim: #2d5299;
-  --text: #e0e0e8;
-  --text-dim: #8888a0;
-  --danger: #ff5555;
-  --success: #55ff88;
-  --mono: 'Courier New', monospace;
-}
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100vh;
-}
-header {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 12px 24px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-header h1 { font-size: 18px; font-weight: 600; }
-header span { color: var(--text-dim); font-size: 13px; }
+/* Base layout — grid-template values too complex for inline Tailwind */
 .app {
   display: grid;
   grid-template-columns: 320px 1fr 1fr;
   grid-template-rows: 1fr;
   height: calc(100vh - 49px);
 }
-/* ─ Sidebar ─ */
-.sidebar {
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  padding: 16px;
-  overflow-y: auto;
-}
-.sidebar h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-dim); margin-bottom: 12px; }
-.sidebar section { margin-bottom: 20px; }
-label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 4px; }
-input[type="number"], select, input[type="range"] {
-  width: 100%;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  color: var(--text);
-  padding: 6px 8px;
-  border-radius: 4px;
-  font-size: 13px;
-  margin-bottom: 8px;
-}
-input[type="range"] { padding: 2px 0; border: none; background: transparent; }
-input[type="number"]:focus, select:focus { outline: none; border-color: var(--accent); }
-.drop-zone {
-  border: 2px dashed var(--border);
-  border-radius: 8px;
-  padding: 32px 16px;
-  text-align: center;
-  cursor: pointer;
-  transition: border-color 0.2s, background 0.2s;
-  margin-bottom: 12px;
-}
-.drop-zone:hover, .drop-zone.drag-over {
-  border-color: var(--accent);
-  background: rgba(79,140,255,0.06);
-}
-.drop-zone p { font-size: 13px; color: var(--text-dim); }
-.drop-zone .filename { color: var(--accent); font-weight: 600; margin-top: 8px; font-size: 14px; }
-.btn {
-  display: inline-block;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 4px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.btn-primary { background: var(--accent); color: #fff; width: 100%; }
-.btn-primary:hover { background: var(--accent-dim); }
-.btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
-.btn-secondary { background: var(--border); color: var(--text); margin-top: 8px; width: 100%; }
-.btn-secondary:hover { background: #3a3d4a; }
-.btn-sm { padding: 4px 10px; font-size: 12px; width: auto; margin: 0; }
-.status { font-size: 12px; margin-top: 8px; min-height: 16px; }
-.status.error { color: var(--danger); }
-.status.ok { color: var(--success); }
-/* ─ Preview pane ─ */
-.preview {
-  background: var(--bg);
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--border);
-}
-.preview .pane-header {
-  font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
-  color: var(--text-dim); padding: 12px 16px; border-bottom: 1px solid var(--border);
-}
+/* Canvas elements fill their container */
 canvas { flex: 1; width: 100%; height: 100%; display: block; }
-/* ─ Right pane (tabs) ─ */
-.right-pane {
-  background: var(--bg);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.tab-bar {
-  display: flex;
-  border-bottom: 1px solid var(--border);
-}
-.tab-bar button {
-  flex: 1;
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 10px 0;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: color 0.15s, border-color 0.15s;
-}
-.tab-bar button.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
-.tab-content { flex: 1; display: none; flex-direction: column; overflow: hidden; }
-.tab-content.active { display: flex; }
-/* G-code tab */
-.gcode-toolbar {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 16px; border-bottom: 1px solid var(--border);
-}
-.gcode-toolbar .spacer { flex: 1; }
-#gcode-output {
-  flex: 1; background: var(--surface); color: var(--text); border: none;
-  padding: 12px; font-family: var(--mono); font-size: 12px; line-height: 1.6;
-  resize: none; overflow: auto;
-}
-/* Sim tab */
-.sim-wrap { flex: 1; position: relative; }
-.sim-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
-.sim-controls {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; border-top: 1px solid var(--border); background: var(--surface);
-}
-.sim-controls .spacer { flex: 1; }
-.sim-controls .scrubber { flex: 3; }
-.sim-info { font-size: 11px; color: var(--text-dim); min-width: 90px; text-align: right; font-family: var(--mono); }
-/* ─ Mode switcher ─ */
-.mode-switcher {
-  display: flex; gap: 2px; margin-left: auto;
-  background: var(--bg); border-radius: 6px; padding: 2px;
-}
-.mode-switcher button {
-  background: transparent; border: none; color: var(--text-dim);
-  font-size: 13px; font-weight: 600; padding: 6px 16px;
-  border-radius: 4px; cursor: pointer; transition: background 0.15s, color 0.15s;
-}
-.mode-switcher button.active { background: var(--accent); color: #fff; }
-/* ─ Sketch mode ─ */
-.app.sketch-mode { grid-template-columns: 320px 1fr; }
-.app.sketch-mode .right-pane { display: none; }
-/* ─ Dataflow mode ─ */
-.app.dataflow-mode { grid-template-columns: 280px 1fr 280px; }
-.app.dataflow-mode .preview { display: none; }
-.app.dataflow-mode .right-pane { display: none; }
-.df-canvas-wrap { flex: 1; position: relative; display: none; }
-.app.dataflow-mode .df-canvas-wrap { display: flex; flex-direction: column; }
-.df-canvas-wrap canvas { flex: 1; width: 100%; display: block; cursor: crosshair; }
-.df-controls { display: flex; gap: 6px; align-items: center; padding: 8px 12px; border-top: 1px solid var(--border); background: var(--surface); font-size: 12px; }
-.df-right { background: var(--surface); border-left: 1px solid var(--border); padding: 12px; overflow-y: auto; display: none; }
-.app.dataflow-mode .df-right { display: block; }
-.sketch-tools { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 12px; }
-.btn-tool { text-align: center; }
-.btn-tool.active { background: var(--accent) !important; color: #fff !important; }
-.btn-cst { font-size: 11px; padding: 2px 6px; text-align: center; }
-.btn-cst.active { background: #ff9800 !important; color: #fff !important; }
-/* ─ Responsive ─ */
-@media (max-width: 900px) {
-  .app { grid-template-columns: 1fr; grid-template-rows: auto 300px 1fr; }
-  .preview, .right-pane { border-right: none; border-bottom: 1px solid var(--border); }
-}
+/* Range inputs: transparent bg, no border */
+input[type="range"] { padding: 2px 0; border: none; background: transparent; }
 </style>
 </head>
-<body>
+<body class="font-sans bg-bg text-text min-h-screen box-border m-0 p-0">
 
-<header>
-  <h1>Wasm Engineered Browser Computer-Aided Manufacturing</h1>
-  <span>STL / SVG &rarr; G-code &mdash; runs entirely in your browser</span>
-  <div class="mode-switcher" id="mode-switcher">
-    <button class="active" data-mode="cam">CAM</button>
-    <button data-mode="sketch">2D Sketch</button>
-    <button data-mode="dataflow">Dataflow</button>
+<header class="bg-surface border-b border-border px-6 py-3 flex items-center gap-4">
+  <h1 class="text-lg font-semibold">Wasm Engineered Browser Computer-Aided Manufacturing</h1>
+  <span class="text-text-dim text-[13px]">STL / SVG &rarr; G-code &mdash; runs entirely in your browser</span>
+  <div class="flex gap-0.5 ml-auto bg-bg rounded-md p-0.5" id="mode-switcher">
+    <button class="active bg-transparent border-none text-text-dim text-[13px] font-semibold px-4 py-1.5 rounded cursor-pointer transition-colors duration-150 [&.active]:bg-accent [&.active]:text-white" data-mode="cam">CAM</button>
+    <button class="bg-transparent border-none text-text-dim text-[13px] font-semibold px-4 py-1.5 rounded cursor-pointer transition-colors duration-150 [&.active]:bg-accent [&.active]:text-white" data-mode="sketch">2D Sketch</button>
+    <button class="bg-transparent border-none text-text-dim text-[13px] font-semibold px-4 py-1.5 rounded cursor-pointer transition-colors duration-150 [&.active]:bg-accent [&.active]:text-white" data-mode="dataflow">Dataflow</button>
   </div>
 </header>
 
 <div class="app">
   <!-- Sidebar -->
-  <div class="sidebar">
+  <div class="sidebar bg-surface border-r border-border p-4 overflow-y-auto">
     <div id="cam-sidebar-content">
-    <section>
-      <h2>Input File</h2>
-      <div class="drop-zone" id="drop-zone">
-        <p>Drop an <b>.stl</b> or <b>.svg</b> file here<br/>or click to browse</p>
-        <div class="filename" id="filename"></div>
+    <section class="mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Input File</h2>
+      <div class="drop-zone border-2 border-dashed border-border rounded-lg px-4 py-8 text-center cursor-pointer transition-colors duration-200 mb-3 hover:border-accent hover:bg-[rgba(79,140,255,0.06)]" id="drop-zone">
+        <p class="text-[13px] text-text-dim">Drop an <b>.stl</b> or <b>.svg</b> file here<br/>or click to browse</p>
+        <div class="text-accent font-semibold mt-2 text-sm" id="filename"></div>
       </div>
       <input type="file" id="file-input" accept=".stl,.svg" hidden/>
     </section>
-    <section>
-      <h2>Machine</h2>
-      <select id="machine-type">
+    <section class="mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Machine</h2>
+      <select id="machine-type" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2">
         <option value="cnc_mill">CNC Mill</option>
         <option value="laser_cutter">Laser Cutter</option>
       </select>
     </section>
-    <section>
-      <h2>Strategy</h2>
-      <select id="strategy">
+    <section class="mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Strategy</h2>
+      <select id="strategy" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2">
         <option value="contour">Contour (profile cut)</option>
         <option value="pocket">Pocket (area clear)</option>
         <option value="slice">Slice (layer contour)</option>
@@ -239,102 +62,102 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
         <option value="laser_engrave">Laser Engrave</option>
       </select>
     </section>
-    <section>
-      <h2>Tool</h2>
-      <label>Tool type</label>
-      <select id="tool-type">
+    <section class="mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Tool</h2>
+      <label class="block text-[13px] text-text-dim mb-1">Tool type</label>
+      <select id="tool-type" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2">
         <option value="end_mill">End Mill</option>
         <option value="ball_end">Ball End</option>
         <option value="face_mill">Face Mill</option>
       </select>
-      <label>Tool diameter (mm)</label>
-      <input type="number" id="tool-diameter" value="3.175" step="0.1" min="0.1"/>
-      <div id="effective-diameter-row" style="display:none;">
-        <label>Effective diameter (mm)</label>
-        <input type="number" id="effective-diameter" value="3.175" step="0.1" min="0.1"/>
+      <label class="block text-[13px] text-text-dim mb-1">Tool diameter (mm)</label>
+      <input type="number" id="tool-diameter" value="3.175" step="0.1" min="0.1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <div id="effective-diameter-row" class="hidden">
+        <label class="block text-[13px] text-text-dim mb-1">Effective diameter (mm)</label>
+        <input type="number" id="effective-diameter" value="3.175" step="0.1" min="0.1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
       </div>
-      <div id="corner-radius-row" style="display:none;">
-        <label>Corner radius (mm)</label>
-        <input type="number" id="corner-radius" value="0" step="0.1" min="0"/>
+      <div id="corner-radius-row" class="hidden">
+        <label class="block text-[13px] text-text-dim mb-1">Corner radius (mm)</label>
+        <input type="number" id="corner-radius" value="0" step="0.1" min="0" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
       </div>
-      <label>Step-over (mm)</label>
-      <input type="number" id="step-over" value="1.5" step="0.1" min="0.1"/>
+      <label class="block text-[13px] text-text-dim mb-1">Step-over (mm)</label>
+      <input type="number" id="step-over" value="1.5" step="0.1" min="0.1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
     </section>
-    <section id="zigzag-options" style="display:none;">
-      <h2>Zigzag Options</h2>
-      <label>Scan direction</label>
-      <select id="scan-direction">
+    <section id="zigzag-options" class="hidden mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Zigzag Options</h2>
+      <label class="block text-[13px] text-text-dim mb-1">Scan direction</label>
+      <select id="scan-direction" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2">
         <option value="x">X (rows along X)</option>
         <option value="y">Y (rows along Y)</option>
       </select>
     </section>
-    <section id="perimeter-options" style="display:none;">
-      <h2>Perimeter Options</h2>
-      <label>
+    <section id="perimeter-options" class="hidden mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Perimeter Options</h2>
+      <label class="block text-[13px] text-text-dim mb-1">
         <input type="checkbox" id="climb-cut"/>
         Climb cutting
       </label>
-      <label>Number of passes</label>
-      <input type="number" id="perimeter-passes" value="1" step="1" min="1"/>
+      <label class="block text-[13px] text-text-dim mb-1">Number of passes</label>
+      <input type="number" id="perimeter-passes" value="1" step="1" min="1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
     </section>
-    <section id="cnc-params">
-      <h2>Cutting</h2>
-      <label>Cut depth (mm, negative)</label>
-      <input type="number" id="cut-depth" value="-1" step="0.5"/>
-      <label>Step-down per pass (mm)</label>
-      <input type="number" id="step-down" value="1" step="0.25" min="0.1"/>
-      <label>Feed rate (mm/min)</label>
-      <input type="number" id="feed-rate" value="800" step="50" min="1"/>
-      <label>Plunge rate (mm/min)</label>
-      <input type="number" id="plunge-rate" value="300" step="50" min="1"/>
-      <label>Spindle speed (RPM)</label>
-      <input type="number" id="spindle-speed" value="12000" step="500" min="0"/>
-      <label>Safe Z (mm)</label>
-      <input type="number" id="safe-z" value="5" step="1" min="0.5"/>
+    <section id="cnc-params" class="mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Cutting</h2>
+      <label class="block text-[13px] text-text-dim mb-1">Cut depth (mm, negative)</label>
+      <input type="number" id="cut-depth" value="-1" step="0.5" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Step-down per pass (mm)</label>
+      <input type="number" id="step-down" value="1" step="0.25" min="0.1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Feed rate (mm/min)</label>
+      <input type="number" id="feed-rate" value="800" step="50" min="1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Plunge rate (mm/min)</label>
+      <input type="number" id="plunge-rate" value="300" step="50" min="1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Spindle speed (RPM)</label>
+      <input type="number" id="spindle-speed" value="12000" step="500" min="0" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Safe Z (mm)</label>
+      <input type="number" id="safe-z" value="5" step="1" min="0.5" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
     </section>
-    <section id="laser-params" style="display:none;">
-      <h2>Laser</h2>
-      <label>Laser power (%)</label>
-      <input type="number" id="laser-power" value="100" step="5" min="0" max="100"/>
-      <label>Feed rate (mm/min)</label>
-      <input type="number" id="laser-feed-rate" value="1000" step="50" min="1"/>
-      <label>Number of passes</label>
-      <input type="number" id="laser-passes" value="1" step="1" min="1"/>
-      <label>
+    <section id="laser-params" class="hidden mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Laser</h2>
+      <label class="block text-[13px] text-text-dim mb-1">Laser power (%)</label>
+      <input type="number" id="laser-power" value="100" step="5" min="0" max="100" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Feed rate (mm/min)</label>
+      <input type="number" id="laser-feed-rate" value="1000" step="50" min="1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Number of passes</label>
+      <input type="number" id="laser-passes" value="1" step="1" min="1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">
         <input type="checkbox" id="air-assist"/>
         Air assist
       </label>
     </section>
-    <section>
+    <section class="mb-5">
       <button class="btn btn-primary" id="generate-btn" disabled>Generate G-code</button>
-      <div class="status" id="status"></div>
+      <div class="text-xs mt-2 min-h-4" id="status"></div>
     </section>
     </div><!-- cam-sidebar-content -->
 
-    <div id="sketch-sidebar-content" style="display:none">
-      <section>
-        <h2>Drawing Tools</h2>
-        <div class="sketch-tools">
+    <div id="sketch-sidebar-content" class="hidden">
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Drawing Tools</h2>
+        <div class="grid grid-cols-2 gap-1 mb-3">
           <button class="btn btn-secondary btn-tool active" data-tool="line">Line</button>
           <button class="btn btn-secondary btn-tool" data-tool="rect">Rectangle</button>
           <button class="btn btn-secondary btn-tool" data-tool="circle">Circle</button>
           <button class="btn btn-secondary btn-tool" data-tool="polyline">Polyline</button>
         </div>
       </section>
-      <section>
-        <h2>Canvas</h2>
-        <label>Grid snap (mm)</label>
-        <input type="number" id="grid-snap" value="1" step="0.5" min="0"/>
-        <label>Canvas size (mm)</label>
-        <input type="number" id="canvas-size" value="100" step="10" min="10"/>
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Canvas</h2>
+        <label class="block text-[13px] text-text-dim mb-1">Grid snap (mm)</label>
+        <input type="number" id="grid-snap" value="1" step="0.5" min="0" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+        <label class="block text-[13px] text-text-dim mb-1">Canvas size (mm)</label>
+        <input type="number" id="canvas-size" value="100" step="10" min="10" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
       </section>
-      <section>
-        <h2>Shapes (<span id="shape-count">0</span>)</h2>
-        <div id="shape-list" style="max-height:200px;overflow-y:auto;font-size:12px;color:var(--text-dim)"></div>
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Shapes (<span id="shape-count">0</span>)</h2>
+        <div id="shape-list" class="max-h-[200px] overflow-y-auto text-xs text-text-dim"></div>
       </section>
-      <section>
-        <h2>Constraints</h2>
-        <div class="sketch-tools">
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Constraints</h2>
+        <div class="grid grid-cols-2 gap-1">
           <button class="btn btn-secondary btn-cst" data-cst="coincident" title="Merge two points">Coincident</button>
           <button class="btn btn-secondary btn-cst" data-cst="horizontal" title="Same Y">Horiz</button>
           <button class="btn btn-secondary btn-cst" data-cst="vertical" title="Same X">Vert</button>
@@ -344,108 +167,114 @@ canvas { flex: 1; width: 100%; height: 100%; display: block; }
           <button class="btn btn-secondary btn-cst" data-cst="parallel" title="Same angle">Parallel</button>
           <button class="btn btn-secondary btn-cst" data-cst="equal_length" title="Equal segment lengths">Equal</button>
         </div>
-        <div id="cst-status" style="font-size:11px;color:var(--text-dim);margin-top:4px"></div>
-        <div id="cst-dof" style="font-size:12px;margin-top:4px;font-weight:600"></div>
-        <div id="cst-list" style="max-height:150px;overflow-y:auto;font-size:11px;color:var(--text-dim);margin-top:4px"></div>
+        <div id="cst-status" class="text-[11px] text-text-dim mt-1"></div>
+        <div id="cst-dof" class="text-xs mt-1 font-semibold"></div>
+        <div id="cst-list" class="max-h-[150px] overflow-y-auto text-[11px] text-text-dim mt-1"></div>
       </section>
-      <section>
+      <section class="mb-5">
         <button class="btn btn-secondary" id="sketch-undo">Undo Last Shape</button>
-        <button class="btn btn-secondary" id="sketch-clear" style="margin-top:4px">Clear All</button>
-        <button class="btn btn-primary" id="sketch-to-cam" style="margin-top:12px">Use Sketch in CAM &rarr;</button>
-        <div class="status" id="sketch-status"></div>
+        <button class="btn btn-secondary" id="sketch-clear">Clear All</button>
+        <button class="btn btn-primary mt-3" id="sketch-to-cam">Use Sketch in CAM &rarr;</button>
+        <div class="text-xs mt-2 min-h-4" id="sketch-status"></div>
       </section>
     </div><!-- sketch-sidebar-content -->
 
-    <div id="dataflow-sidebar-content" style="display:none">
-      <section>
-        <h2>Dataflow Simulator</h2>
-        <p style="font-size:12px;color:var(--text-dim);margin-bottom:8px">
+    <div id="dataflow-sidebar-content" class="hidden">
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Dataflow Simulator</h2>
+        <p class="text-xs text-text-dim mb-2">
           Double-click canvas to add blocks.<br>
           Drag between ports to connect.<br>
           Right-click a block to remove it.
         </p>
       </section>
-      <section>
-        <h2>Transport</h2>
-        <div style="display:flex;gap:4px;margin-bottom:8px">
-          <button class="btn btn-primary btn-sm" id="df-play" style="flex:1">Play</button>
-          <button class="btn btn-secondary btn-sm" id="df-reset" style="flex:1">Reset</button>
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Transport</h2>
+        <div class="flex gap-1 mb-2">
+          <button class="btn btn-primary btn-sm flex-1" id="df-play">Play</button>
+          <button class="btn btn-secondary btn-sm flex-1" id="df-reset">Reset</button>
         </div>
-        <label>Time step (s)</label>
-        <input type="number" id="df-dt" value="0.01" step="0.001" min="0.0001"/>
-        <label>Speed multiplier</label>
-        <input type="number" id="df-speed" value="1" step="0.5" min="0"/>
+        <label class="block text-[13px] text-text-dim mb-1">Time step (s)</label>
+        <input type="number" id="df-dt" value="0.01" step="0.001" min="0.0001" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+        <label class="block text-[13px] text-text-dim mb-1">Speed multiplier</label>
+        <input type="number" id="df-speed" value="1" step="0.5" min="0" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
       </section>
-      <section>
-        <h2>Batch (Non-realtime)</h2>
-        <label>Steps</label>
-        <input type="number" id="df-batch-steps" value="100" step="10" min="1"/>
-        <button class="btn btn-secondary" id="df-batch" style="margin-top:4px;width:100%">Run Batch</button>
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Batch (Non-realtime)</h2>
+        <label class="block text-[13px] text-text-dim mb-1">Steps</label>
+        <input type="number" id="df-batch-steps" value="100" step="10" min="1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+        <button class="btn btn-secondary w-full mt-1" id="df-batch">Run Batch</button>
       </section>
-      <section>
-        <h2>Selected Block</h2>
-        <div id="df-block-info" style="font-size:12px;min-height:40px">
-          <span style="color:var(--text-dim)">Select a block to view details</span>
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Export</h2>
+        <div id="df-target-select" class="mb-3"></div>
+        <button class="btn btn-secondary w-full" id="df-export-rust">Generate &amp; Download</button>
+        <div class="text-xs mt-2 min-h-4" id="df-export-status"></div>
+      </section>
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Selected Block</h2>
+        <div id="df-block-info" class="text-xs min-h-[40px]">
+          <span class="text-text-dim">Select a block to view details</span>
         </div>
       </section>
     </div><!-- dataflow-sidebar-content -->
   </div>
 
   <!-- Preview canvas -->
-  <div class="preview">
-    <div class="pane-header" id="preview-header">Toolpath Preview</div>
+  <div class="preview bg-bg flex flex-col border-r border-border">
+    <div class="text-[13px] uppercase tracking-wider text-text-dim px-4 py-3 border-b border-border" id="preview-header">Toolpath Preview</div>
     <canvas id="preview-canvas"></canvas>
-    <div id="sketch-canvas-wrap" style="display:none;flex:1;position:relative;">
-      <canvas id="sketch-canvas" style="position:absolute;inset:0;width:100%;height:100%;cursor:crosshair"></canvas>
-      <div style="position:absolute;top:8px;right:12px;font-size:11px;color:var(--text-dim);font-family:var(--mono)" id="sketch-cursor-pos"></div>
+    <div id="sketch-canvas-wrap" class="flex-1 relative" style="display:none">
+      <canvas id="sketch-canvas" class="absolute inset-0 w-full h-full cursor-crosshair"></canvas>
+      <div class="absolute top-2 right-3 text-[11px] text-text-dim font-mono" id="sketch-cursor-pos"></div>
     </div>
   </div>
 
   <!-- Right pane: G-code + Simulation tabs -->
-  <div class="right-pane">
-    <div class="tab-bar">
-      <button class="active" data-tab="gcode-tab">G-code</button>
-      <button data-tab="sim-tab">Simulation</button>
+  <div class="right-pane bg-bg flex flex-col overflow-hidden">
+    <div class="tab-bar flex border-b border-border">
+      <button class="active flex-1 bg-transparent border-none text-text-dim text-[13px] font-semibold uppercase tracking-wider py-2.5 cursor-pointer border-b-2 border-transparent transition-colors duration-150 [&.active]:text-accent [&.active]:border-b-accent" data-tab="gcode-tab">G-code</button>
+      <button class="flex-1 bg-transparent border-none text-text-dim text-[13px] font-semibold uppercase tracking-wider py-2.5 cursor-pointer border-b-2 border-transparent transition-colors duration-150 [&.active]:text-accent [&.active]:border-b-accent" data-tab="sim-tab">Simulation</button>
     </div>
 
     <!-- G-code tab -->
-    <div class="tab-content active" id="gcode-tab">
-      <div class="gcode-toolbar">
-        <div class="spacer"></div>
+    <div class="tab-content flex-1 flex-col overflow-hidden [&.active]:flex active" id="gcode-tab">
+      <div class="flex items-center gap-2 px-4 py-2 border-b border-border">
+        <div class="flex-1"></div>
         <button class="btn btn-sm btn-secondary" id="copy-btn">Copy</button>
         <button class="btn btn-sm btn-secondary" id="download-btn">Download .nc</button>
       </div>
-      <textarea id="gcode-output" readonly placeholder="G-code will appear here after generation..."></textarea>
+      <textarea id="gcode-output" readonly placeholder="G-code will appear here after generation..." class="flex-1 bg-surface text-text border-none p-3 font-mono text-xs leading-relaxed resize-none overflow-auto"></textarea>
     </div>
 
     <!-- Simulation tab -->
-    <div class="tab-content" id="sim-tab">
-      <div class="sim-wrap">
-        <canvas id="sim-canvas"></canvas>
+    <div class="tab-content flex-1 flex-col overflow-hidden [&.active]:flex" id="sim-tab">
+      <div class="flex-1 relative">
+        <canvas id="sim-canvas" class="absolute inset-0 w-full h-full"></canvas>
       </div>
-      <div class="sim-controls">
+      <div class="flex items-center gap-2 px-3 py-2 border-t border-border bg-surface">
         <button class="btn btn-sm btn-secondary" id="sim-play">Play</button>
         <button class="btn btn-sm btn-secondary" id="sim-reset">Reset</button>
-        <label style="margin:0;font-size:11px;min-width:50px">Speed</label>
-        <input type="range" id="sim-speed" min="1" max="200" value="50" style="width:80px;flex:0 0 80px"/>
-        <input type="range" class="scrubber" id="sim-scrub" min="0" max="1" step="0.001" value="0"/>
-        <div class="sim-info" id="sim-info">0 / 0</div>
+        <label class="m-0 text-[11px] min-w-[50px]">Speed</label>
+        <input type="range" id="sim-speed" min="1" max="200" value="50" class="w-20 flex-none"/>
+        <input type="range" class="flex-[3]" id="sim-scrub" min="0" max="1" step="0.001" value="0"/>
+        <div class="text-[11px] text-text-dim min-w-[90px] text-right font-mono" id="sim-info">0 / 0</div>
       </div>
     </div>
   </div>
 
-  <!-- Dataflow canvas -->
-  <div class="df-canvas-wrap">
-    <canvas id="dataflow-canvas"></canvas>
-    <div class="df-controls">
-      <span id="df-time-info" style="font-family:var(--mono);color:var(--text-dim)">t=0.000</span>
+  <!-- Dataflow workspace -->
+  <div class="df-canvas-wrap flex-1 relative">
+    <div id="dataflow-workspace" class="df-workspace"></div>
+    <div class="df-controls flex gap-1.5 items-center px-3 py-2 border-t border-border bg-surface text-xs">
+      <span id="df-time-info" class="font-mono text-text-dim">t=0.000</span>
     </div>
   </div>
 
   <!-- Dataflow right pane (plots) -->
-  <div class="df-right">
-    <h2 style="font-size:13px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-dim);margin-bottom:8px">Plot</h2>
-    <canvas id="df-plot-canvas" style="width:100%;height:200px;border:1px solid var(--border);border-radius:4px"></canvas>
+  <div class="df-right bg-surface border-l border-border p-3 overflow-y-auto">
+    <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-2">Plot</h2>
+    <canvas id="df-plot-canvas" class="w-full h-[200px] border border-border rounded"></canvas>
   </div>
 </div>
 

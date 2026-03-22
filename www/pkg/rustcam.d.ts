@@ -23,6 +23,19 @@ export function dataflow_advance(graph_id: number, elapsed: number): string;
 export function dataflow_block_types(): string;
 
 /**
+ * Generate a standalone Rust crate from a dataflow graph.
+ * Returns JSON: `{ "files": [["path", "content"], ...] }` or error.
+ */
+export function dataflow_codegen(graph_id: number, dt: number): string;
+
+/**
+ * Generate a multi-target workspace from a dataflow graph.
+ * targets_json is a JSON array of { target, binding } objects.
+ * Returns JSON: `[["path", "content"], ...]` or error.
+ */
+export function dataflow_codegen_multi(graph_id: number, dt: number, targets_json: string): string;
+
+/**
  * Connect an output port to an input port. Returns channel id.
  */
 export function dataflow_connect(graph_id: number, from_block: number, from_port: number, to_block: number, to_port: number): number;
@@ -62,6 +75,11 @@ export function dataflow_set_speed(graph_id: number, speed: number): void;
  * Get a snapshot of the graph without ticking.
  */
 export function dataflow_snapshot(graph_id: number): string;
+
+/**
+ * Update a block's config by replacing it in-place (preserving channels where ports still match).
+ */
+export function dataflow_update_block(graph_id: number, block_id: number, block_type: string, config_json: string): void;
 
 /**
  * Return a default config JSON for the given machine type.
@@ -182,6 +200,7 @@ export interface InitOutput {
     readonly dataflow_add_block: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly dataflow_advance: (a: number, b: number) => [number, number, number, number];
     readonly dataflow_block_types: () => [number, number];
+    readonly dataflow_codegen: (a: number, b: number) => [number, number, number, number];
     readonly dataflow_connect: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly dataflow_destroy: (a: number) => void;
     readonly dataflow_disconnect: (a: number, b: number) => [number, number];
@@ -190,6 +209,7 @@ export interface InitOutput {
     readonly dataflow_run: (a: number, b: number, c: number) => [number, number, number, number];
     readonly dataflow_set_speed: (a: number, b: number) => [number, number];
     readonly dataflow_snapshot: (a: number) => [number, number, number, number];
+    readonly dataflow_update_block: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly default_config: (a: number, b: number) => [number, number];
     readonly preview_stl: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly preview_svg: (a: number, b: number) => [number, number, number, number];

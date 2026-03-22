@@ -1,9 +1,11 @@
 //! Built-in block implementations.
 
 pub mod constant;
+pub mod embedded;
 pub mod function;
 pub mod plot;
 pub mod serde_block;
+pub mod state_machine;
 pub mod udp;
 
 use super::block::Block;
@@ -44,6 +46,41 @@ pub fn create_block(block_type: &str, config_json: &str) -> Result<Box<dyn Block
             let cfg: udp::UdpConfig =
                 serde_json::from_str(config_json).map_err(|e| e.to_string())?;
             Ok(Box::new(udp::UdpSinkBlock::new(&cfg.address)))
+        }
+        "adc_source" => {
+            let cfg: embedded::AdcConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(embedded::AdcBlock::from_config(cfg)))
+        }
+        "pwm_sink" => {
+            let cfg: embedded::PwmConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(embedded::PwmBlock::from_config(cfg)))
+        }
+        "gpio_out" => {
+            let cfg: embedded::GpioOutConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(embedded::GpioOutBlock::from_config(cfg)))
+        }
+        "gpio_in" => {
+            let cfg: embedded::GpioInConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(embedded::GpioInBlock::from_config(cfg)))
+        }
+        "uart_tx" => {
+            let cfg: embedded::UartTxConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(embedded::UartTxBlock::from_config(cfg)))
+        }
+        "uart_rx" => {
+            let cfg: embedded::UartRxConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(embedded::UartRxBlock::from_config(cfg)))
+        }
+        "state_machine" => {
+            let cfg: state_machine::StateMachineConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(state_machine::StateMachineBlock::from_config(cfg)))
         }
         _ => Err(format!("unknown block type: {block_type}")),
     }
@@ -101,6 +138,41 @@ pub fn available_block_types() -> Vec<BlockTypeInfo> {
             block_type: "udp_sink",
             name: "UDP Sink",
             category: "I/O",
+        },
+        BlockTypeInfo {
+            block_type: "adc_source",
+            name: "ADC Source",
+            category: "Embedded",
+        },
+        BlockTypeInfo {
+            block_type: "pwm_sink",
+            name: "PWM Sink",
+            category: "Embedded",
+        },
+        BlockTypeInfo {
+            block_type: "gpio_out",
+            name: "GPIO Out",
+            category: "Embedded",
+        },
+        BlockTypeInfo {
+            block_type: "gpio_in",
+            name: "GPIO In",
+            category: "Embedded",
+        },
+        BlockTypeInfo {
+            block_type: "uart_tx",
+            name: "UART TX",
+            category: "Embedded",
+        },
+        BlockTypeInfo {
+            block_type: "uart_rx",
+            name: "UART RX",
+            category: "Embedded",
+        },
+        BlockTypeInfo {
+            block_type: "state_machine",
+            name: "State Machine",
+            category: "Logic",
         },
     ]
 }

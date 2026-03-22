@@ -1135,6 +1135,27 @@ pub fn dataflow_remove_block(graph_id: u32, block_id: u32) -> Result<(), JsValue
     })
 }
 
+/// Update a block's config by replacing it in-place (preserving channels where ports still match).
+#[wasm_bindgen]
+pub fn dataflow_update_block(
+    graph_id: u32,
+    block_id: u32,
+    block_type: &str,
+    config_json: &str,
+) -> Result<(), JsValue> {
+    let block = dataflow::blocks::create_block(block_type, config_json)
+        .map_err(|e| JsValue::from_str(&e))?;
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        graph
+            .replace_block(dataflow::BlockId(block_id), block)
+            .map_err(|e| JsValue::from_str(&e))
+    })
+}
+
 /// Connect an output port to an input port. Returns channel id.
 #[wasm_bindgen]
 pub fn dataflow_connect(
@@ -1241,4 +1262,46 @@ pub fn dataflow_snapshot(graph_id: u32) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn dataflow_block_types() -> String {
     serde_json::to_string(&dataflow::blocks::available_block_types()).unwrap_or_default()
+}
+
+/// Generate a standalone Rust crate from a dataflow graph.
+/// Returns JSON: `{ "files": [["path", "content"], ...] }` or error.
+#[wasm_bindgen]
+pub fn dataflow_codegen(graph_id: u32, dt: f64) -> Result<String, JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let graphs = g.borrow();
+        let graph = graphs
+            .get(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        let snap = graph.snapshot();
+        let generated = dataflow::codegen::generate_rust(&snap, dt)
+            .map_err(|e| JsValue::from_str(&e))?;
+        let files_json: Vec<(String, String)> = generated.files;
+        serde_json::to_string(&files_json).map_err(|e| JsValue::from_str(&e.to_string()))
+    })
+}
+
+/// Generate a multi-target workspace from a dataflow graph.
+///
+/// `targets_json` is a JSON array of `{ "target": "host"|"rp2040"|"stm32f4"|"esp32c3", "binding": {...} }`.
+/// Returns JSON: `[["path", "content"], ...]` or error.
+#[wasm_bindgen]
+pub fn dataflow_codegen_multi(
+    graph_id: u32,
+    dt: f64,
+    targets_json: &str,
+) -> Result<String, JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let graphs = g.borrow();
+        let graph = graphs
+            .get(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        let snap = graph.snapshot();
+        let targets: Vec<dataflow::codegen::binding::TargetWithBinding> =
+            serde_json::from_str(targets_json)
+                .map_err(|e| JsValue::from_str(&format!("invalid targets JSON: {e}")))?;
+        let ws = dataflow::codegen::generate_workspace(&snap, dt, &targets)
+            .map_err(|e| JsValue::from_str(&e))?;
+        serde_json::to_string(&ws.files).map_err(|e| JsValue::from_str(&e.to_string()))
+    })
 }
