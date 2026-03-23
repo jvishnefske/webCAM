@@ -1,10 +1,8 @@
 /** Simple time-series plot renderer for plot blocks. */
 
+import { theme } from '../theme.js';
+
 const PLOT_PAD = 30;
-const PLOT_BG = '#1a1d27';
-const PLOT_AXIS = '#2a2d3a';
-const PLOT_LINE = '#4f8cff';
-const PLOT_TEXT = '#8888a0';
 
 export function drawPlot(
   canvas: HTMLCanvasElement,
@@ -25,11 +23,11 @@ export function drawPlot(
   const h = rect.height;
 
   // Background
-  ctx.fillStyle = PLOT_BG;
+  ctx.fillStyle = theme.colors.surface;
   ctx.fillRect(0, 0, w, h);
 
   if (data.length < 2) {
-    ctx.fillStyle = PLOT_TEXT;
+    ctx.fillStyle = theme.colors.textDim;
     ctx.font = '12px monospace';
     ctx.fillText('Waiting for data...', PLOT_PAD, h / 2);
     ctx.restore();
@@ -47,7 +45,7 @@ export function drawPlot(
   if (max === min) { max += 1; min -= 1; }
 
   // Axes
-  ctx.strokeStyle = PLOT_AXIS;
+  ctx.strokeStyle = theme.colors.border;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(PLOT_PAD, PLOT_PAD);
@@ -56,7 +54,7 @@ export function drawPlot(
   ctx.stroke();
 
   // Y-axis labels
-  ctx.fillStyle = PLOT_TEXT;
+  ctx.fillStyle = theme.colors.textDim;
   ctx.font = '10px monospace';
   ctx.textAlign = 'right';
   ctx.fillText(max.toFixed(2), PLOT_PAD - 4, PLOT_PAD + 4);
@@ -67,7 +65,7 @@ export function drawPlot(
   ctx.fillText(label, PLOT_PAD, PLOT_PAD - 8);
 
   // Data line
-  ctx.strokeStyle = PLOT_LINE;
+  ctx.strokeStyle = theme.colors.accent;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   for (let i = 0; i < data.length; i++) {

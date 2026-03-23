@@ -7,6 +7,7 @@
 pub mod block;
 pub mod blocks;
 pub mod channel;
+pub mod codegen;
 pub mod graph;
 pub mod scheduler;
 

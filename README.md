@@ -1,88 +1,50 @@
-# Rust webCAM
+# webCAM
 
-Browser-based computer-aided manufacturing tool. Load an **STL** (3-D mesh) or
-**SVG** (2-D vector) file and generate **G-code** — all in WebAssembly, no
-server required.
+**CNC toolpath generation that runs entirely in your browser.**
 
-Inspired by [PyCAM](https://pycam.sourceforge.net/); reference implementation
-in Rust targeting `wasm32-unknown-unknown`.
+Desktop CAM software is heavy, expensive, and platform-locked. webCAM compiles
+Rust to WebAssembly so you get STL/SVG → G-code conversion with zero installs,
+zero server calls, and zero cost.
 
-## Swiss Cheese Architecture
+**[Try it live →](https://jvishnefske.github.io/cam)**
 
-The processing pipeline is four independent layers with explicit extension
-points ("holes") where new functionality plugs in without touching existing
-code:
+## What it does
 
 ```
-Input ──> Geometry ──> Strategy ──> Output
-(STL,SVG)  (Mesh,Paths)  (Contour,    (G-code)
-                          Pocket,
- +OBJ,3MF   +NURBS       Slice)       +HPGL
- +STEP,DXF  +T-spline   +trochoidal   +Marlin
-                         +adaptive     +GRBL
+ Drop a file         Pick a strategy        Get G-code
+┌───────────┐      ┌───────────────┐      ┌───────────┐
+│  .stl     │ ──→  │  Contour      │ ──→  │  .nc file │
+│  .svg     │      │  Pocket       │      │  copy or  │
+│  sketch   │      │  Slice        │      │  download │
+└───────────┘      │  Zigzag       │      └───────────┘
+                   │  Laser cut    │
+                   └───────────────┘
 ```
 
-Each layer is a Rust module behind a trait boundary.
+- **3D meshes** (STL) — slice into layers, generate surface and contour paths
+- **2D vectors** (SVG) — profile cuts, pocket clearing, laser engraving
+- **Built-in sketcher** — draw constrained 2D geometry and send it straight to CAM
+- **Toolpath simulation** — watch the toolhead trace the path before you cut
+- **Dataflow editor** — wire up signal-processing blocks for custom workflows
 
 ## Quick start
 
 ```bash
-# Run unit tests
-make test
-
-# Build WASM (requires wasm-pack)
-make wasm
-
-# Serve locally
-make serve       # http://localhost:8080
-
-# Package for release
-make release     # dist/rustcam.zip
+make test            # run unit tests
+make wasm            # build WASM (requires wasm-pack 0.12+)
+make serve           # http://localhost:8080
 ```
 
-### Requirements
+## How the pipeline works
 
-| Tool | Version |
-|------|---------|
-| Rust | stable  |
-| wasm-pack | 0.12+ |
-| Python 3 | (for `make serve` only) |
+Four layers, each behind a trait boundary. Extend any layer without touching the others:
 
-## Usage
-
-1. Open the app in a browser (or unzip the release and open `index.html`).
-2. Drop an `.stl` or `.svg` file onto the drop zone.
-3. Select a machining strategy (Contour / Pocket / Slice).
-4. Adjust tool diameter, feed rate, step-down, and other parameters.
-5. Click **Generate G-code**.
-6. Copy or download the `.nc` file.
-
-## Modules
-
-| Module | File | Purpose |
-|--------|------|---------|
-| `geometry` | `src/geometry.rs` | Core types: Vec3, Vec2, Triangle, Mesh, Polyline, Toolpath |
-| `stl` | `src/stl.rs` | Binary + ASCII STL parser |
-| `svg` | `src/svg.rs` | SVG path / rect / circle / polygon parser |
-| `slicer` | `src/slicer.rs` | 3-D mesh to 2-D contour slicing |
-| `toolpath` | `src/toolpath.rs` | Contour and pocket toolpath strategies |
-| `gcode` | `src/gcode.rs` | G-code emitter |
-| `lib` | `src/lib.rs` | WASM entry points, pipeline orchestration |
-
-## CI / Release / Pages
-
-GitHub Actions runs tests on every push. On pushes to `main` (or tags),
-the WASM bundle is built and deployed to **GitHub Pages** automatically.
-
-Live site: **https://jvishnefske.github.io/cam**
-
-To enable Pages for `/cam`:
-1. Create an empty repo `jvishnefske/cam` on GitHub.
-2. Go to **Settings > Pages** and set source to **GitHub Actions**.
-3. Push to `main` here — the deploy job publishes to Pages.
-
-Tag a version (`v0.1.0`) to also create a GitHub Release with the
-`rustcam.zip` download.
+| Layer | Does | Extend with |
+|-------|------|-------------|
+| **Input** | Parse STL, SVG, sketch | OBJ, STEP, DXF |
+| **Geometry** | Mesh, polylines, toolpaths | NURBS, T-splines |
+| **Strategy** | Contour, pocket, slice, zigzag, laser | Trochoidal, adaptive |
+| **Output** | G-code emitter | HPGL, Marlin, GRBL |
 
 ## License
 

@@ -6,6 +6,7 @@ import {
 } from '../pkg/rustcam.js';
 import { $, $input, $select, $canvas, $textarea, $btn } from './dom.js';
 import type { CamConfig, WorkerOutMsg } from './types.js';
+import { theme } from './theme.js';
 
 // ── State ────────────────────────────────────────────────────────────
 
@@ -48,8 +49,8 @@ const laserStrategies = ['contour', 'pocket', 'perimeter', 'laser_cut', 'laser_e
 
 function updateToolTypeUI(): void {
   const toolType = toolTypeSelect.value;
-  effectiveDiameterRow.style.display = toolType === 'face_mill' ? 'block' : 'none';
-  cornerRadiusRow.style.display = toolType === 'ball_end' ? 'block' : 'none';
+  effectiveDiameterRow.classList.toggle('hidden', toolType !== 'face_mill');
+  cornerRadiusRow.classList.toggle('hidden', toolType !== 'ball_end');
   if (toolType === 'ball_end') {
     const diameter = parseFloat($input('tool-diameter').value);
     $input('corner-radius').value = (diameter / 2).toFixed(2);
@@ -63,14 +64,14 @@ $input('tool-diameter').addEventListener('change', updateToolTypeUI);
 
 function updateStrategyUI(): void {
   const strategy = strategySelect.value;
-  perimeterOptions.style.display = strategy === 'perimeter' ? 'block' : 'none';
-  zigzagOptions.style.display = strategy === 'zigzag' ? 'block' : 'none';
+  perimeterOptions.classList.toggle('hidden', strategy !== 'perimeter');
+  zigzagOptions.classList.toggle('hidden', strategy !== 'zigzag');
 }
 
 function updateMachineTypeUI(): void {
   const isLaser = machineTypeSelect.value === 'laser_cutter';
-  cncParamsSection.style.display = isLaser ? 'none' : 'block';
-  laserParamsSection.style.display = isLaser ? 'block' : 'none';
+  cncParamsSection.classList.toggle('hidden', isLaser);
+  laserParamsSection.classList.toggle('hidden', !isLaser);
   const current = strategySelect.value;
   const allowed = isLaser ? laserStrategies : cncStrategies;
   for (const opt of Array.from(strategySelect.options)) {
@@ -134,7 +135,7 @@ function handleFile(file: File): void {
     });
   } else {
     statusEl.textContent = 'Unsupported file type: .' + ext;
-    statusEl.className = 'status error';
+    statusEl.className = 'text-xs mt-2 min-h-4 text-danger';
   }
 }
 
@@ -235,14 +236,14 @@ function drawPreview(paths: number[][][]): void {
   const isLaserPreview = machineTypeSelect.value === 'laser_cutter';
 
   const zColor = (z?: number): string => {
-    if (isLaserPreview) return 'rgba(255, 60, 40, 0.85)';
-    if (!has3D || z === undefined) return '#4f8cff';
+    if (isLaserPreview) return theme.colors.camLaser;
+    if (!has3D || z === undefined) return theme.colors.camZDefault;
     const t = (z - minZ) / zRange;
     const hue = 240 - t * 180;
     return `hsl(${hue}, 80%, 55%)`;
   };
 
-  ctx.strokeStyle = '#1a1d27'; ctx.lineWidth = 0.5;
+  ctx.strokeStyle = theme.colors.surface; ctx.lineWidth = 0.5;
   const gs = Math.pow(10, Math.floor(Math.log10(Math.max(w, h))));
   for (let x = Math.floor(minX / gs) * gs; x <= maxX; x += gs) {
     ctx.beginPath(); ctx.moveTo(tx(x), 0); ctx.lineTo(tx(x), rect.height); ctx.stroke();
@@ -263,7 +264,7 @@ function drawPreview(paths: number[][][]): void {
         ctx.stroke();
       }
     } else {
-      ctx.strokeStyle = isLaserPreview ? 'rgba(255, 60, 40, 0.85)' : '#4f8cff';
+      ctx.strokeStyle = isLaserPreview ? theme.colors.camLaser : theme.colors.camZDefault;
       ctx.beginPath();
       ctx.moveTo(tx(p[0][0]), ty(p[0][1]));
       for (let i = 1; i < p.length; i++) ctx.lineTo(tx(p[i][0]), ty(p[i][1]));
@@ -287,24 +288,24 @@ function initWorker(): void {
     if (msg.type === 'progress') {
       const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
       statusEl.textContent = `Generating... layer ${msg.completed} / ${msg.total}  (${elapsed}s)`;
-      statusEl.className = 'status';
+      statusEl.className = 'text-xs mt-2 min-h-4';
     } else if (msg.type === 'done') {
       gcodeOut.value = msg.gcode;
       const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
       statusEl.textContent = `Done — ${msg.gcode.split('\n').length} lines of G-code in ${elapsed}s.`;
-      statusEl.className = 'status ok';
+      statusEl.className = 'text-xs mt-2 min-h-4 text-success';
       generateBtn.disabled = false;
       tryPreview();
       loadSimFn();
     } else if (msg.type === 'error') {
       statusEl.textContent = 'Error: ' + msg.error;
-      statusEl.className = 'status error';
+      statusEl.className = 'text-xs mt-2 min-h-4 text-danger';
       generateBtn.disabled = false;
     }
   };
   genWorker.onerror = (e) => {
     statusEl.textContent = 'Worker error: ' + e.message;
-    statusEl.className = 'status error';
+    statusEl.className = 'text-xs mt-2 min-h-4 text-danger';
     generateBtn.disabled = false;
   };
 }
@@ -321,7 +322,7 @@ generateBtn.addEventListener('click', () => {
   if (!wasmReady || !fileData) return;
   generateBtn.disabled = true;
   statusEl.textContent = 'Generating... layer 0 / ?';
-  statusEl.className = 'status';
+  statusEl.className = 'text-xs mt-2 min-h-4';
   genStartTime = performance.now();
 
   const cfg = getConfig();
@@ -336,12 +337,12 @@ generateBtn.addEventListener('click', () => {
       gcodeOut.value = gcode;
       const elapsed = ((performance.now() - genStartTime) / 1000).toFixed(1);
       statusEl.textContent = `Done — ${gcode.split('\n').length} lines of G-code in ${elapsed}s.`;
-      statusEl.className = 'status ok';
+      statusEl.className = 'text-xs mt-2 min-h-4 text-success';
       tryPreview();
       loadSimFn();
     } catch (e) {
       statusEl.textContent = 'Error: ' + e;
-      statusEl.className = 'status error';
+      statusEl.className = 'text-xs mt-2 min-h-4 text-danger';
     }
     generateBtn.disabled = false;
   }

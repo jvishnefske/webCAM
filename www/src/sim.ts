@@ -4,6 +4,7 @@ import { sim_moves_stl, sim_moves_svg } from '../pkg/rustcam.js';
 import { $, $input, $canvas, $btn } from './dom.js';
 import { fileData, fileType, getConfig } from './cam.js';
 import type { SimMove, SimBounds } from './types.js';
+import { theme } from './theme.js';
 
 const simCanvas = $canvas('sim-canvas');
 const simPlay   = $btn('sim-play');
@@ -93,7 +94,7 @@ function stampMat(ax: number, ay: number, bx: number, by: number, toolR: number)
   const dpr = window.devicePixelRatio || 1;
   matCtx.save();
   matCtx.scale(dpr, dpr);
-  matCtx.strokeStyle = 'rgba(255,80,80,0.35)';
+  matCtx.strokeStyle = theme.colors.simMaterialRemoval;
   matCtx.lineWidth = toolR * simScale * 2;
   matCtx.lineCap = 'round';
   matCtx.beginPath();
@@ -127,7 +128,7 @@ function drawSimFrame(): void {
   ctx.clearRect(0, 0, rect.width, rect.height);
 
   if (simBounds) {
-    ctx.strokeStyle = '#2a2d3a';
+    ctx.strokeStyle = theme.colors.border;
     ctx.lineWidth = 1;
     ctx.strokeRect(
       simTx(simBounds.minX) - 4, simTy(simBounds.maxY) - 4,
@@ -143,7 +144,7 @@ function drawSimFrame(): void {
     for (let i = 1; i <= simIdx && i < simMoves.length; i++) {
       const prev = simMoves[i - 1];
       const cur = simMoves[i];
-      ctx.strokeStyle = cur.rapid ? 'rgba(255,255,100,0.25)' : 'rgba(79,140,255,0.6)';
+      ctx.strokeStyle = cur.rapid ? theme.colors.simRapid : theme.colors.simCutting;
       ctx.beginPath();
       ctx.moveTo(simTx(prev.x), simTy(prev.y));
       ctx.lineTo(simTx(cur.x), simTy(cur.y));
@@ -157,15 +158,15 @@ function drawSimFrame(): void {
     const r = toolR * simScale;
     const cx = simTx(m.x), cy = simTy(m.y);
     ctx.beginPath(); ctx.arc(cx, cy, r + 2, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.3)'; ctx.fill();
+    ctx.fillStyle = theme.colors.simToolShadow; ctx.fill();
     ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
     const cutting = !m.rapid && m.z < parseFloat($input('safe-z').value) - 0.01;
-    ctx.fillStyle = cutting ? 'rgba(255,80,80,0.7)' : 'rgba(100,200,100,0.5)';
-    ctx.strokeStyle = cutting ? '#ff5555' : '#55ff88';
+    ctx.fillStyle = cutting ? theme.colors.simToolCutting : theme.colors.simToolIdle;
+    ctx.strokeStyle = cutting ? theme.colors.simToolOutlineCutting : theme.colors.simToolOutlineIdle;
     ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke();
     ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff'; ctx.fill();
-    ctx.fillStyle = '#8888a0'; ctx.font = '11px monospace';
+    ctx.fillStyle = theme.colors.simToolCenter; ctx.fill();
+    ctx.fillStyle = theme.colors.textDim; ctx.font = '11px monospace';
     ctx.fillText(`Z${m.z.toFixed(2)}`, cx + r + 6, cy + 4);
   }
 
