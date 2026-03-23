@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "dataflow-rt"]
+
 [package]
 name = "rustcam"
 version = "0.1.0"

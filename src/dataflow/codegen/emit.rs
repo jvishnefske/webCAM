@@ -38,6 +38,16 @@ const PERIPHERAL_BLOCK_TYPES: &[&str] = &[
     "uart_rx",
 ];
 
+/// Wrap a call argument with `state.` prefix only if it's a variable reference
+/// (starts with `out_`). Literal defaults like `0.0_f64` are used as-is.
+fn state_ref(arg: &str) -> String {
+    if arg.starts_with("out_") {
+        format!("state.{arg}")
+    } else {
+        arg.to_string()
+    }
+}
+
 /// Block types that produce a stub with a TODO comment (legacy).
 const STUB_BLOCK_TYPES: &[&str] = &[
     "udp_source",
@@ -231,7 +241,6 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
         }
         if block.block_type == "state_machine" {
             writeln!(out, "    pub sm_{id}: blocks::Block{id},").unwrap();
-            continue;
         }
         for (port_idx, port) in block.outputs.iter().enumerate() {
             let ty = crate::dataflow::codegen::types::rust_type_no_std(&port.kind);
@@ -269,7 +278,6 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
         }
         if block.block_type == "state_machine" {
             writeln!(out, "            sm_{id}: blocks::Block{id}::default(),").unwrap();
-            continue;
         }
         for (port_idx, port) in block.outputs.iter().enumerate() {
             let default = crate::dataflow::codegen::types::rust_default_no_std(&port.kind);
@@ -329,7 +337,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 let arg = if args.is_empty() {
                     "0.0".to_string()
                 } else {
-                    format!("state.{}", args[0])
+                    state_ref(&args[0])
                 };
                 writeln!(
                     out,
@@ -346,7 +354,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 let arg = if args.is_empty() {
                     "0.0".to_string()
                 } else {
-                    format!("state.{}", args[0])
+                    state_ref(&args[0])
                 };
                 writeln!(
                     out,
@@ -375,7 +383,8 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 let arg = if args.is_empty() {
                     "&[]".to_string()
                 } else {
-                    format!("&state.{}", args[0])
+                    let r = state_ref(&args[0]);
+                    format!("&{r}")
                 };
                 writeln!(out, "    hw.uart_write({port}, {arg});").unwrap();
             }
@@ -395,7 +404,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
             "state_machine" => {
                 let arg_str = args
                     .iter()
-                    .map(|a| format!("state.{a}"))
+                    .map(|a| state_ref(a))
                     .collect::<Vec<_>>()
                     .join(", ");
                 if block.outputs.len() <= 1 {
@@ -420,7 +429,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
             _ => {
                 let arg_str = args
                     .iter()
-                    .map(|a| format!("state.{a}"))
+                    .map(|a| state_ref(a))
                     .collect::<Vec<_>>()
                     .join(", ");
 
@@ -1715,5 +1724,104 @@ mod tests {
 
         assert!(lib_rs.contains("sm_5"));
         assert!(lib_rs.contains("state.sm_5.tick("));
+    }
+
+    #[test]
+    fn unconnected_port_uses_literal_default_not_state_prefix() {
+        // Gain block with no input connected — should use literal 0.0_f64, not state.0.0_f64
+        let snap = GraphSnapshot {
+            blocks: vec![make_gain_snapshot(2, 3.0)],
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let targets = vec![TargetWithBinding {
+            target: TargetFamily::Host,
+            binding: Binding::host_default(),
+        }];
+        let ws = generate_workspace(&snap, 0.01, &targets).unwrap();
+
+        let lib_rs = ws
+            .files
+            .iter()
+            .find(|(p, _)| p == "logic/src/lib.rs")
+            .unwrap()
+            .1
+            .as_str();
+
+        // Should contain the literal default, not prefixed with state.
+        assert!(
+            lib_rs.contains("blocks::block_2(0.0_f64)"),
+            "Expected literal default 0.0_f64 for unconnected port, got:\n{lib_rs}"
+        );
+        assert!(
+            !lib_rs.contains("state.0.0_f64"),
+            "Bug: unconnected port produced state.0.0_f64"
+        );
+    }
+
+    #[test]
+    fn state_machine_has_output_fields_in_state_struct() {
+        // State machine with 4 outputs — State struct must have both sm_5 AND out_5_p0..p3
+        let snap = GraphSnapshot {
+            blocks: vec![
+                make_constant_snapshot(1, 1.0),
+                BlockSnapshot {
+                    id: 5,
+                    block_type: "state_machine".to_string(),
+                    name: "SM".to_string(),
+                    inputs: vec![PortDef::new("guard_0", PortKind::Float)],
+                    outputs: vec![
+                        PortDef::new("state", PortKind::Float),
+                        PortDef::new("active_idle", PortKind::Float),
+                        PortDef::new("active_running", PortKind::Float),
+                        PortDef::new("active_error", PortKind::Float),
+                    ],
+                    config: serde_json::json!({
+                        "states": ["idle", "running", "error"],
+                        "initial": "idle",
+                        "transitions": [
+                            { "from": "idle", "to": "running", "guard_port": 0 },
+                            { "from": "running", "to": "error", "guard_port": null }
+                        ]
+                    }),
+                    output_values: vec![],
+                },
+            ],
+            channels: vec![ch(1, 1, 0, 5, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let targets = vec![TargetWithBinding {
+            target: TargetFamily::Host,
+            binding: Binding::host_default(),
+        }];
+        let ws = generate_workspace(&snap, 0.01, &targets).unwrap();
+
+        let lib_rs = ws
+            .files
+            .iter()
+            .find(|(p, _)| p == "logic/src/lib.rs")
+            .unwrap()
+            .1
+            .as_str();
+
+        // State struct must have the state machine instance field
+        assert!(lib_rs.contains("sm_5: blocks::Block5"), "Missing sm_5 field");
+        // AND the output fields for tick() to write to
+        assert!(lib_rs.contains("out_5_p0: f64"), "Missing out_5_p0 field");
+        assert!(lib_rs.contains("out_5_p1: f64"), "Missing out_5_p1 field");
+        assert!(lib_rs.contains("out_5_p2: f64"), "Missing out_5_p2 field");
+        assert!(lib_rs.contains("out_5_p3: f64"), "Missing out_5_p3 field");
+
+        // Default impl must also have both
+        assert!(
+            lib_rs.contains("sm_5: blocks::Block5::default()"),
+            "Missing sm_5 default"
+        );
+        assert!(
+            lib_rs.contains("out_5_p0: 0.0_f64"),
+            "Missing out_5_p0 default"
+        );
     }
 }

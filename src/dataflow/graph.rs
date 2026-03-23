@@ -66,6 +66,22 @@ impl DataflowGraph {
         id
     }
 
+    pub fn replace_block(&mut self, id: BlockId, new_block: Box<dyn Block>) -> Result<(), String> {
+        if !self.blocks.contains_key(&id) {
+            return Err("block not found".into());
+        }
+        self.blocks.insert(id, new_block);
+        self.outputs.retain(|&(bid, _), _| bid != id);
+        // Prune channels referencing ports beyond new block's port count
+        let n_in = self.blocks[&id].input_ports().len();
+        let n_out = self.blocks[&id].output_ports().len();
+        self.channels.retain(|c| {
+            !(c.to_block == id && c.to_port >= n_in)
+                && !(c.from_block == id && c.from_port >= n_out)
+        });
+        Ok(())
+    }
+
     pub fn remove_block(&mut self, id: BlockId) -> bool {
         if self.blocks.remove(&id).is_some() {
             self.channels
@@ -277,6 +293,33 @@ mod tests {
         let snap = g.snapshot();
         assert!(snap.channels.is_empty());
         assert_eq!(snap.blocks.len(), 1);
+    }
+
+    #[test]
+    fn replace_block_preserves_channels() {
+        let mut g = DataflowGraph::new();
+        let c = g.add_block(Box::new(ConstantBlock::new(5.0)));
+        let gain = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+        g.connect(c, 0, gain, 0).unwrap();
+
+        // Replace the constant with a different value
+        g.replace_block(c, Box::new(ConstantBlock::new(10.0))).unwrap();
+
+        let snap = g.snapshot();
+        // Channel should still exist
+        assert_eq!(snap.channels.len(), 1);
+        // Block count unchanged
+        assert_eq!(snap.blocks.len(), 2);
+
+        // Run and verify new value propagates
+        g.tick(0.01); // constant emits 10.0
+        g.tick(0.01); // gain receives 10.0, outputs 20.0
+        let snap = g.snapshot();
+        let gain_snap = snap.blocks.iter().find(|b| b.id == gain.0).unwrap();
+        assert_eq!(
+            gain_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(20.0)
+        );
     }
 
     #[test]

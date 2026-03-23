@@ -1,429 +1,312 @@
-/** Canvas-based node editor for the dataflow graph. */
+/** DOM/SVG dataflow editor — workspace orchestrator. */
 
 import { DataflowManager } from './graph.js';
-import type { GraphSnapshot, BlockSnapshot, ChannelSnapshot, BlockTypeInfo } from './types.js';
-
-const NODE_W = 140;
-const NODE_H_BASE = 40;
-const PORT_R = 6;
-const PORT_SPACING = 20;
-const PORT_OFFSET_Y = 30;
-
-const COLORS = {
-  bg: '#0f1117',
-  node: '#1a1d27',
-  nodeBorder: '#2a2d3a',
-  nodeSelected: '#4f8cff',
-  text: '#e0e0e8',
-  textDim: '#8888a0',
-  portFloat: '#4f8cff',
-  portBytes: '#ff9800',
-  portText: '#55ff88',
-  portSeries: '#ff55aa',
-  portAny: '#aaa',
-  wire: '#4f8cff66',
-  wireActive: '#4f8cff',
-};
-
-function portColor(kind: string): string {
-  switch (kind) {
-    case 'Float': return COLORS.portFloat;
-    case 'Bytes': return COLORS.portBytes;
-    case 'Text': return COLORS.portText;
-    case 'Series': return COLORS.portSeries;
-    default: return COLORS.portAny;
-  }
-}
-
-function nodeHeight(block: BlockSnapshot): number {
-  const ports = Math.max(block.inputs.length, block.outputs.length);
-  return NODE_H_BASE + Math.max(ports, 1) * PORT_SPACING;
-}
-
-interface DragState {
-  type: 'move-node';
-  blockId: number;
-  offsetX: number;
-  offsetY: number;
-}
-
-interface WireDrag {
-  fromBlock: number;
-  fromPort: number;
-  fromX: number;
-  fromY: number;
-  isOutput: boolean;
-  mouseX: number;
-  mouseY: number;
-}
+import type { GraphSnapshot, BlockTypeInfo } from './types.js';
+import { reconcileNodes, setupNodeDrag, setupNodeDelete, type NodeElements } from './node-view.js';
+import { reconcileEdges, type EdgeElements } from './edge-view.js';
+import { setupWireDrag } from './port-view.js';
+import { showPalette } from './palette.js';
 
 export class DataflowEditor {
-  private canvas: HTMLCanvasElement;
-  private ctx: CanvasRenderingContext2D;
+  private container: HTMLDivElement;
+  private workspace: HTMLDivElement;
+  private grid: HTMLDivElement;
+  private svg: SVGSVGElement;
+  private nodeLayer: HTMLDivElement;
   private mgr: DataflowManager;
   private snap: GraphSnapshot | null = null;
   private selected: number | null = null;
-  private drag: DragState | null = null;
-  private wireDrag: WireDrag | null = null;
+  private selectedEdge: number | null = null;
   private panX = 0;
   private panY = 0;
-  private blockTypes: BlockTypeInfo[] = [];
+  private scale = 1;
+  private blockTypes: BlockTypeInfo[];
+  private nodeElements: NodeElements = { nodes: new Map() };
+  private edgeElements: EdgeElements = { paths: new Map() };
+  private cleanupFns: Array<() => void> = [];
 
   /** Fires when block selection changes. */
   onSelect: ((blockId: number | null, snap: GraphSnapshot | null) => void) | null = null;
+  /** Fires when edge selection changes. */
+  onEdgeSelect: ((channelId: number | null, snap: GraphSnapshot | null) => void) | null = null;
 
-  constructor(canvas: HTMLCanvasElement, mgr: DataflowManager) {
-    this.canvas = canvas;
-    this.ctx = canvas.getContext('2d')!;
+  constructor(container: HTMLDivElement, mgr: DataflowManager) {
+    this.container = container;
     this.mgr = mgr;
     this.blockTypes = DataflowManager.blockTypes();
 
-    canvas.addEventListener('mousedown', this.onMouseDown);
-    canvas.addEventListener('mousemove', this.onMouseMove);
-    canvas.addEventListener('mouseup', this.onMouseUp);
-    canvas.addEventListener('dblclick', this.onDblClick);
-    canvas.addEventListener('contextmenu', this.onContextMenu);
+    // Build DOM structure
+    this.workspace = container;
+    this.workspace.textContent = '';
+    this.workspace.classList.add('df-workspace');
 
+    this.grid = document.createElement('div');
+    this.grid.className = 'df-grid';
+    this.workspace.appendChild(this.grid);
+
+    this.svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.svg.classList.add('df-edge-layer');
+    this.svg.setAttribute('width', '100%');
+    this.svg.setAttribute('height', '100%');
+    this.workspace.appendChild(this.svg);
+
+    this.nodeLayer = document.createElement('div');
+    this.nodeLayer.className = 'df-node-layer';
+    this.workspace.appendChild(this.nodeLayer);
+
+    // Wire up pan/zoom
+    this.setupPanZoom();
+
+    // Wire up node drag
+    const cleanupDrag = setupNodeDrag(
+      this.workspace, this.nodeLayer, mgr, this.edgeElements,
+      () => this.snap,
+      () => ({ panX: this.panX, panY: this.panY, scale: this.scale }),
+      (blockId) => {
+        this.selected = blockId;
+        this.selectedEdge = null;
+        this.reconcile();
+        this.onSelect?.(blockId, this.snap);
+      },
+      () => { /* drag end — edges already updated during drag */ },
+    );
+    this.cleanupFns.push(cleanupDrag);
+
+    // Wire up node delete
+    const cleanupDelete = setupNodeDelete(
+      this.nodeLayer, mgr,
+      () => this.selected,
+      (deletedId) => {
+        if (this.selected === deletedId) {
+          this.selected = null;
+          this.onSelect?.(null, this.snap);
+        }
+        this.snap = mgr.snapshot();
+        this.reconcile();
+      },
+    );
+    this.cleanupFns.push(cleanupDelete);
+
+    // Wire up wire drag (port-to-port connections)
+    const cleanupWire = setupWireDrag(
+      this.workspace, this.nodeLayer, this.svg, mgr,
+      () => this.snap,
+      () => ({ panX: this.panX, panY: this.panY, scale: this.scale }),
+      () => {
+        this.snap = mgr.snapshot();
+        this.reconcile();
+      },
+    );
+    this.cleanupFns.push(cleanupWire);
+
+    // Wire up double-click palette
+    this.setupDblClick();
+
+    // Wire up edge click (event delegation)
+    this.setupEdgeClick();
+
+    // Wire up keyboard delete
+    this.setupKeyDelete();
+
+    // Manager tick callback
     mgr.onTick = (snap) => {
       this.snap = snap;
-      this.draw();
+      this.reconcile();
     };
+
+    // Initial render
+    this.snap = mgr.snapshot();
+    this.reconcile();
   }
 
   resize(): void {
-    const rect = this.canvas.getBoundingClientRect();
-    if (rect.width < 1 || rect.height < 1) return;
-    const dpr = window.devicePixelRatio || 1;
-    this.canvas.width = rect.width * dpr;
-    this.canvas.height = rect.height * dpr;
-    this.draw();
+    // The workspace is sized by CSS (flex/grid), no manual sizing needed.
+    // Just re-render in case layout changed.
+    this.applyTransform();
   }
 
   updateSnapshot(): void {
     this.snap = this.mgr.snapshot();
-    this.draw();
+    this.reconcile();
   }
 
-  draw(): void {
-    const ctx = this.ctx;
-    const dpr = window.devicePixelRatio || 1;
-    const rect = this.canvas.getBoundingClientRect();
-    if (rect.width < 1) return;
-
-    ctx.save();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, rect.width, rect.height);
-    ctx.fillStyle = COLORS.bg;
-    ctx.fillRect(0, 0, rect.width, rect.height);
-
-    if (!this.snap) { ctx.restore(); return; }
-
-    ctx.translate(this.panX, this.panY);
-
-    // Draw wires
-    for (const ch of this.snap.channels) {
-      this.drawWire(ch);
-    }
-
-    // Draw wire being dragged
-    if (this.wireDrag) {
-      ctx.strokeStyle = COLORS.wireActive;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(this.wireDrag.fromX, this.wireDrag.fromY);
-      ctx.lineTo(this.wireDrag.mouseX - this.panX, this.wireDrag.mouseY - this.panY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    // Draw nodes
-    for (const block of this.snap.blocks) {
-      this.drawNode(block);
-    }
-
-    ctx.restore();
-  }
-
-  private drawNode(block: BlockSnapshot): void {
-    const ctx = this.ctx;
-    const pos = this.mgr.positions.get(block.id) ?? { x: 50, y: 50 };
-    const h = nodeHeight(block);
-    const isSelected = this.selected === block.id;
-
-    // Background
-    ctx.fillStyle = COLORS.node;
-    ctx.strokeStyle = isSelected ? COLORS.nodeSelected : COLORS.nodeBorder;
-    ctx.lineWidth = isSelected ? 2 : 1;
-    ctx.beginPath();
-    ctx.roundRect(pos.x, pos.y, NODE_W, h, 6);
-    ctx.fill();
-    ctx.stroke();
-
-    // Title
-    ctx.fillStyle = COLORS.text;
-    ctx.font = '12px -apple-system, sans-serif';
-    ctx.fillText(block.name, pos.x + 10, pos.y + 18);
-
-    // Type subtitle
-    ctx.fillStyle = COLORS.textDim;
-    ctx.font = '10px monospace';
-    ctx.fillText(block.block_type, pos.x + 10, pos.y + 30);
-
-    // Input ports (left side)
-    for (let i = 0; i < block.inputs.length; i++) {
-      const py = pos.y + PORT_OFFSET_Y + i * PORT_SPACING + PORT_SPACING / 2;
-      ctx.fillStyle = portColor(block.inputs[i].kind);
-      ctx.beginPath();
-      ctx.arc(pos.x, py, PORT_R, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = COLORS.textDim;
-      ctx.font = '10px monospace';
-      ctx.fillText(block.inputs[i].name, pos.x + PORT_R + 4, py + 3);
-    }
-
-    // Output ports (right side)
-    for (let i = 0; i < block.outputs.length; i++) {
-      const py = pos.y + PORT_OFFSET_Y + i * PORT_SPACING + PORT_SPACING / 2;
-      ctx.fillStyle = portColor(block.outputs[i].kind);
-      ctx.beginPath();
-      ctx.arc(pos.x + NODE_W, py, PORT_R, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Output value label
-      const val = block.output_values[i];
-      let label = block.outputs[i].name;
-      if (val) {
-        if (val.type === 'Float') label = val.data.toFixed(2);
-        else if (val.type === 'Text') label = val.data.slice(0, 12);
-        else if (val.type === 'Series') label = `[${val.data.length}]`;
-      }
-      ctx.fillStyle = COLORS.textDim;
-      ctx.font = '10px monospace';
-      const tw = ctx.measureText(label).width;
-      ctx.fillText(label, pos.x + NODE_W - PORT_R - 4 - tw, py + 3);
-    }
-  }
-
-  private drawWire(ch: ChannelSnapshot): void {
-    const ctx = this.ctx;
-    const fromBlock = this.snap!.blocks.find(b => b.id === ch.from_block[0]);
-    const toBlock = this.snap!.blocks.find(b => b.id === ch.to_block[0]);
-    if (!fromBlock || !toBlock) return;
-
-    const fromPos = this.mgr.positions.get(fromBlock.id) ?? { x: 0, y: 0 };
-    const toPos = this.mgr.positions.get(toBlock.id) ?? { x: 0, y: 0 };
-
-    const x1 = fromPos.x + NODE_W;
-    const y1 = fromPos.y + PORT_OFFSET_Y + ch.from_port * PORT_SPACING + PORT_SPACING / 2;
-    const x2 = toPos.x;
-    const y2 = toPos.y + PORT_OFFSET_Y + ch.to_port * PORT_SPACING + PORT_SPACING / 2;
-
-    const cpX = Math.abs(x2 - x1) * 0.5;
-    ctx.strokeStyle = COLORS.wireActive;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.bezierCurveTo(x1 + cpX, y1, x2 - cpX, y2, x2, y2);
-    ctx.stroke();
-  }
-
-  private getPortAt(mx: number, my: number): { blockId: number; portIndex: number; isOutput: boolean; px: number; py: number } | null {
-    if (!this.snap) return null;
-    for (const block of this.snap.blocks) {
-      const pos = this.mgr.positions.get(block.id) ?? { x: 0, y: 0 };
-      // Check output ports
-      for (let i = 0; i < block.outputs.length; i++) {
-        const px = pos.x + NODE_W;
-        const py = pos.y + PORT_OFFSET_Y + i * PORT_SPACING + PORT_SPACING / 2;
-        if (Math.hypot(mx - px, my - py) < PORT_R + 4) {
-          return { blockId: block.id, portIndex: i, isOutput: true, px, py };
-        }
-      }
-      // Check input ports
-      for (let i = 0; i < block.inputs.length; i++) {
-        const px = pos.x;
-        const py = pos.y + PORT_OFFSET_Y + i * PORT_SPACING + PORT_SPACING / 2;
-        if (Math.hypot(mx - px, my - py) < PORT_R + 4) {
-          return { blockId: block.id, portIndex: i, isOutput: false, px, py };
-        }
-      }
-    }
-    return null;
-  }
-
-  private getNodeAt(mx: number, my: number): number | null {
-    if (!this.snap) return null;
-    // Iterate in reverse so topmost node wins
-    for (let i = this.snap.blocks.length - 1; i >= 0; i--) {
-      const block = this.snap.blocks[i];
-      const pos = this.mgr.positions.get(block.id) ?? { x: 0, y: 0 };
-      const h = nodeHeight(block);
-      if (mx >= pos.x && mx <= pos.x + NODE_W && my >= pos.y && my <= pos.y + h) {
-        return block.id;
-      }
-    }
-    return null;
-  }
-
-  private canvasCoords(e: MouseEvent): [number, number] {
-    const rect = this.canvas.getBoundingClientRect();
-    return [e.clientX - rect.left - this.panX, e.clientY - rect.top - this.panY];
-  }
-
-  private onMouseDown = (e: MouseEvent): void => {
-    const [mx, my] = this.canvasCoords(e);
-
-    // Check for port click (start wiring)
-    const port = this.getPortAt(mx, my);
-    if (port) {
-      this.wireDrag = {
-        fromBlock: port.blockId,
-        fromPort: port.portIndex,
-        fromX: port.px,
-        fromY: port.py,
-        isOutput: port.isOutput,
-        mouseX: e.clientX - this.canvas.getBoundingClientRect().left,
-        mouseY: e.clientY - this.canvas.getBoundingClientRect().top,
-      };
-      return;
-    }
-
-    // Check for node click (start dragging)
-    const nodeId = this.getNodeAt(mx, my);
-    if (nodeId !== null) {
-      const pos = this.mgr.positions.get(nodeId) ?? { x: 0, y: 0 };
-      this.drag = {
-        type: 'move-node',
-        blockId: nodeId,
-        offsetX: mx - pos.x,
-        offsetY: my - pos.y,
-      };
-      this.selected = nodeId;
-      this.onSelect?.(nodeId, this.snap);
-      this.draw();
-      return;
-    }
-
+  clearSelection(): void {
     this.selected = null;
-    this.onSelect?.(null, this.snap);
-    this.draw();
+    this.selectedEdge = null;
+    this.reconcile();
+  }
+
+  destroy(): void {
+    for (const fn of this.cleanupFns) fn();
+    this.cleanupFns = [];
+    this.mgr.onTick = null;
+    this.workspace.removeEventListener('wheel', this.onWheel);
+    this.workspace.removeEventListener('pointerdown', this.onPanStart);
+    this.workspace.removeEventListener('dblclick', this.onDblClick);
+    this.svg.removeEventListener('click', this.onEdgeClick);
+    this.workspace.removeEventListener('keydown', this.onKeyDelete);
+    this.workspace.textContent = '';
+    this.nodeElements.nodes.clear();
+    this.edgeElements.paths.clear();
+  }
+
+  private reconcile(): void {
+    if (!this.snap) return;
+    reconcileNodes(this.nodeLayer, this.nodeElements, this.snap.blocks, this.mgr.positions, this.selected);
+    reconcileEdges(this.svg, this.edgeElements, this.snap.channels, this.snap.blocks, this.mgr.positions, this.selectedEdge);
+
+    // Update time display
+    const timeInfo = document.getElementById('df-time-info');
+    if (timeInfo) timeInfo.textContent = `t=${this.snap.time.toFixed(3)}`;
+  }
+
+  private applyTransform(): void {
+    const transform = `translate(${this.panX}px, ${this.panY}px) scale(${this.scale})`;
+    this.nodeLayer.style.transform = transform;
+    this.nodeLayer.style.transformOrigin = '0 0';
+    this.svg.style.transform = transform;
+    this.svg.style.transformOrigin = '0 0';
+
+    // Update grid to match
+    const gridSize = 20 * this.scale;
+    this.grid.style.backgroundSize = `${gridSize}px ${gridSize}px`;
+    this.grid.style.backgroundPosition = `${this.panX}px ${this.panY}px`;
+  }
+
+  // ── Edge click ──────────────────────────────────────────────────
+
+  private onEdgeClick = (e: MouseEvent): void => {
+    const target = e.target as Element;
+    const chAttr = target instanceof SVGElement ? target.dataset.ch : undefined;
+    if (!chAttr) return;
+    const channelId = parseInt(chAttr, 10);
+    if (isNaN(channelId)) return;
+    this.selectedEdge = channelId;
+    this.selected = null;
+    this.reconcile();
+    this.onEdgeSelect?.(channelId, this.snap);
   };
 
-  private onMouseMove = (e: MouseEvent): void => {
-    if (this.drag) {
-      const [mx, my] = this.canvasCoords(e);
-      this.mgr.positions.set(this.drag.blockId, {
-        x: mx - this.drag.offsetX,
-        y: my - this.drag.offsetY,
-      });
-      this.draw();
-    }
-    if (this.wireDrag) {
-      const rect = this.canvas.getBoundingClientRect();
-      this.wireDrag.mouseX = e.clientX - rect.left;
-      this.wireDrag.mouseY = e.clientY - rect.top;
-      this.draw();
+  private setupEdgeClick(): void {
+    this.svg.addEventListener('click', this.onEdgeClick);
+  }
+
+  // ── Keyboard delete ────────────────────────────────────────────
+
+  private onKeyDelete = (e: KeyboardEvent): void => {
+    if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+    // Don't intercept when focused on an input
+    const tag = (e.target as HTMLElement).tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+    if (this.selectedEdge !== null) {
+      this.mgr.disconnect(this.selectedEdge);
+      this.selectedEdge = null;
+      this.snap = this.mgr.snapshot();
+      this.reconcile();
+      this.onEdgeSelect?.(null, null);
+    } else if (this.selected !== null) {
+      const id = this.selected;
+      this.mgr.removeBlock(id);
+      this.selected = null;
+      this.snap = this.mgr.snapshot();
+      this.reconcile();
+      this.onSelect?.(null, null);
     }
   };
 
-  private onMouseUp = (e: MouseEvent): void => {
-    if (this.wireDrag) {
-      const [mx, my] = this.canvasCoords(e);
-      const port = this.getPortAt(mx, my);
-      if (port && port.isOutput !== this.wireDrag.isOutput) {
-        try {
-          if (this.wireDrag.isOutput) {
-            this.mgr.connect(this.wireDrag.fromBlock, this.wireDrag.fromPort, port.blockId, port.portIndex);
-          } else {
-            this.mgr.connect(port.blockId, port.portIndex, this.wireDrag.fromBlock, this.wireDrag.fromPort);
-          }
-          this.snap = this.mgr.snapshot();
-        } catch (err) {
-          console.warn('connect failed:', err);
-        }
-      }
-      this.wireDrag = null;
-      this.draw();
-    }
-    this.drag = null;
+  private setupKeyDelete(): void {
+    this.workspace.setAttribute('tabindex', '0');
+    this.workspace.style.outline = 'none';
+    this.workspace.addEventListener('keydown', this.onKeyDelete);
+  }
+
+  // ── Pan/Zoom ─────────────────────────────────────────────────────
+
+  private isPanning = false;
+  private panStartX = 0;
+  private panStartY = 0;
+  private panBaseX = 0;
+  private panBaseY = 0;
+
+  private setupPanZoom(): void {
+    this.workspace.addEventListener('wheel', this.onWheel, { passive: false });
+    this.workspace.addEventListener('pointerdown', this.onPanStart);
+  }
+
+  private onWheel = (e: WheelEvent): void => {
+    e.preventDefault();
+    const rect = this.workspace.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const oldScale = this.scale;
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    this.scale = Math.max(0.2, Math.min(3.0, this.scale * delta));
+
+    // Preserve focal point under cursor
+    this.panX = mx - (mx - this.panX) * (this.scale / oldScale);
+    this.panY = my - (my - this.panY) * (this.scale / oldScale);
+
+    this.applyTransform();
   };
+
+  private onPanStart = (e: PointerEvent): void => {
+    // Middle mouse button or shift+left
+    if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
+      // Don't pan if clicking on a node/port
+      const target = e.target as HTMLElement;
+      if (target.closest('.df-node') || target.classList.contains('df-port')) return;
+
+      this.isPanning = true;
+      this.panStartX = e.clientX;
+      this.panStartY = e.clientY;
+      this.panBaseX = this.panX;
+      this.panBaseY = this.panY;
+      this.workspace.style.cursor = 'grabbing';
+      e.preventDefault();
+
+      const onMove = (ev: PointerEvent): void => {
+        if (!this.isPanning) return;
+        this.panX = this.panBaseX + (ev.clientX - this.panStartX);
+        this.panY = this.panBaseY + (ev.clientY - this.panStartY);
+        this.applyTransform();
+      };
+
+      const onUp = (): void => {
+        this.isPanning = false;
+        this.workspace.style.cursor = '';
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+      };
+
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+    }
+  };
+
+  // ── Double-click palette ─────────────────────────────────────────
 
   private onDblClick = (e: MouseEvent): void => {
-    // Double-click on empty space: show block palette
-    const [mx, my] = this.canvasCoords(e);
-    const nodeId = this.getNodeAt(mx, my);
-    if (nodeId === null) {
-      this.showPalette(mx, my);
-    }
-  };
+    const target = e.target as HTMLElement;
+    if (target.closest('.df-node') || target.closest('.df-palette')) return;
 
-  private onContextMenu = (e: MouseEvent): void => {
-    e.preventDefault();
-    const [mx, my] = this.canvasCoords(e);
-    const nodeId = this.getNodeAt(mx, my);
-    if (nodeId !== null) {
-      this.mgr.removeBlock(nodeId);
-      if (this.selected === nodeId) {
-        this.selected = null;
-        this.onSelect?.(null, this.snap);
-      }
-      this.snap = this.mgr.snapshot();
-      this.draw();
-    }
-  };
+    const rect = this.workspace.getBoundingClientRect();
+    const worldX = (e.clientX - rect.left - this.panX) / this.scale;
+    const worldY = (e.clientY - rect.top - this.panY) / this.scale;
 
-  private showPalette(x: number, y: number): void {
-    // Remove any existing palette
-    document.getElementById('df-palette')?.remove();
-
-    const div = document.createElement('div');
-    div.id = 'df-palette';
-    div.style.cssText = `
-      position: fixed; z-index: 100; background: #1a1d27; border: 1px solid #2a2d3a;
-      border-radius: 6px; padding: 4px 0; font-size: 13px; color: #e0e0e8;
-      max-height: 300px; overflow-y: auto; min-width: 160px;
-    `;
-    const rect = this.canvas.getBoundingClientRect();
-    div.style.left = `${rect.left + x + this.panX}px`;
-    div.style.top = `${rect.top + y + this.panY}px`;
-
-    let lastCat = '';
-    for (const bt of this.blockTypes) {
-      if (bt.category !== lastCat) {
-        lastCat = bt.category;
-        const header = document.createElement('div');
-        header.style.cssText = 'padding: 4px 12px; font-size: 11px; color: #8888a0; text-transform: uppercase;';
-        header.textContent = bt.category;
-        div.appendChild(header);
-      }
-      const item = document.createElement('div');
-      item.style.cssText = 'padding: 4px 12px; cursor: pointer;';
-      item.textContent = bt.name;
-      item.addEventListener('mouseenter', () => { item.style.background = '#2a2d3a'; });
-      item.addEventListener('mouseleave', () => { item.style.background = 'transparent'; });
-      item.addEventListener('click', () => {
-        const defaultConfig = bt.block_type === 'constant' ? { value: 1.0 }
-          : bt.block_type === 'gain' ? { op: 'Gain', param1: 1.0, param2: 0.0 }
-          : bt.block_type === 'clamp' ? { op: 'Clamp', param1: 0.0, param2: 100.0 }
-          : bt.block_type === 'plot' ? { max_samples: 500 }
-          : bt.block_type === 'udp_source' || bt.block_type === 'udp_sink' ? { address: '127.0.0.1:9000' }
-          : {};
-        this.mgr.addBlock(bt.block_type, defaultConfig, x, y);
+    showPalette(
+      this.workspace, this.blockTypes, this.mgr,
+      e.clientX, e.clientY,
+      worldX, worldY,
+      () => {
         this.snap = this.mgr.snapshot();
-        this.draw();
-        div.remove();
-      });
-      div.appendChild(item);
-    }
+        this.reconcile();
+      },
+    );
+  };
 
-    document.body.appendChild(div);
-    const dismiss = (ev: MouseEvent) => {
-      if (!div.contains(ev.target as Node)) {
-        div.remove();
-        document.removeEventListener('mousedown', dismiss);
-      }
-    };
-    setTimeout(() => document.addEventListener('mousedown', dismiss), 0);
+  private setupDblClick(): void {
+    this.workspace.addEventListener('dblclick', this.onDblClick);
   }
 }

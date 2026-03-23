@@ -2,6 +2,7 @@
 
 import { $, $input, $canvas } from './dom.js';
 import type { SketchShape, DraftShape } from './types.js';
+import { theme } from './theme.js';
 
 // ── State ────────────────────────────────────────────────────────────
 
@@ -90,7 +91,7 @@ export function redrawSketch(): void {
   const ty = (v: number) => offY + v * scale;
 
   // Grid
-  ctx.strokeStyle = '#1a1d27';
+  ctx.strokeStyle = theme.colors.surface;
   ctx.lineWidth = 0.5;
   const snap = sketchGridSnap() || (size / 10);
   const maxLines = 200;
@@ -102,25 +103,25 @@ export function redrawSketch(): void {
   }
 
   // Canvas border
-  ctx.strokeStyle = '#2a2d3a';
+  ctx.strokeStyle = theme.colors.border;
   ctx.lineWidth = 1;
   ctx.strokeRect(tx(0), ty(0), size * scale, size * scale);
 
   // Origin label
-  ctx.fillStyle = '#8888a0';
+  ctx.fillStyle = theme.colors.textDim;
   ctx.font = '10px monospace';
   ctx.fillText('0,0', tx(0) + 2, ty(0) - 4);
   ctx.fillText(`${size},${size}`, tx(size) - 40, ty(size) + 12);
 
   // Committed shapes
-  for (const s of sketchShapes) drawShape(ctx, s, '#4f8cff', tx, ty, scale);
+  for (const s of sketchShapes) drawShape(ctx, s, theme.colors.accent, tx, ty, scale);
 
   // Draft shape
-  if (sketchDraft) drawShape(ctx, sketchDraft as SketchShape, '#55ff88', tx, ty, scale);
+  if (sketchDraft) drawShape(ctx, sketchDraft as SketchShape, theme.colors.success, tx, ty, scale);
 
   // Polyline in-progress points
   if (sketchTool === 'polyline' && sketchPolyPts.length > 0) {
-    ctx.strokeStyle = '#55ff88';
+    ctx.strokeStyle = theme.colors.success;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(tx(sketchPolyPts[0].x), ty(sketchPolyPts[0].y));
@@ -129,7 +130,7 @@ export function redrawSketch(): void {
     if (sketchDraft && '_cursor' in sketchDraft && sketchDraft._cursor)
       ctx.lineTo(tx(sketchDraft._cursor.x), ty(sketchDraft._cursor.y));
     ctx.stroke();
-    ctx.fillStyle = '#55ff88';
+    ctx.fillStyle = theme.colors.success;
     for (const p of sketchPolyPts) {
       ctx.beginPath(); ctx.arc(tx(p.x), ty(p.y), 3, 0, Math.PI * 2); ctx.fill();
     }

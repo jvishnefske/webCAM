@@ -2,8 +2,8 @@
 
 import {
   dataflow_new, dataflow_destroy, dataflow_add_block, dataflow_remove_block,
-  dataflow_connect, dataflow_disconnect, dataflow_advance, dataflow_run,
-  dataflow_set_speed, dataflow_snapshot, dataflow_block_types,
+  dataflow_update_block, dataflow_connect, dataflow_disconnect, dataflow_advance,
+  dataflow_run, dataflow_set_speed, dataflow_snapshot, dataflow_block_types,
 } from '../../pkg/rustcam.js';
 import type { GraphSnapshot, BlockTypeInfo, NodePosition } from './types.js';
 
@@ -32,6 +32,10 @@ export class DataflowManager {
     const id = dataflow_add_block(this.graphId, blockType, JSON.stringify(config));
     this.positions.set(id, { x, y });
     return id;
+  }
+
+  updateBlock(blockId: number, blockType: string, config: Record<string, unknown>): void {
+    dataflow_update_block(this.graphId, blockId, blockType, JSON.stringify(config));
   }
 
   removeBlock(blockId: number): void {

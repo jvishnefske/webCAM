@@ -5,6 +5,7 @@ import {
   sketch_solve, sketch_remove_constraint,
 } from '../pkg/rustcam.js';
 import { $ } from './dom.js';
+import { theme } from './theme.js';
 import {
   sketchShapes, sketchCvs, sketchCtx2d, sketchGridSnap,
   sketchCanvasSize, sketchScreenToWorld, getCurrentMode,
@@ -96,14 +97,14 @@ function solveAndRender(): void {
     // DOF display
     const d = cstLastSnap!.dof;
     const status = cstLastSnap!.dof_status;
-    const color = status === 'FullyConstrained' ? '#4caf50'
-                : status === 'OverConstrained' ? '#f44336' : '#ff9800';
+    const color = status === 'FullyConstrained' ? theme.colors.cstFullyConstrained
+                : status === 'OverConstrained' ? theme.colors.cstOverConstrained : theme.colors.cstUnderConstrained;
     cstDofEl.style.color = color;
     cstDofEl.textContent = `DOF: ${d} (${status.replace(/([A-Z])/g, ' $1').trim()})`;
     // Constraint list
     cstListEl.innerHTML = cstLastSnap!.constraints.map(([id, c]) => {
       const type = Object.keys(c)[0] || 'unknown';
-      return `<div>${id}. ${type} <button onclick="window.__removeCst(${id})" style="font-size:10px;cursor:pointer;background:none;border:none;color:#f44336">✕</button></div>`;
+      return `<div>${id}. ${type} <button onclick="window.__removeCst(${id})" style="font-size:10px;cursor:pointer;background:none;border:none;color:${theme.colors.cstOverConstrained}">✕</button></div>`;
     }).join('');
     baseRedraw();
   } catch (e) {
@@ -202,18 +203,18 @@ export function drawConstraintOverlay(): void {
 
   for (const [id, pt] of cstLastSnap.points) {
     const status: DofStatus = cstLastSnap.point_status[id] || 'UnderConstrained';
-    const color = status === 'FullyConstrained' ? '#4caf50'
-                : status === 'OverConstrained' ? '#f44336' : '#ff9800';
+    const color = status === 'FullyConstrained' ? theme.colors.cstFullyConstrained
+                : status === 'OverConstrained' ? theme.colors.cstOverConstrained : theme.colors.cstUnderConstrained;
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(tx(pt.x), ty(pt.y), 4, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#8888a0';
+    ctx.fillStyle = theme.colors.textDim;
     ctx.font = '9px monospace';
     ctx.fillText(String(id), tx(pt.x) + 5, ty(pt.y) - 5);
   }
 
-  ctx.strokeStyle = '#ffeb3b';
+  ctx.strokeStyle = theme.colors.cstPickHighlight;
   ctx.lineWidth = 2;
   for (const pid of cstPicks) {
     const pt = cstPointMap[pid];
