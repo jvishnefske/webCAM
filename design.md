@@ -134,3 +134,76 @@ and G-code output per machine. Ports useful Rust code from the cnc-sender projec
 - Multi-tool operations in single job
 - 5-axis toolpaths
 - Material database / feeds & speeds calculator
+
+---
+
+## Multi-Frontend Model-Based Development
+
+RustCAM's reactive dataflow engine supports three frontend paradigms — all sharing the same `GraphSnapshot` IR and codegen pipeline. No server required.
+
+### Architecture
+
+```
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│  Block Editor    │  │  Python API     │  │  Jupyter         │
+│  (DOM/SVG)       │  │  (Keras-style)  │  │  Notebook        │
+│  Browser/WASM    │  │  PyO3 bindings  │  │  IPython display │
+└────────┬────────┘  └────────┬────────┘  └────────┬────────┘
+         │                    │                     │
+         ▼                    ▼                     ▼
+    ┌─────────────────────────────────────────────────────┐
+    │              GraphSnapshot JSON IR                   │
+    │         (universal contract — see schema)            │
+    └──────────────────────┬──────────────────────────────┘
+                           │
+                           ▼
+    ┌─────────────────────────────────────────────────────┐
+    │              Rust Codegen Engine                      │
+    │     generate_workspace(snapshot, dt, targets)         │
+    └──────┬──────────┬──────────┬──────────┬─────────────┘
+           │          │          │          │
+           ▼          ▼          ▼          ▼
+        Host      RP2040     STM32F4    ESP32-C3
+      (std bin)  (embassy)  (embassy)   (esp-hal)
+```
+
+### Approach: Hybrid (WASM + PyO3)
+
+- **Browser**: WASM via `wasm-bindgen` powers the block editor (existing)
+- **Python**: PyO3 bindings wrap the same Rust `DataflowGraph` for the API and notebook frontends
+- **Contract**: `GraphSnapshot` JSON is the interchange format — any frontend can produce/consume it
+- **No server**: both WASM and PyO3 run the engine locally, no network round-trips
+
+### Market Positioning
+
+| Capability | RustCAM | Simulink | Keras | Node-RED |
+|-----------|---------|----------|-------|----------|
+| Visual block editor | Yes | Yes | No | Yes |
+| Programmatic API | Yes (Python) | Yes (MATLAB) | Yes | Limited |
+| Notebook integration | Yes (Jupyter) | No | Yes | No |
+| Embedded codegen | Yes (Rust, multi-target) | Yes (C) | No | No |
+| Runs in browser | Yes (WASM) | No | No | Yes (server) |
+| Open source | Yes | No | Yes | Yes |
+| No server required | Yes | N/A | Yes | No |
+
+### URL Structure
+
+Each frontend is served at its own path on `jvishnefske.github.io/cam/`. One user sees one frontend at a time — no shared mode switcher.
+
+| Path | Frontend | Content |
+|------|----------|---------|
+| `/cam/` | CAM Tool | STL/SVG → G-code (existing) |
+| `/cam/blocks/` | Block Editor | Visual dataflow editor (WASM) |
+| `/cam/api/` | Python API | Landing page, install instructions, examples |
+| `/cam/notebook/` | Jupyter Notebook | Landing page, example notebooks, Binder links |
+
+Each path has its own `index.html`. A minimal nav bar links between them, but each page is self-contained — no tabbed mode switcher.
+
+The existing single-page mode switcher (CAM / 2D Sketch / Dataflow) in `www/index.html` will be split into separate entry points during the multi-frontend migration.
+
+### Frontend Design Documents
+
+- **[Block Editor](docs/block-frontend.md)** — DOM/SVG visual editor (~70% built on `feature-dataflow`)
+- **[Python API](docs/api-frontend.md)** — Keras-style programmatic graph building via PyO3
+- **[Jupyter Notebook](docs/notebook-frontend.md)** — IPython display integration with SVG and matplotlib
+- **[GraphSnapshot Schema](docs/graph-snapshot-schema.md)** — formal IR specification (the contract all frontends share)
