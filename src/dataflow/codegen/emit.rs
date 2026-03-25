@@ -1275,7 +1275,7 @@ pub fn generate_distributed_workspace(
             .find(|t| t.target == *target_family)
             .ok_or_else(|| format!("no binding for target {target_family:?}"))?;
 
-        let mut ws = generate_workspace(&sub_snap, config.dt, &[twb.clone()])?;
+        let mut ws = generate_workspace(sub_snap, config.dt, std::slice::from_ref(twb))?;
 
         // 3. If there are bridges, add pubsub dependency to logic Cargo.toml.
         if has_bridges {

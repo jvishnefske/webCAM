@@ -8,7 +8,6 @@ import { setupWireDrag } from './port-view.js';
 import { showPalette } from './palette.js';
 
 export class DataflowEditor {
-  private container: HTMLDivElement;
   private workspace: HTMLDivElement;
   private grid: HTMLDivElement;
   private svg: SVGSVGElement;
@@ -31,7 +30,6 @@ export class DataflowEditor {
   onEdgeSelect: ((channelId: number | null, snap: GraphSnapshot | null) => void) | null = null;
 
   constructor(container: HTMLDivElement, mgr: DataflowManager) {
-    this.container = container;
     this.mgr = mgr;
     this.blockTypes = DataflowManager.blockTypes();
 
