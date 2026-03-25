@@ -9,6 +9,7 @@ pub enum TargetFamily {
     Rp2040,
     Stm32f4,
     Esp32c3,
+    Stm32g0b1,
 }
 
 /// Counts of available peripherals on a target.
@@ -81,6 +82,18 @@ pub fn all_targets() -> Vec<TargetDef> {
                 uart_ports: 2,
             },
         },
+        TargetDef {
+            family: TargetFamily::Stm32g0b1,
+            name: "stm32g0b1cb",
+            rust_target: "thumbv6m-none-eabi",
+            embassy_chip: "stm32g0b1cb",
+            peripherals: PeripheralSet {
+                adc_channels: 16,
+                pwm_channels: 12,
+                gpio_pins: 64,
+                uart_ports: 4,
+            },
+        },
     ]
 }
 
@@ -94,8 +107,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_targets_has_four() {
-        assert_eq!(all_targets().len(), 4);
+    fn all_targets_has_five() {
+        assert_eq!(all_targets().len(), 5);
     }
 
     #[test]
