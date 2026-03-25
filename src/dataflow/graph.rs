@@ -76,8 +76,8 @@ impl DataflowGraph {
         let n_in = self.blocks[&id].input_ports().len();
         let n_out = self.blocks[&id].output_ports().len();
         self.channels.retain(|c| {
-            !(c.to_block == id && c.to_port >= n_in)
-                && !(c.from_block == id && c.from_port >= n_out)
+            !(c.to_block == id && c.to_port >= n_in
+                || c.from_block == id && c.from_port >= n_out)
         });
         Ok(())
     }
