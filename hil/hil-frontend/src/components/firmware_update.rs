@@ -50,7 +50,7 @@ enum UploadStatus {
 #[component]
 pub fn FirmwareUpdatePanel(
     /// Callback to send requests to the Pico.
-    send: impl Fn(Request) + Copy + 'static,
+    send: impl Fn(Request) + Copy + Send + 'static,
     /// Signal carrying responses from the Pico for upload flow control.
     fw_response: ReadSignal<Option<Response>>,
 ) -> impl IntoView {
