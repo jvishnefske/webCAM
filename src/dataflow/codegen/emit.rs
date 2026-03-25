@@ -1,10 +1,12 @@
 //! Code emitter: generates a standalone Rust workspace from a dataflow graph snapshot.
 
+use std::collections::HashMap;
 use std::fmt::Write;
 
 use crate::dataflow::block::BlockId;
 use crate::dataflow::codegen::binding::TargetWithBinding;
 use crate::dataflow::codegen::concurrency::find_parallel_groups;
+use crate::dataflow::codegen::partition;
 use crate::dataflow::codegen::target::TargetFamily;
 use crate::dataflow::codegen::targets::generator_for;
 use crate::dataflow::codegen::topo::topological_sort;
@@ -532,6 +534,21 @@ fn generate_logic_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 writeln!(out, "pub fn block_{id}(_data: f64) {{").unwrap();
                 writeln!(out, "}}").unwrap();
             }
+            "pubsub_sink" => {
+                let topic = block.config.get("topic").and_then(|v| v.as_str()).unwrap_or("unknown");
+                writeln!(out, "// pubsub_sink: topic=\"{topic}\"").unwrap();
+                writeln!(out, "pub fn block_{id}(_value: f64) {{").unwrap();
+                writeln!(out, "    // TODO: pubsub::encode + transport.send").unwrap();
+                writeln!(out, "}}").unwrap();
+            }
+            "pubsub_source" => {
+                let topic = block.config.get("topic").and_then(|v| v.as_str()).unwrap_or("unknown");
+                writeln!(out, "// pubsub_source: topic=\"{topic}\"").unwrap();
+                writeln!(out, "pub fn block_{id}() -> f64 {{").unwrap();
+                writeln!(out, "    // TODO: transport.recv + pubsub::decode").unwrap();
+                writeln!(out, "    0.0").unwrap();
+                writeln!(out, "}}").unwrap();
+            }
             other => {
                 return Err(format!("unsupported block type for codegen: {other}"));
             }
@@ -884,6 +901,21 @@ fn generate_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 writeln!(out, "    Vec::new()").unwrap();
                 writeln!(out, "}}").unwrap();
             }
+            "pubsub_sink" => {
+                let topic = block.config.get("topic").and_then(|v| v.as_str()).unwrap_or("unknown");
+                writeln!(out, "// pubsub_sink: topic=\"{topic}\"").unwrap();
+                writeln!(out, "pub fn block_{id}(_value: f64) {{").unwrap();
+                writeln!(out, "    // TODO: pubsub::encode + transport.send").unwrap();
+                writeln!(out, "}}").unwrap();
+            }
+            "pubsub_source" => {
+                let topic = block.config.get("topic").and_then(|v| v.as_str()).unwrap_or("unknown");
+                writeln!(out, "// pubsub_source: topic=\"{topic}\"").unwrap();
+                writeln!(out, "pub fn block_{id}() -> f64 {{").unwrap();
+                writeln!(out, "    // TODO: transport.recv + pubsub::decode").unwrap();
+                writeln!(out, "    0.0").unwrap();
+                writeln!(out, "}}").unwrap();
+            }
             other => {
                 return Err(format!("unsupported block type for codegen: {other}"));
             }
@@ -1180,6 +1212,108 @@ fn build_call_args(
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// Distributed multi-MCU workspace generation
+// ---------------------------------------------------------------------------
+
+/// Configuration for distributed multi-MCU code generation.
+#[derive(Debug, Clone)]
+pub struct DistributedConfig {
+    /// Per-target bindings (one per MCU in the system).
+    pub targets: Vec<TargetWithBinding>,
+    /// Fixed timestep in seconds.
+    pub dt: f64,
+    /// Transport configuration for pubsub bridges.
+    pub transport: TransportConfig,
+}
+
+/// Transport layer configuration for inter-MCU communication.
+#[derive(Debug, Clone)]
+pub enum TransportConfig {
+    /// CAN bus -- all nodes share a bus.
+    Can,
+    /// UDP/IP -- each node has an IP address.
+    Ip {
+        addresses: HashMap<TargetFamily, String>,
+    },
+}
+
+/// Result of distributed code generation -- one workspace per target.
+#[derive(Debug, Clone)]
+pub struct DistributedWorkspace {
+    /// Per-target generated workspaces.
+    pub workspaces: HashMap<TargetFamily, GeneratedWorkspace>,
+}
+
+/// Generate separate firmware workspaces for a distributed multi-MCU system.
+///
+/// Each target gets its own workspace containing only the blocks assigned to it,
+/// plus pubsub bridge blocks for cross-target communication.
+///
+/// # Errors
+///
+/// Returns an error if:
+/// - Any block has no target assignment (`target` is `None`)
+/// - Partition or code generation fails for any target
+pub fn generate_distributed_workspace(
+    snap: &GraphSnapshot,
+    config: &DistributedConfig,
+) -> Result<DistributedWorkspace, String> {
+    // 1. Partition the graph by target assignment.
+    let partition_result = partition::partition_graph(snap)
+        .map_err(|e| format!("partition error: {e:?}"))?;
+
+    let has_bridges = !partition_result.bridges.is_empty();
+
+    // 2. Generate one workspace per partition.
+    let mut workspaces: HashMap<TargetFamily, GeneratedWorkspace> = HashMap::new();
+    for (target_family, sub_snap) in &partition_result.partitions {
+        // Find the binding for this target.
+        let twb = config
+            .targets
+            .iter()
+            .find(|t| t.target == *target_family)
+            .ok_or_else(|| format!("no binding for target {target_family:?}"))?;
+
+        let mut ws = generate_workspace(&sub_snap, config.dt, &[twb.clone()])?;
+
+        // 3. If there are bridges, add pubsub dependency to logic Cargo.toml.
+        if has_bridges {
+            for file in &mut ws.files {
+                if file.0 == "logic/Cargo.toml" {
+                    file.1.push_str("\n[dependencies.pubsub]\npath = \"../pubsub\"\n");
+                }
+            }
+        }
+
+        // 4/5. Inject pubsub bridge code into logic/src/lib.rs for this partition's bridges.
+        for bridge in &partition_result.bridges {
+            for file in &mut ws.files {
+                if file.0 == "logic/src/lib.rs" {
+                    if bridge.source_target == *target_family {
+                        // This partition is the sender -- emit pubsub_sink encode+send.
+                        file.1.push_str(&format!(
+                            "\n    // pubsub_sink: topic=\"{}\"\n    // pubsub::encode(&value); transport.send();\n",
+                            bridge.topic
+                        ));
+                    }
+                    if bridge.sink_target == *target_family {
+                        // This partition is the receiver -- emit pubsub_source recv+decode.
+                        file.1.push_str(&format!(
+                            "\n    // pubsub_source: topic=\"{}\"\n    // let value = pubsub::decode(&transport.recv());\n",
+                            bridge.topic
+                        ));
+                    }
+                }
+            }
+        }
+
+        workspaces.insert(*target_family, ws);
+    }
+
+    Ok(DistributedWorkspace { workspaces })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1198,6 +1332,7 @@ mod tests {
             outputs: vec![PortDef::new("out", PortKind::Float)],
             config: serde_json::json!({ "value": value }),
             output_values: vec![Some(Value::Float(value))],
+            target: None,
         }
     }
 
@@ -1210,6 +1345,7 @@ mod tests {
             outputs: vec![PortDef::new("out", PortKind::Float)],
             config: serde_json::json!({ "op": "Gain", "param1": factor, "param2": 0.0 }),
             output_values: vec![Some(Value::Float(0.0))],
+            target: None,
         }
     }
 
@@ -1225,6 +1361,7 @@ mod tests {
             outputs: vec![PortDef::new("out", PortKind::Float)],
             config: serde_json::json!({ "op": "Add", "param1": 0.0, "param2": 0.0 }),
             output_values: vec![Some(Value::Float(0.0))],
+            target: None,
         }
     }
 
@@ -1237,6 +1374,7 @@ mod tests {
             outputs: vec![PortDef::new("series", PortKind::Series)],
             config: serde_json::json!({ "max_samples": 1000 }),
             output_values: vec![],
+            target: None,
         }
     }
 
@@ -1374,6 +1512,7 @@ mod tests {
                 outputs: vec![PortDef::new("out", PortKind::Float)],
                 config: serde_json::json!({ "op": "Clamp", "param1": -1.0, "param2": 1.0 }),
                 output_values: vec![],
+                target: None,
             }],
             channels: vec![],
             tick_count: 0,
@@ -1396,6 +1535,7 @@ mod tests {
                 outputs: vec![PortDef::new("data", PortKind::Bytes)],
                 config: serde_json::json!({ "address": "127.0.0.1:9000" }),
                 output_values: vec![],
+                target: None,
             }],
             channels: vec![],
             tick_count: 0,
@@ -1473,6 +1613,7 @@ mod tests {
                     outputs: vec![PortDef::new("value", PortKind::Float)],
                     config: serde_json::json!({ "channel": 2, "resolution_bits": 10 }),
                     output_values: vec![],
+                    target: None,
                 },
                 BlockSnapshot {
                     id: 2,
@@ -1482,6 +1623,7 @@ mod tests {
                     outputs: vec![],
                     config: serde_json::json!({ "channel": 1, "frequency_hz": 2000 }),
                     output_values: vec![],
+                    target: None,
                 },
             ],
             channels: vec![ch(1, 1, 0, 2, 0)],
@@ -1568,6 +1710,7 @@ mod tests {
                     outputs: vec![PortDef::new("value", PortKind::Float)],
                     config: serde_json::json!({ "channel": 0 }),
                     output_values: vec![],
+                    target: None,
                 },
                 make_gain_snapshot(2, 2.5),
                 BlockSnapshot {
@@ -1578,6 +1721,7 @@ mod tests {
                     outputs: vec![],
                     config: serde_json::json!({ "channel": 0 }),
                     output_values: vec![],
+                    target: None,
                 },
             ],
             channels: vec![ch(1, 1, 0, 2, 0), ch(2, 2, 0, 3, 0)],
@@ -1688,6 +1832,7 @@ mod tests {
                         ]
                     }),
                     output_values: vec![],
+                    target: None,
                 },
             ],
             channels: vec![ch(1, 1, 0, 5, 0)],
@@ -1786,6 +1931,7 @@ mod tests {
                         ]
                     }),
                     output_values: vec![],
+                    target: None,
                 },
             ],
             channels: vec![ch(1, 1, 0, 5, 0)],
@@ -1822,6 +1968,359 @@ mod tests {
         assert!(
             lib_rs.contains("out_5_p0: 0.0_f64"),
             "Missing out_5_p0 default"
+        );
+    }
+
+    // Distributed multi-MCU tests -----------------------------------------------
+
+    /// Helper: build a two-MCU graph with a cross-partition channel.
+    ///
+    /// Block 1: constant(5.0) on Rp2040
+    /// Block 2: gain(2.0) on Stm32f4
+    /// Channel: block1:0 -> block2:0 (cross-partition, forces pubsub bridge)
+    fn make_distributed_graph() -> GraphSnapshot {
+        let mut const_block = make_constant_snapshot(1, 5.0);
+        const_block.target = Some(TargetFamily::Rp2040);
+
+        let mut gain_block = make_gain_snapshot(2, 2.0);
+        gain_block.target = Some(TargetFamily::Stm32f4);
+
+        GraphSnapshot {
+            blocks: vec![const_block, gain_block],
+            channels: vec![ch(1, 1, 0, 2, 0)],
+            tick_count: 0,
+            time: 0.0,
+        }
+    }
+
+    /// Helper: build a DistributedConfig for two targets (Rp2040 + Stm32f4).
+    fn make_two_target_config() -> DistributedConfig {
+        DistributedConfig {
+            targets: vec![
+                TargetWithBinding {
+                    target: TargetFamily::Rp2040,
+                    binding: Binding {
+                        target: TargetFamily::Rp2040,
+                        pins: vec![],
+                    },
+                },
+                TargetWithBinding {
+                    target: TargetFamily::Stm32f4,
+                    binding: Binding {
+                        target: TargetFamily::Stm32f4,
+                        pins: vec![],
+                    },
+                },
+            ],
+            dt: 0.01,
+            transport: TransportConfig::Can,
+        }
+    }
+
+    /// Helper: extract a file's content from a GeneratedWorkspace by path.
+    fn ws_file<'a>(ws: &'a GeneratedWorkspace, path: &str) -> Option<&'a str> {
+        ws.files
+            .iter()
+            .find(|(p, _)| p == path)
+            .map(|(_, content)| content.as_str())
+    }
+
+    // --- Test 1 ---
+    #[test]
+    fn distributed_produces_two_workspaces() {
+        let snap = make_distributed_graph();
+        let config = make_two_target_config();
+        let result = generate_distributed_workspace(&snap, &config).unwrap();
+        assert_eq!(
+            result.workspaces.len(),
+            2,
+            "Expected 2 workspaces, got {}",
+            result.workspaces.len()
+        );
+    }
+
+    // --- Test 2 ---
+    #[test]
+    fn distributed_workspace_keys_match_targets() {
+        let snap = make_distributed_graph();
+        let config = make_two_target_config();
+        let result = generate_distributed_workspace(&snap, &config).unwrap();
+        assert!(
+            result.workspaces.contains_key(&TargetFamily::Rp2040),
+            "Missing Rp2040 workspace"
+        );
+        assert!(
+            result.workspaces.contains_key(&TargetFamily::Stm32f4),
+            "Missing Stm32f4 workspace"
+        );
+    }
+
+    // --- Test 3 ---
+    #[test]
+    fn distributed_rp2040_has_logic_crate() {
+        let snap = make_distributed_graph();
+        let config = make_two_target_config();
+        let result = generate_distributed_workspace(&snap, &config).unwrap();
+        let rp_ws = &result.workspaces[&TargetFamily::Rp2040];
+        assert!(
+            ws_file(rp_ws, "logic/src/lib.rs").is_some(),
+            "Rp2040 workspace missing logic/src/lib.rs"
+        );
+    }
+
+    // --- Test 4 ---
+    #[test]
+    fn distributed_stm32_has_logic_crate() {
+        let snap = make_distributed_graph();
+        let config = make_two_target_config();
+        let result = generate_distributed_workspace(&snap, &config).unwrap();
+        let stm_ws = &result.workspaces[&TargetFamily::Stm32f4];
+        assert!(
+            ws_file(stm_ws, "logic/src/lib.rs").is_some(),
+            "Stm32f4 workspace missing logic/src/lib.rs"
+        );
+    }
+
+    // --- Test 5 ---
+    #[test]
+    fn distributed_rp2040_logic_has_pubsub_sink() {
+        let snap = make_distributed_graph();
+        let config = make_two_target_config();
+        let result = generate_distributed_workspace(&snap, &config).unwrap();
+        let rp_ws = &result.workspaces[&TargetFamily::Rp2040];
+        let lib_rs = ws_file(rp_ws, "logic/src/lib.rs").expect("missing logic/src/lib.rs");
+        assert!(
+            lib_rs.contains("pubsub_sink") || lib_rs.contains("pubsub::encode"),
+            "Rp2040 logic lib.rs should contain pubsub sink/encode code, got:\n{lib_rs}"
+        );
+    }
+
+    // --- Test 6 ---
+    #[test]
+    fn distributed_stm32_logic_has_pubsub_source() {
+        let snap = make_distributed_graph();
+        let config = make_two_target_config();
+        let result = generate_distributed_workspace(&snap, &config).unwrap();
+        let stm_ws = &result.workspaces[&TargetFamily::Stm32f4];
+        let lib_rs = ws_file(stm_ws, "logic/src/lib.rs").expect("missing logic/src/lib.rs");
+        assert!(
+            lib_rs.contains("pubsub_source") || lib_rs.contains("pubsub::decode"),
+            "Stm32f4 logic lib.rs should contain pubsub source/decode code, got:\n{lib_rs}"
+        );
+    }
+
+    // --- Test 7 ---
+    #[test]
+    fn distributed_single_target_no_bridges() {
+        // All blocks on one target -- should produce one workspace with no pubsub code.
+        let mut const_block = make_constant_snapshot(1, 5.0);
+        const_block.target = Some(TargetFamily::Rp2040);
+
+        let mut gain_block = make_gain_snapshot(2, 2.0);
+        gain_block.target = Some(TargetFamily::Rp2040);
+
+        let snap = GraphSnapshot {
+            blocks: vec![const_block, gain_block],
+            channels: vec![ch(1, 1, 0, 2, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        let config = DistributedConfig {
+            targets: vec![TargetWithBinding {
+                target: TargetFamily::Rp2040,
+                binding: Binding {
+                    target: TargetFamily::Rp2040,
+                    pins: vec![],
+                },
+            }],
+            dt: 0.01,
+            transport: TransportConfig::Can,
+        };
+
+        let result = generate_distributed_workspace(&snap, &config).unwrap();
+        assert_eq!(result.workspaces.len(), 1, "Expected 1 workspace for single target");
+
+        let rp_ws = &result.workspaces[&TargetFamily::Rp2040];
+        let lib_rs = ws_file(rp_ws, "logic/src/lib.rs").expect("missing logic/src/lib.rs");
+        assert!(
+            !lib_rs.contains("pubsub_sink") && !lib_rs.contains("pubsub_source"),
+            "Single-target workspace should have no pubsub code, got:\n{lib_rs}"
+        );
+    }
+
+    // --- Test 8 ---
+    #[test]
+    fn distributed_three_targets() {
+        // Blocks spread across 3 targets produces 3 workspaces.
+        let mut b1 = make_constant_snapshot(1, 1.0);
+        b1.target = Some(TargetFamily::Rp2040);
+
+        let mut b2 = make_gain_snapshot(2, 2.0);
+        b2.target = Some(TargetFamily::Stm32f4);
+
+        let mut b3 = make_gain_snapshot(3, 3.0);
+        b3.target = Some(TargetFamily::Esp32c3);
+
+        let snap = GraphSnapshot {
+            blocks: vec![b1, b2, b3],
+            channels: vec![ch(1, 1, 0, 2, 0), ch(2, 2, 0, 3, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        let config = DistributedConfig {
+            targets: vec![
+                TargetWithBinding {
+                    target: TargetFamily::Rp2040,
+                    binding: Binding {
+                        target: TargetFamily::Rp2040,
+                        pins: vec![],
+                    },
+                },
+                TargetWithBinding {
+                    target: TargetFamily::Stm32f4,
+                    binding: Binding {
+                        target: TargetFamily::Stm32f4,
+                        pins: vec![],
+                    },
+                },
+                TargetWithBinding {
+                    target: TargetFamily::Esp32c3,
+                    binding: Binding {
+                        target: TargetFamily::Esp32c3,
+                        pins: vec![],
+                    },
+                },
+            ],
+            dt: 0.01,
+            transport: TransportConfig::Can,
+        };
+
+        let result = generate_distributed_workspace(&snap, &config).unwrap();
+        assert_eq!(result.workspaces.len(), 3, "Expected 3 workspaces");
+        assert!(result.workspaces.contains_key(&TargetFamily::Rp2040));
+        assert!(result.workspaces.contains_key(&TargetFamily::Stm32f4));
+        assert!(result.workspaces.contains_key(&TargetFamily::Esp32c3));
+    }
+
+    // --- Test 9 ---
+    #[test]
+    fn distributed_unassigned_block_errors() {
+        // Block with target=None should return an error.
+        let mut const_block = make_constant_snapshot(1, 5.0);
+        const_block.target = None; // deliberately unassigned
+
+        let snap = GraphSnapshot {
+            blocks: vec![const_block],
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        let config = DistributedConfig {
+            targets: vec![TargetWithBinding {
+                target: TargetFamily::Rp2040,
+                binding: Binding {
+                    target: TargetFamily::Rp2040,
+                    pins: vec![],
+                },
+            }],
+            dt: 0.01,
+            transport: TransportConfig::Can,
+        };
+
+        let result = generate_distributed_workspace(&snap, &config);
+        assert!(
+            result.is_err(),
+            "Expected error for unassigned block, got Ok"
+        );
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("partition") || err.contains("unassigned") || err.contains("Unassigned"),
+            "Error should mention partition/unassigned, got: {err}"
+        );
+    }
+
+    // --- Test 10 ---
+    #[test]
+    fn distributed_workspace_has_pubsub_dependency() {
+        // When bridges exist, generated Cargo.toml should include pubsub dependency.
+        let snap = make_distributed_graph();
+        let config = make_two_target_config();
+        let result = generate_distributed_workspace(&snap, &config).unwrap();
+
+        for (target, ws) in &result.workspaces {
+            let cargo = ws_file(ws, "logic/Cargo.toml")
+                .unwrap_or_else(|| panic!("missing logic/Cargo.toml for {target:?}"));
+            assert!(
+                cargo.contains("pubsub"),
+                "logic/Cargo.toml for {target:?} should contain pubsub dependency, got:\n{cargo}"
+            );
+        }
+    }
+
+    // --- Test 11 ---
+    #[test]
+    fn distributed_no_bridges_no_pubsub_dep() {
+        // Single-target workspace should have no pubsub dependency.
+        let mut b1 = make_constant_snapshot(1, 5.0);
+        b1.target = Some(TargetFamily::Rp2040);
+
+        let mut b2 = make_gain_snapshot(2, 2.0);
+        b2.target = Some(TargetFamily::Rp2040);
+
+        let snap = GraphSnapshot {
+            blocks: vec![b1, b2],
+            channels: vec![ch(1, 1, 0, 2, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        let config = DistributedConfig {
+            targets: vec![TargetWithBinding {
+                target: TargetFamily::Rp2040,
+                binding: Binding {
+                    target: TargetFamily::Rp2040,
+                    pins: vec![],
+                },
+            }],
+            dt: 0.01,
+            transport: TransportConfig::Can,
+        };
+
+        let result = generate_distributed_workspace(&snap, &config).unwrap();
+        let rp_ws = &result.workspaces[&TargetFamily::Rp2040];
+        let cargo = ws_file(rp_ws, "logic/Cargo.toml")
+            .expect("missing logic/Cargo.toml");
+        assert!(
+            !cargo.contains("pubsub"),
+            "Single-target workspace should not have pubsub dependency, got:\n{cargo}"
+        );
+    }
+
+    // --- Test 12 ---
+    #[test]
+    fn distributed_bridge_topic_appears_in_code() {
+        // The bridge topic name should appear in generated code.
+        let snap = make_distributed_graph();
+        let config = make_two_target_config();
+        let result = generate_distributed_workspace(&snap, &config).unwrap();
+
+        // The partition module generates topic names like "bridge_1_0".
+        // At least one workspace should contain the topic string.
+        let mut found = false;
+        for ws in result.workspaces.values() {
+            if let Some(lib_rs) = ws_file(ws, "logic/src/lib.rs") {
+                if lib_rs.contains("bridge_1_0") {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            found,
+            "Expected bridge topic 'bridge_1_0' to appear in at least one workspace's logic/src/lib.rs"
         );
     }
 }

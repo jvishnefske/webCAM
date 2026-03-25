@@ -18,6 +18,10 @@ pub struct BlockSnapshot {
     pub config: serde_json::Value,
     /// Last output values (one per output port).
     pub output_values: Vec<Option<Value>>,
+    /// Optional target MCU assignment for distributed codegen.
+    /// When None, the block runs on all targets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<crate::dataflow::codegen::target::TargetFamily>,
 }
 
 /// Snapshot of the entire graph.
@@ -220,6 +224,7 @@ impl DataflowGraph {
                     outputs: block.output_ports(),
                     config,
                     output_values,
+                    target: None,
                 }
             })
             .collect();
@@ -329,5 +334,57 @@ mod tests {
         g.run(100, 0.01);
         assert_eq!(g.tick_count, 100);
         assert!((g.time - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn snapshot_target_is_none_by_default() {
+        let mut g = DataflowGraph::new();
+        g.add_block(Box::new(ConstantBlock::new(1.0)));
+        let snap = g.snapshot();
+        assert!(snap.blocks[0].target.is_none());
+    }
+
+    #[test]
+    fn block_snapshot_serde_roundtrip_with_target() {
+        use crate::dataflow::codegen::target::TargetFamily;
+        use crate::dataflow::block::PortKind;
+
+        let snap = BlockSnapshot {
+            id: 1,
+            block_type: "constant".to_string(),
+            name: "Constant".to_string(),
+            inputs: vec![],
+            outputs: vec![super::super::block::PortDef::new("out", PortKind::Float)],
+            config: serde_json::json!({"value": 42.0}),
+            output_values: vec![Some(Value::Float(42.0))],
+            target: Some(TargetFamily::Rp2040),
+        };
+
+        let json = serde_json::to_string(&snap).unwrap();
+        assert!(json.contains("\"target\""));
+        let deser: BlockSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(deser.target, Some(TargetFamily::Rp2040));
+    }
+
+    #[test]
+    fn block_snapshot_serde_roundtrip_without_target() {
+        use crate::dataflow::block::PortKind;
+
+        let snap = BlockSnapshot {
+            id: 2,
+            block_type: "gain".to_string(),
+            name: "Gain".to_string(),
+            inputs: vec![super::super::block::PortDef::new("in", PortKind::Float)],
+            outputs: vec![super::super::block::PortDef::new("out", PortKind::Float)],
+            config: serde_json::json!({}),
+            output_values: vec![None],
+            target: None,
+        };
+
+        let json = serde_json::to_string(&snap).unwrap();
+        // target: None should be skipped in serialization
+        assert!(!json.contains("\"target\""));
+        let deser: BlockSnapshot = serde_json::from_str(&json).unwrap();
+        assert!(deser.target.is_none());
     }
 }

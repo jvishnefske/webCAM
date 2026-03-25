@@ -7,9 +7,13 @@
 pub mod binding;
 pub mod concurrency;
 pub mod emit;
+pub mod partition;
 pub mod target;
 pub mod targets;
 pub mod topo;
 pub mod types;
 
-pub use emit::{generate_rust, generate_workspace, GeneratedCrate, GeneratedWorkspace};
+pub use emit::{
+    generate_distributed_workspace, generate_rust, generate_workspace, DistributedConfig,
+    DistributedWorkspace, GeneratedCrate, GeneratedWorkspace, TransportConfig,
+};

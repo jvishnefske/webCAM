@@ -4,6 +4,7 @@ pub mod constant;
 pub mod embedded;
 pub mod function;
 pub mod plot;
+pub mod pubsub;
 pub mod serde_block;
 pub mod state_machine;
 pub mod udp;
@@ -81,6 +82,16 @@ pub fn create_block(block_type: &str, config_json: &str) -> Result<Box<dyn Block
             let cfg: state_machine::StateMachineConfig =
                 serde_json::from_str(config_json).map_err(|e| e.to_string())?;
             Ok(Box::new(state_machine::StateMachineBlock::from_config(cfg)))
+        }
+        "pubsub_sink" => {
+            let cfg: pubsub::PubSubConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(pubsub::PubSubSinkBlock::from_config(cfg)))
+        }
+        "pubsub_source" => {
+            let cfg: pubsub::PubSubConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(pubsub::PubSubSourceBlock::from_config(cfg)))
         }
         _ => Err(format!("unknown block type: {block_type}")),
     }
@@ -173,6 +184,16 @@ pub fn available_block_types() -> Vec<BlockTypeInfo> {
             block_type: "state_machine",
             name: "State Machine",
             category: "Logic",
+        },
+        BlockTypeInfo {
+            block_type: "pubsub_source",
+            name: "PubSub Source",
+            category: "I/O",
+        },
+        BlockTypeInfo {
+            block_type: "pubsub_sink",
+            name: "PubSub Sink",
+            category: "I/O",
         },
     ]
 }
