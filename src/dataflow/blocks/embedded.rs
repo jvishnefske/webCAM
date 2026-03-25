@@ -318,6 +318,232 @@ impl Block for UartRxBlock {
 }
 
 // ---------------------------------------------------------------------------
+// Encoder
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EncoderConfig {
+    pub channel: u8,
+}
+
+impl Default for EncoderConfig {
+    fn default() -> Self {
+        Self { channel: 0 }
+    }
+}
+
+/// Reads a quadrature encoder channel.
+/// Stubbed in WASM — always outputs None.
+pub struct EncoderBlock {
+    config: EncoderConfig,
+}
+
+impl EncoderBlock {
+    pub fn from_config(config: EncoderConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl Block for EncoderBlock {
+    fn name(&self) -> &str {
+        "Encoder"
+    }
+    fn block_type(&self) -> &str {
+        "encoder"
+    }
+    fn input_ports(&self) -> Vec<PortDef> {
+        vec![]
+    }
+    fn output_ports(&self) -> Vec<PortDef> {
+        vec![
+            PortDef::new("position", PortKind::Float),
+            PortDef::new("velocity", PortKind::Float),
+        ]
+    }
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        // Stub: no actual encoder in WASM.
+        vec![None, None]
+    }
+    fn config_json(&self) -> String {
+        serde_json::to_string(&self.config).unwrap_or_default()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SSD1306 Display
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Ssd1306DisplayConfig {
+    pub i2c_bus: u8,
+    pub address: u8,
+}
+
+impl Default for Ssd1306DisplayConfig {
+    fn default() -> Self {
+        Self {
+            i2c_bus: 0,
+            address: 0x3C,
+        }
+    }
+}
+
+/// Writes two lines to an SSD1306 OLED display.
+/// Stubbed in WASM.
+pub struct Ssd1306DisplayBlock {
+    config: Ssd1306DisplayConfig,
+}
+
+impl Ssd1306DisplayBlock {
+    pub fn from_config(config: Ssd1306DisplayConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl Block for Ssd1306DisplayBlock {
+    fn name(&self) -> &str {
+        "SSD1306 Display"
+    }
+    fn block_type(&self) -> &str {
+        "ssd1306_display"
+    }
+    fn input_ports(&self) -> Vec<PortDef> {
+        vec![
+            PortDef::new("line1", PortKind::Text),
+            PortDef::new("line2", PortKind::Text),
+        ]
+    }
+    fn output_ports(&self) -> Vec<PortDef> {
+        vec![]
+    }
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        // Stub: no actual display in WASM.
+        vec![]
+    }
+    fn config_json(&self) -> String {
+        serde_json::to_string(&self.config).unwrap_or_default()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TMC2209 Stepper
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Tmc2209StepperConfig {
+    pub uart_port: u8,
+    pub uart_addr: u8,
+    pub steps_per_rev: u16,
+    pub microsteps: u8,
+}
+
+impl Default for Tmc2209StepperConfig {
+    fn default() -> Self {
+        Self {
+            uart_port: 0,
+            uart_addr: 0,
+            steps_per_rev: 200,
+            microsteps: 16,
+        }
+    }
+}
+
+/// Controls a TMC2209 stepper driver.
+/// Stubbed in WASM.
+pub struct Tmc2209StepperBlock {
+    config: Tmc2209StepperConfig,
+}
+
+impl Tmc2209StepperBlock {
+    pub fn from_config(config: Tmc2209StepperConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl Block for Tmc2209StepperBlock {
+    fn name(&self) -> &str {
+        "TMC2209 Stepper"
+    }
+    fn block_type(&self) -> &str {
+        "tmc2209_stepper"
+    }
+    fn input_ports(&self) -> Vec<PortDef> {
+        vec![
+            PortDef::new("target_position", PortKind::Float),
+            PortDef::new("enable", PortKind::Float),
+        ]
+    }
+    fn output_ports(&self) -> Vec<PortDef> {
+        vec![PortDef::new("actual_position", PortKind::Float)]
+    }
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        // Stub: no actual stepper in WASM.
+        vec![None]
+    }
+    fn config_json(&self) -> String {
+        serde_json::to_string(&self.config).unwrap_or_default()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TMC2209 StallGuard
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Tmc2209StallGuardConfig {
+    pub uart_port: u8,
+    pub uart_addr: u8,
+    pub threshold: u16,
+}
+
+impl Default for Tmc2209StallGuardConfig {
+    fn default() -> Self {
+        Self {
+            uart_port: 0,
+            uart_addr: 0,
+            threshold: 50,
+        }
+    }
+}
+
+/// Reads TMC2209 StallGuard value for stall detection.
+/// Stubbed in WASM.
+pub struct Tmc2209StallGuardBlock {
+    config: Tmc2209StallGuardConfig,
+}
+
+impl Tmc2209StallGuardBlock {
+    pub fn from_config(config: Tmc2209StallGuardConfig) -> Self {
+        Self { config }
+    }
+}
+
+impl Block for Tmc2209StallGuardBlock {
+    fn name(&self) -> &str {
+        "TMC2209 StallGuard"
+    }
+    fn block_type(&self) -> &str {
+        "tmc2209_stallguard"
+    }
+    fn input_ports(&self) -> Vec<PortDef> {
+        vec![]
+    }
+    fn output_ports(&self) -> Vec<PortDef> {
+        vec![
+            PortDef::new("sg_value", PortKind::Float),
+            PortDef::new("stall_detected", PortKind::Float),
+        ]
+    }
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        // Stub: no actual StallGuard in WASM.
+        vec![None, None]
+    }
+    fn config_json(&self) -> String {
+        serde_json::to_string(&self.config).unwrap_or_default()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -359,6 +585,42 @@ mod tests {
         let mut block = UartRxBlock::from_config(UartRxConfig::default());
         let result = block.tick(&[], 0.01);
         assert_eq!(result.len(), 1);
+        assert!(result[0].is_none());
+    }
+
+    #[test]
+    fn encoder_outputs_none() {
+        let mut block = EncoderBlock::from_config(EncoderConfig::default());
+        let result = block.tick(&[], 0.01);
+        assert_eq!(result.len(), 2);
+        assert!(result[0].is_none());
+    }
+
+    #[test]
+    fn ssd1306_display_config_roundtrip() {
+        let config = Ssd1306DisplayConfig { i2c_bus: 1, address: 0x3C };
+        let block = Ssd1306DisplayBlock::from_config(config);
+        let json = block.config_json();
+        let parsed: Ssd1306DisplayConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.i2c_bus, 1);
+        assert_eq!(parsed.address, 0x3C);
+    }
+
+    #[test]
+    fn tmc2209_stepper_config_roundtrip() {
+        let config = Tmc2209StepperConfig { uart_port: 1, uart_addr: 2, steps_per_rev: 400, microsteps: 32 };
+        let block = Tmc2209StepperBlock::from_config(config);
+        let json = block.config_json();
+        let parsed: Tmc2209StepperConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.uart_port, 1);
+        assert_eq!(parsed.steps_per_rev, 400);
+    }
+
+    #[test]
+    fn tmc2209_stallguard_outputs_none() {
+        let mut block = Tmc2209StallGuardBlock::from_config(Tmc2209StallGuardConfig::default());
+        let result = block.tick(&[], 0.01);
+        assert_eq!(result.len(), 2);
         assert!(result[0].is_none());
     }
 }

@@ -38,6 +38,10 @@ const PERIPHERAL_BLOCK_TYPES: &[&str] = &[
     "gpio_in",
     "uart_tx",
     "uart_rx",
+    "encoder",
+    "ssd1306_display",
+    "tmc2209_stepper",
+    "tmc2209_stallguard",
 ];
 
 /// Wrap a call argument with `state.` prefix only if it's a variable reference
@@ -60,6 +64,10 @@ const STUB_BLOCK_TYPES: &[&str] = &[
     "gpio_in",
     "uart_tx",
     "uart_rx",
+    "encoder",
+    "ssd1306_display",
+    "tmc2209_stepper",
+    "tmc2209_stallguard",
 ];
 
 /// Generate a standalone Rust project from a dataflow graph snapshot (legacy API).
@@ -148,6 +156,7 @@ fn build_workspace_members(targets: &[TargetWithBinding]) -> Vec<String> {
             TargetFamily::Rp2040 => "target-rp2040",
             TargetFamily::Stm32f4 => "target-stm32f4",
             TargetFamily::Esp32c3 => "target-esp32c3",
+            TargetFamily::Stm32g0b1 => "target-stm32g0b1",
         };
         if !members.contains(&name.to_string()) {
             members.push(name.to_string());
@@ -214,6 +223,12 @@ pub trait Peripherals {
     fn gpio_write(&mut self, pin: u8, high: bool);
     fn uart_write(&mut self, port: u8, data: &[u8]);
     fn uart_read(&mut self, port: u8, buf: &mut [u8]) -> usize;
+    fn encoder_read(&mut self, channel: u8) -> i64 { 0 }
+    fn display_write(&mut self, bus: u8, addr: u8, line1: &str, line2: &str) {}
+    fn stepper_move(&mut self, port: u8, target: i64) {}
+    fn stepper_position(&self, port: u8) -> i64 { 0 }
+    fn stepper_enable(&mut self, port: u8, enabled: bool) {}
+    fn stallguard_read(&mut self, port: u8, addr: u8) -> u16 { 0 }
 }
 "#
     .to_string()
@@ -399,6 +414,111 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 writeln!(
                     out,
                     "    {{ let mut buf = [0u8; 64]; let _n = hw.uart_read({port}, &mut buf); }}"
+                )
+                .unwrap();
+            }
+            "encoder" => {
+                let channel = block
+                    .config
+                    .get("channel")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                writeln!(
+                    out,
+                    "    state.out_{id}_p0 = hw.encoder_read({channel}) as f64;"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "    state.out_{id}_p1 = 0.0; // velocity: computed by differencing"
+                )
+                .unwrap();
+            }
+            "ssd1306_display" => {
+                let bus = block
+                    .config
+                    .get("i2c_bus")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let addr = block
+                    .config
+                    .get("address")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0x3C);
+                let arg0 = if args.is_empty() {
+                    "\"\"".to_string()
+                } else {
+                    let r = state_ref(&args[0]);
+                    format!("&{r}")
+                };
+                let arg1 = if args.len() < 2 {
+                    "\"\"".to_string()
+                } else {
+                    let r = state_ref(&args[1]);
+                    format!("&{r}")
+                };
+                writeln!(
+                    out,
+                    "    hw.display_write({bus}, {addr}, {arg0}, {arg1});"
+                )
+                .unwrap();
+            }
+            "tmc2209_stepper" => {
+                let port = block
+                    .config
+                    .get("uart_port")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let arg_target = if args.is_empty() {
+                    "0.0".to_string()
+                } else {
+                    state_ref(&args[0])
+                };
+                let arg_enable = if args.len() < 2 {
+                    "0.0".to_string()
+                } else {
+                    state_ref(&args[1])
+                };
+                writeln!(
+                    out,
+                    "    hw.stepper_enable({port}, {arg_enable} > 0.5);"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "    hw.stepper_move({port}, {arg_target} as i64);"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "    state.out_{id}_p0 = hw.stepper_position({port}) as f64;"
+                )
+                .unwrap();
+            }
+            "tmc2209_stallguard" => {
+                let port = block
+                    .config
+                    .get("uart_port")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let addr = block
+                    .config
+                    .get("uart_addr")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let threshold = block
+                    .config
+                    .get("threshold")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(50);
+                writeln!(
+                    out,
+                    "    state.out_{id}_p0 = hw.stallguard_read({port}, {addr}) as f64;"
+                )
+                .unwrap();
+                writeln!(
+                    out,
+                    "    state.out_{id}_p1 = if (state.out_{id}_p0 as u16) < {threshold} {{ 1.0 }} else {{ 0.0 }};"
                 )
                 .unwrap();
             }
@@ -757,7 +877,7 @@ fn is_peripheral(block_type: &str) -> bool {
 }
 
 fn is_peripheral_source(block_type: &str) -> bool {
-    matches!(block_type, "adc_source" | "gpio_in" | "uart_rx")
+    matches!(block_type, "adc_source" | "gpio_in" | "uart_rx" | "encoder" | "tmc2209_stallguard" | "tmc2209_stepper")
 }
 
 // ---------------------------------------------------------------------------
@@ -899,6 +1019,34 @@ fn generate_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 writeln!(out, "// TODO: Receive from UART{port} at {baud} baud").unwrap();
                 writeln!(out, "pub fn block_{id}() -> Vec<u8> {{").unwrap();
                 writeln!(out, "    Vec::new()").unwrap();
+                writeln!(out, "}}").unwrap();
+            }
+            "encoder" => {
+                let channel = block.config.get("channel").and_then(|v| v.as_u64()).unwrap_or(0);
+                writeln!(out, "// TODO: Read quadrature encoder channel {channel}").unwrap();
+                writeln!(out, "pub fn block_{id}() -> (f64, f64) {{").unwrap();
+                writeln!(out, "    (0.0, 0.0) // stub: (position, velocity)").unwrap();
+                writeln!(out, "}}").unwrap();
+            }
+            "ssd1306_display" => {
+                let bus = block.config.get("i2c_bus").and_then(|v| v.as_u64()).unwrap_or(0);
+                let addr = block.config.get("address").and_then(|v| v.as_u64()).unwrap_or(0x3C);
+                writeln!(out, "// TODO: Write to SSD1306 display on I2C bus {bus}, addr 0x{addr:02X}").unwrap();
+                writeln!(out, "pub fn block_{id}(_line1: &str, _line2: &str) {{").unwrap();
+                writeln!(out, "}}").unwrap();
+            }
+            "tmc2209_stepper" => {
+                let port = block.config.get("uart_port").and_then(|v| v.as_u64()).unwrap_or(0);
+                writeln!(out, "// TODO: TMC2209 stepper on UART port {port}").unwrap();
+                writeln!(out, "pub fn block_{id}(_target: f64, _enable: f64) -> f64 {{").unwrap();
+                writeln!(out, "    0.0 // stub: actual position").unwrap();
+                writeln!(out, "}}").unwrap();
+            }
+            "tmc2209_stallguard" => {
+                let port = block.config.get("uart_port").and_then(|v| v.as_u64()).unwrap_or(0);
+                writeln!(out, "// TODO: TMC2209 StallGuard on UART port {port}").unwrap();
+                writeln!(out, "pub fn block_{id}() -> (f64, f64) {{").unwrap();
+                writeln!(out, "    (0.0, 0.0) // stub: (sg_value, stall_detected)").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "pubsub_sink" => {

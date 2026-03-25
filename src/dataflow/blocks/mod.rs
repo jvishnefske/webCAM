@@ -93,6 +93,26 @@ pub fn create_block(block_type: &str, config_json: &str) -> Result<Box<dyn Block
                 serde_json::from_str(config_json).map_err(|e| e.to_string())?;
             Ok(Box::new(pubsub::PubSubSourceBlock::from_config(cfg)))
         }
+        "encoder" => {
+            let cfg: embedded::EncoderConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(embedded::EncoderBlock::from_config(cfg)))
+        }
+        "ssd1306_display" => {
+            let cfg: embedded::Ssd1306DisplayConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(embedded::Ssd1306DisplayBlock::from_config(cfg)))
+        }
+        "tmc2209_stepper" => {
+            let cfg: embedded::Tmc2209StepperConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(embedded::Tmc2209StepperBlock::from_config(cfg)))
+        }
+        "tmc2209_stallguard" => {
+            let cfg: embedded::Tmc2209StallGuardConfig =
+                serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+            Ok(Box::new(embedded::Tmc2209StallGuardBlock::from_config(cfg)))
+        }
         _ => Err(format!("unknown block type: {block_type}")),
     }
 }
@@ -194,6 +214,26 @@ pub fn available_block_types() -> Vec<BlockTypeInfo> {
             block_type: "pubsub_sink",
             name: "PubSub Sink",
             category: "I/O",
+        },
+        BlockTypeInfo {
+            block_type: "encoder",
+            name: "Encoder",
+            category: "Embedded",
+        },
+        BlockTypeInfo {
+            block_type: "ssd1306_display",
+            name: "SSD1306 Display",
+            category: "Embedded",
+        },
+        BlockTypeInfo {
+            block_type: "tmc2209_stepper",
+            name: "TMC2209 Stepper",
+            category: "Embedded",
+        },
+        BlockTypeInfo {
+            block_type: "tmc2209_stallguard",
+            name: "TMC2209 StallGuard",
+            category: "Embedded",
         },
     ]
 }

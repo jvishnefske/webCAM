@@ -35,6 +35,27 @@ pub enum PinBinding {
         rx_pin: String,
         peripheral: String,
     },
+    Encoder {
+        logical_channel: u8,
+        pin_a: String,
+        pin_b: String,
+        timer: String,
+    },
+    I2cDisplay {
+        logical_bus: u8,
+        sda_pin: String,
+        scl_pin: String,
+        peripheral: String,
+    },
+    Stepper {
+        logical_port: u8,
+        step_pin: String,
+        dir_pin: String,
+        enable_pin: String,
+        uart_tx: String,
+        uart_rx: String,
+        peripheral: String,
+    },
 }
 
 /// A target with its binding, used as input to workspace generation.

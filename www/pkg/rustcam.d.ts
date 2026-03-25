@@ -30,7 +30,8 @@ export function dataflow_codegen(graph_id: number, dt: number): string;
 
 /**
  * Generate a multi-target workspace from a dataflow graph.
- * targets_json is a JSON array of { target, binding } objects.
+ *
+ * `targets_json` is a JSON array of `{ "target": "host"|"rp2040"|"stm32f4"|"esp32c3", "binding": {...} }`.
  * Returns JSON: `[["path", "content"], ...]` or error.
  */
 export function dataflow_codegen_multi(graph_id: number, dt: number, targets_json: string): string;
@@ -201,6 +202,7 @@ export interface InitOutput {
     readonly dataflow_advance: (a: number, b: number) => [number, number, number, number];
     readonly dataflow_block_types: () => [number, number];
     readonly dataflow_codegen: (a: number, b: number) => [number, number, number, number];
+    readonly dataflow_codegen_multi: (a: number, b: number, c: number, d: number) => [number, number, number, number];
     readonly dataflow_connect: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly dataflow_destroy: (a: number) => void;
     readonly dataflow_disconnect: (a: number, b: number) => [number, number];
