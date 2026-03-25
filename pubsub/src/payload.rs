@@ -66,7 +66,7 @@ pub fn encode_raw(data: &[u8], buf: &mut [u8]) -> Result<usize, PayloadError> {
 }
 
 /// Return raw bytes as-is (identity decode).
-pub fn decode_raw<'b>(buf: &'b [u8]) -> &'b [u8] {
+pub fn decode_raw(buf: &[u8]) -> &[u8] {
     buf
 }
 
