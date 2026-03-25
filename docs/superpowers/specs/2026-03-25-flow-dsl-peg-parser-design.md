@@ -9,7 +9,7 @@ The block editor remains the primary editing experience. The DSL serves as a rea
 ## Requirements
 
 - **Audience**: Both embedded/controls engineers and developers; also suitable for machine-generated output (Python API, Jupyter)
-- **Round-trip**: Parse `.flow` text → typed Rust AST, and serialize AST → `.flow` text, yielding identical output
+- **Round-trip**: Parse `.flow` text → typed Rust AST, and serialize AST → `.flow` text, yielding semantically equivalent output (normalized formatting; floats use Rust's `{:?}` round-trippable representation)
 - **Progressive expressiveness**: Terse one-liners for simple blocks, structured config blocks for complex types
 - **Native Rust types**: Parser actions produce Rust enums/structs directly; AST values can be sent over channels, pattern-matched, passed to codegen without serialization
 - **Build-time grammar**: PEG grammar compiled via `peg::parser!{}` proc macro — no runtime grammar interpretation
@@ -23,10 +23,10 @@ The block editor remains the primary editing experience. The DSL serves as a rea
 # Simple: positional argument
 block sensor: constant(42.0)
 
-# Named parameters
-block motor: pwm(channel = 0, frequency = 1000)
+# Named parameters (use = separator)
+block motor: pwm_sink(channel = 0, frequency = 1000)
 
-# Structured config block
+# Structured config block (use : separator, brace-delimited)
 block ctrl: state_machine {
   initial: idle
   states: [idle, running, error]
@@ -37,6 +37,8 @@ block ctrl: state_machine {
   ]
 }
 ```
+
+**Syntax note:** Named config uses `type(key = val, ...)` with `=` separators inside parentheses. Structured config uses `type { key: val ... }` with `:` separators inside braces. Both forms support nested lists and maps. The parser accepts single-line or multi-line structured blocks; the printer always normalizes to multi-line.
 
 ### Connections
 
@@ -86,9 +88,11 @@ dsl/
     ast.rs          # Typed Rust enums/structs
     parser.rs       # peg::parser!{} grammar → AST
     printer.rs      # AST → .flow text (pretty-printer)
-    convert.rs      # Optional: AST ↔ GraphSnapshot bridge (feature-gated)
-    error.rs        # Parse errors with span info
+    error.rs        # Parse errors with span/line/column info
   Cargo.toml        # deps: peg; optional: serde
+
+# Bridge lives in main crate to avoid circular dependency:
+src/dataflow/dsl_bridge.rs  # AST ↔ GraphSnapshot conversion
 ```
 
 ### Data flow
@@ -97,9 +101,9 @@ dsl/
                  parse()
   .flow text  ────────────►  Rust AST enums  ──► channel / direct consumption
                                   │
-  .flow text  ◄────────────       │  (optional, feature-gated)
+  .flow text  ◄────────────       │  (optional, in main crate)
                 print()           ▼
-                            GraphSnapshot bridge
+                            dsl_bridge.rs (GraphSnapshot ↔ AST)
 ```
 
 ### AST types
@@ -107,6 +111,7 @@ dsl/
 ```rust
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
+    Int(i64),
     Float(f64),
     Text(String),
     Ident(String),
@@ -122,10 +127,10 @@ pub struct Annotation {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Config {
-    None,
+    Empty,
     Positional(Vec<Value>),
-    Named(Vec<(String, Value)>),
-    Structured(Vec<(String, Value)>),
+    Named(Vec<(String, Value)>),       // type(key = val, ...) — parenthesized, = separator
+    Structured(Vec<(String, Value)>),  // type { key: val ... } — braced, : separator
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -133,7 +138,7 @@ pub struct BlockDecl {
     pub id: String,
     pub block_type: String,
     pub config: Config,
-    pub annotation: Option<Annotation>,
+    pub annotations: Vec<Annotation>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -153,6 +158,15 @@ pub struct Graph {
 
 All AST types derive `Debug`, `Clone`, `PartialEq`. Serde derives are feature-gated behind `serde` feature. Types are `Send + Sync` for channel usage.
 
+**Number handling:** `Value::Int(i64)` for numbers without a decimal point (`0`, `1000`), `Value::Float(f64)` for numbers with a decimal point (`42.0`, `2.5`). The printer outputs integers without a decimal and floats using Rust's `{:?}` format for round-trip fidelity.
+
+**String escapes:** String literals support `\"`, `\\`, `\n`, `\t` escape sequences.
+
+**Value mapping to engine types (in `dsl_bridge.rs`):**
+- `Value::Int` / `Value::Float` → engine `Value::Float(f64)`
+- `Value::Text` / `Value::Ident` → engine `Value::Text(String)` (idents treated as bare strings)
+- `Value::List` / `Value::Map` → serialized to `serde_json::Value` for `BlockSnapshot.config`
+
 ### Parser grammar shape
 
 ```rust
@@ -164,7 +178,8 @@ peg::parser! {
         rule comment() = "#" [^'\n']*
 
         rule value() -> Value
-            = f:float()       { Value::Float(f) }
+            = f:float()       { Value::Float(f) }  // must try before int (42.0 vs 42)
+            / n:int()         { Value::Int(n) }
             / s:string()      { Value::Text(s) }
             / i:ident()       { Value::Ident(i) }
             / "[" vs:value() ** "," "]" { Value::List(vs) }
@@ -178,7 +193,7 @@ peg::parser! {
             = "@" name:ident() "(" args:value() ** "," ")"
 
         rule block_decl() -> BlockDecl
-            = ann:annotation()? "block" id:ident() ":" ty:ident() config:config()?
+            = anns:annotation()* "block" id:ident() ":" ty:ident() config:config()?
 
         rule connection() -> Connection
             = from_b:ident() "." from_p:ident() "->"
@@ -206,10 +221,17 @@ peg::parser! {
 
 ### Dependency direction
 
-- `dsl/` depends on: `peg` only
-- `dsl/` does NOT depend on `src/dataflow/`
-- `convert.rs` bridge depends on dataflow types, gated behind `convert` feature
-- Main crate can optionally depend on `dsl/` for future WASM exports
+- `dsl/` depends on: `peg` only (plus optional `serde`)
+- `dsl/` does NOT depend on `src/dataflow/` or the main crate
+- Main crate depends on `dsl/` (workspace dependency)
+- Bridge (`src/dataflow/dsl_bridge.rs`) lives in the main crate, imports both `dsl::ast` types and `dataflow` types — no circular dependency
+
+### Bridge: name-to-index resolution
+
+The `dsl_bridge.rs` module converts between DSL AST and `GraphSnapshot`. Key conversions:
+- **Block names → BlockIds**: Allocated sequentially during conversion; a name→id map is maintained
+- **Port names → port indices**: Resolved by instantiating each block type and querying `input_ports()` / `output_ports()` to find the index for a given port name
+- **DSL uses engine type strings**: Block type names in `.flow` files match the engine's `create_block()` registry exactly (e.g., `adc_source`, `pwm_sink`, `gpio_in`, `uart_rx`)
 
 ## Testing strategy
 
@@ -232,7 +254,7 @@ peg::parser! {
 
 ### Layer 4 — Integration tests
 - Parse full graphs, verify block/connection counts
-- Optional: AST ↔ `GraphSnapshot` round-trip via `convert.rs`
+- Optional: AST ↔ `GraphSnapshot` round-trip via `dsl_bridge.rs`
 - Snapshot tests with `insta` for printer output
 
 ## Scope
@@ -243,7 +265,7 @@ peg::parser! {
 - All 17+ current block types parseable
 - `@target` annotations
 - Feature-gated serde derives
-- Feature-gated `convert.rs` for AST ↔ GraphSnapshot bridge
+- `src/dataflow/dsl_bridge.rs` for AST ↔ GraphSnapshot conversion
 
 ### Out of scope (v1)
 - Block editor UI integration (import/export buttons)
@@ -255,6 +277,10 @@ peg::parser! {
 
 ## Supported block types
 
-All current blocks: constant, gain, add, multiply, clamp, plot, adc, pwm, gpio, uart, udp, state_machine, pubsub_source, pubsub_sink, json_encode, json_decode, function.
+All current engine block types: constant, gain, add, multiply, clamp, plot, adc_source, pwm_sink, gpio_in, gpio_out, uart_tx, uart_rx, udp_source, udp_sink, encoder, ssd1306_display, tmc2209_stepper, tmc2209_stallguard, state_machine, pubsub_source, pubsub_sink, json_encode, json_decode, function.
 
-The parser is block-type agnostic — it parses any `block <id>: <type>(...)` declaration. Block-type-specific validation is out of scope for v1.
+The parser is block-type agnostic — it parses any `block <id>: <type>(...)` declaration. DSL type names must match the engine's `create_block()` registry strings exactly. Block-type-specific validation is out of scope for v1.
+
+## Declaration ordering
+
+The parser accepts blocks and connections in any order (interleaved is fine). The printer normalizes output to: all block declarations first (preserving declaration order), then all connections (ordered by source block, then source port). A blank line separates `@target` groups.
