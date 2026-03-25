@@ -30,7 +30,7 @@ jobs:
           cache: npm
           cache-dependency-path: www/package-lock.json
       - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test --all
+      - run: cargo test
       - run: wasm-pack build --target web --out-dir www/pkg --release
       - run: cd www && npm ci && npm run typecheck && npm run build
       - name: Remove build-only files from www

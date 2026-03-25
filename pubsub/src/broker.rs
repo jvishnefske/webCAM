@@ -252,9 +252,9 @@ mod tests {
     // invocations.
 
     std::thread_local! {
-        static HANDLER_A_CALLS: Cell<u32> = Cell::new(0);
-        static HANDLER_A_PAYLOAD: core::cell::RefCell<Vec<u8>> = core::cell::RefCell::new(Vec::new());
-        static HANDLER_B_CALLS: Cell<u32> = Cell::new(0);
+        static HANDLER_A_CALLS: Cell<u32> = const { Cell::new(0) };
+        static HANDLER_A_PAYLOAD: core::cell::RefCell<Vec<u8>> = const { core::cell::RefCell::new(Vec::new()) };
+        static HANDLER_B_CALLS: Cell<u32> = const { Cell::new(0) };
     }
 
     fn reset_handlers() {

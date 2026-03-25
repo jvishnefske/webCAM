@@ -559,7 +559,7 @@ mod tests {
     fn pwm_duty_write_read_roundtrip() {
         let mut bus = make_bus();
         for (i, &base) in FAN_BASE.iter().enumerate() {
-            let duty = (50 * (i as u8 + 1)).min(255);
+            let duty = 50 * (i as u8 + 1);
             bus.write(ADDR, &[base + FAN_OFFSET_SETTING, duty]).unwrap();
             let read_back = read_byte(&mut bus, base + FAN_OFFSET_SETTING);
             assert_eq!(read_back, duty, "fan {i}");

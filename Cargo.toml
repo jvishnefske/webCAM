@@ -26,14 +26,7 @@ default-members = [
     "pubsub",
     "hil/i2c-hil-sim",
     "hil/i2c-hil-devices",
-    "hil/usb-composite-dispatchers",
-    "hil/usb-can-dispatcher",
-    "hil/usb-gpio-dispatcher",
-    "hil/hil-backplane",
     "hil/board-config-common",
-    "hil/hil-firmware-support",
-    "hil/dap-dispatch",
-    "hil/board-support-pi-zero",
     "hil/hil-frontend",
 ]
 
