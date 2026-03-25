@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Target MCU family.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TargetFamily {
     Host,
     Rp2040,

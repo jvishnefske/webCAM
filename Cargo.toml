@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "dataflow-rt"]
+members = [".", "dataflow-rt", "pubsub"]
 
 [package]
 name = "rustcam"
