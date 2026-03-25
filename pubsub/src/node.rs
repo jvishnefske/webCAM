@@ -606,9 +606,17 @@ mod tests {
         assert_eq!(composite.mtu(), 24);
     }
 
+    // Private counter for composite test to avoid races with other tests
+    // that share `HANDLER_CALL_COUNT`.
+    static COMPOSITE_HANDLER_COUNT: AtomicU32 = AtomicU32::new(0);
+
+    fn composite_test_handler(_source: NodeAddr, _topic: TopicId, _payload: &[u8]) {
+        COMPOSITE_HANDLER_COUNT.fetch_add(1, Ordering::SeqCst);
+    }
+
     #[test]
     fn node_with_composite_full_flow() {
-        reset_handler_state();
+        COMPOSITE_HANDLER_COUNT.store(0, Ordering::SeqCst);
 
         let local = NodeAddr::new(1, 0, 0);
         let topic = TopicId::from_name("composite_test");
@@ -620,7 +628,7 @@ mod tests {
         let mut node: Node<CompositeTransport<MockTransport, MockTransport>, 8> =
             Node::new(local, composite);
 
-        node.subscribe(topic, test_handler).unwrap();
+        node.subscribe(topic, composite_test_handler).unwrap();
 
         // Publish should send on both transports.
         node.publish(topic, &[99]).unwrap();
@@ -633,7 +641,7 @@ mod tests {
 
         let count = node.poll().unwrap();
         assert_eq!(count, 1);
-        assert_eq!(HANDLER_CALL_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(COMPOSITE_HANDLER_COUNT.load(Ordering::SeqCst), 1);
     }
 
     #[test]
