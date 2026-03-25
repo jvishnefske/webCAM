@@ -321,15 +321,9 @@ impl Block for UartRxBlock {
 // Encoder
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct EncoderConfig {
     pub channel: u8,
-}
-
-impl Default for EncoderConfig {
-    fn default() -> Self {
-        Self { channel: 0 }
-    }
 }
 
 /// Reads a quadrature encoder channel.
