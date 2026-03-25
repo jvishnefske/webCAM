@@ -1,0 +1,13 @@
+[package]
+name = "i2c-hil-devices"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Simulated I2C device models for hardware-in-the-loop testing"
+
+[lints]
+workspace = true
+
+[dependencies]
+embedded-hal = { workspace = true }
+i2c-hil-sim = { workspace = true }

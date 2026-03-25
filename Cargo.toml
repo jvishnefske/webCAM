@@ -1,5 +1,72 @@
 [workspace]
-members = [".", "dataflow-rt", "pubsub"]
+resolver = "2"
+members = [
+    ".",
+    "dataflow-rt",
+    "pubsub",
+    "hil/i2c-hil-sim",
+    "hil/i2c-hil-devices",
+    "hil/usb-composite-dispatchers",
+    "hil/usb-can-dispatcher",
+    "hil/usb-gpio-dispatcher",
+    "hil/hil-backplane",
+    "hil/board-config-common",
+    "hil/hil-firmware-support",
+    "hil/dap-dispatch",
+    "hil/board-support-pico",
+    "hil/board-support-pico2",
+    "hil/board-support-stm32",
+    "hil/board-support-pi-zero",
+    "hil/pico-bootloader",
+    "hil/hil-frontend",
+]
+default-members = [
+    ".",
+    "dataflow-rt",
+    "pubsub",
+    "hil/i2c-hil-sim",
+    "hil/i2c-hil-devices",
+    "hil/usb-composite-dispatchers",
+    "hil/usb-can-dispatcher",
+    "hil/usb-gpio-dispatcher",
+    "hil/hil-backplane",
+    "hil/board-config-common",
+    "hil/hil-firmware-support",
+    "hil/dap-dispatch",
+    "hil/board-support-pi-zero",
+    "hil/hil-frontend",
+]
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+[workspace.lints.clippy]
+unwrap_in_result = "deny"
+expect_used = "warn"
+panic = "warn"
+undocumented_unsafe_blocks = "deny"
+missing_panics_doc = "deny"
+unnecessary_safety_doc = "warn"
+
+[workspace.dependencies]
+embedded-hal = "1.0"
+embedded-can = "0.4"
+embassy-usb = { version = "0.4", default-features = false, features = ["defmt"] }
+embassy-usb-driver = "0.1"
+i2c-hil-sim = { path = "hil/i2c-hil-sim" }
+i2c-hil-devices = { path = "hil/i2c-hil-devices" }
+usb-composite-dispatchers = { path = "hil/usb-composite-dispatchers" }
+gs-usb-device = { path = "hil/usb-can-dispatcher" }
+vprbrd-usb-gpio = { path = "hil/usb-gpio-dispatcher" }
+defmt = "0.3"
+board-config-common = { path = "hil/board-config-common" }
+hil-backplane = { path = "hil/hil-backplane", default-features = false }
+hil-firmware-support = { path = "hil/hil-firmware-support" }
+dap-dispatch = { path = "hil/dap-dispatch" }
+embassy-stm32 = { version = "0.2", default-features = false }
+sha1_smol = "1"
 
 [package]
 name = "rustcam"
@@ -23,6 +90,37 @@ wasm-bindgen-test = "0.3"
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
 
+[profile.dev]
+codegen-units = 1
+debug = 2
+debug-assertions = true
+incremental = false
+opt-level = 1
+overflow-checks = true
+lto = "off"
+
 [profile.release]
+codegen-units = 1
+debug = 2
+debug-assertions = false
+incremental = false
+lto = "fat"
 opt-level = "s"
-lto = true
+overflow-checks = false
+
+[profile.dev.build-override]
+codegen-units = 8
+debug = false
+debug-assertions = false
+opt-level = 0
+overflow-checks = false
+
+[profile.release.build-override]
+codegen-units = 8
+debug = false
+debug-assertions = false
+opt-level = 0
+overflow-checks = false
+
+[patch.crates-io]
+embassy-rp = { path = "hil/embassy-rp-patched" }

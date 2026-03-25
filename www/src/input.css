@@ -169,6 +169,146 @@
     @apply bg-border;
   }
 
+  /* ── Dataflow right-pane tabs ──────────────────────────────────── */
+  .df-right-tab {
+    @apply flex-1 bg-transparent border-none text-text-dim text-[13px] font-semibold uppercase tracking-wider py-2 cursor-pointer border-b-2 border-transparent transition-colors duration-150;
+  }
+  .df-right-tab.active {
+    @apply text-accent border-b-accent;
+  }
+  .df-tab-content {
+    display: none;
+    flex: 1;
+  }
+  .df-tab-content.active {
+    display: block;
+  }
+
+  /* ── Project sidebar ─────────────────────────────────────────── */
+  .df-sidebar {
+    @apply absolute right-0 top-0 bottom-0 w-[260px] bg-surface border-l border-border z-10 flex flex-col overflow-hidden;
+  }
+  .df-sidebar.hidden {
+    display: none;
+  }
+  .df-sidebar-header {
+    @apply px-3 py-2 border-b border-border;
+  }
+  .df-sidebar-header h3 {
+    @apply text-[13px] uppercase tracking-wider text-text-dim font-semibold m-0;
+  }
+  .df-project-list {
+    @apply flex-1 overflow-y-auto p-2;
+  }
+  .df-project-empty {
+    @apply text-xs text-text-dim p-3 text-center;
+  }
+  .df-project-item {
+    @apply flex items-center justify-between px-2 py-1.5 rounded text-xs cursor-default mb-0.5;
+  }
+  .df-project-item.active {
+    @apply bg-accent/15;
+  }
+  .df-project-info {
+    @apply flex-1 min-w-0;
+  }
+  .df-project-name {
+    @apply text-text truncate;
+  }
+  .df-project-date {
+    @apply text-text-dim text-[10px];
+  }
+  .df-project-actions {
+    @apply flex gap-1 ml-2 flex-shrink-0;
+  }
+  .df-project-load, .df-project-delete {
+    @apply text-[10px] px-1.5 py-0.5 rounded border border-border bg-transparent text-text-dim cursor-pointer;
+  }
+  .df-project-load:hover { @apply text-accent border-accent; }
+  .df-project-delete:hover { @apply text-danger border-danger; }
+
+  /* ── Pin table ───────────────────────────────────────────────── */
+  .pin-table {
+    @apply w-full border-collapse font-mono text-[10px];
+  }
+  .pin-table th {
+    @apply text-text-dim text-[9px] font-normal p-0 text-center;
+    width: 17px;
+    min-width: 17px;
+  }
+  .pin-cell {
+    @apply border border-border text-center cursor-pointer select-none;
+    width: 17px;
+    height: 17px;
+    max-width: 17px;
+    overflow: hidden;
+    position: relative;
+  }
+  .pin-cell:hover {
+    @apply bg-border;
+  }
+  .pin-name {
+    @apply block truncate text-[8px] leading-none;
+  }
+  .pin-badge {
+    @apply text-[7px] leading-none;
+  }
+  .pin-cell-input .pin-badge {
+    color: var(--color-accent);
+  }
+  .pin-cell-output .pin-badge {
+    color: var(--color-warning);
+  }
+  .pin-inline-edit {
+    @apply w-full bg-bg text-text text-[8px] border-none outline-none p-0;
+    position: absolute;
+    inset: 0;
+  }
+
+  /* ── I2C panel ───────────────────────────────────────────────── */
+  .i2c-controls {
+    @apply flex items-center gap-2 mb-3 flex-wrap;
+  }
+  .i2c-bus-grid {
+    @apply flex flex-col gap-2 mb-3;
+  }
+  .i2c-bus-card {
+    @apply bg-bg border border-border rounded p-2;
+  }
+  .i2c-bus-header {
+    @apply text-xs font-semibold mb-1;
+  }
+  .i2c-device-row {
+    @apply flex items-center gap-2 py-0.5 px-1 text-xs;
+  }
+  .i2c-device-row:hover {
+    @apply bg-border rounded;
+  }
+  .i2c-device-addr {
+    @apply font-mono text-accent text-[11px] min-w-[36px];
+  }
+  .i2c-device-name {
+    @apply flex-1 truncate text-text-dim;
+  }
+  .i2c-remove-btn {
+    @apply p-0 w-5 h-5 text-center leading-none text-danger bg-transparent border-none cursor-pointer text-sm;
+  }
+  .i2c-form {
+    @apply bg-bg border border-border rounded p-2;
+  }
+  .i2c-form-row {
+    @apply flex items-center gap-2 mb-1;
+  }
+  .i2c-form-row label {
+    @apply min-w-[70px];
+  }
+  .i2c-input {
+    @apply bg-surface border border-border text-text text-xs px-2 py-1 rounded focus:outline-none focus:border-accent;
+  }
+  .i2c-input-sm {
+    @apply w-14;
+  }
+
   /* Edge interaction */
   .df-edge {
     pointer-events: stroke;

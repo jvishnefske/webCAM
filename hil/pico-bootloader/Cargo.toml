@@ -1,0 +1,19 @@
+[package]
+name = "pico-bootloader"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "A/B partition bootloader for RP2040 using embassy-boot-rp"
+
+[lints]
+workspace = true
+
+[dependencies]
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+defmt = { workspace = true }
+defmt-rtt = "0.4"
+embassy-boot-rp = "0.4"
+embassy-rp = { version = "0.3", features = ["defmt", "critical-section-impl", "rp2040"] }
+embassy-sync = "0.6"
+embassy-time = { version = "0.4", features = ["defmt"] }

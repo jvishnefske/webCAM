@@ -1,0 +1,16 @@
+[package]
+name = "board-config-common"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Shared I2C bus topologies and network configuration for HIL firmware"
+
+[lints]
+workspace = true
+
+[dependencies]
+i2c-hil-sim = { workspace = true }
+i2c-hil-devices = { workspace = true }
+
+[dev-dependencies]
+embedded-hal = { workspace = true }

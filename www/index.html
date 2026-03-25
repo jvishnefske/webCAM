@@ -181,12 +181,31 @@ input[type="range"] { padding: 2px 0; border: none; background: transparent; }
 
     <div id="dataflow-sidebar-content" class="hidden">
       <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Project</h2>
+        <div id="df-project-name" class="text-xs font-semibold text-text mb-2 truncate">Untitled</div>
+        <div class="flex gap-1 mb-2">
+          <button class="btn btn-secondary btn-sm flex-1" id="df-new">New</button>
+          <button class="btn btn-secondary btn-sm flex-1" id="df-save-as">Save As</button>
+          <button class="btn btn-secondary btn-sm flex-1" id="df-projects">Projects</button>
+        </div>
+      </section>
+      <section class="mb-5">
         <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Dataflow Simulator</h2>
         <p class="text-xs text-text-dim mb-2">
           Double-click canvas to add blocks.<br>
           Drag between ports to connect.<br>
           Right-click a block to remove it.
         </p>
+      </section>
+      <section id="df-hil-section" class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">HIL Connection</h2>
+        <div class="flex gap-1 mb-2">
+          <input id="hil-ws-url" type="text" value="ws://169.254.1.1:8080" class="flex-1 bg-bg border border-border text-text px-2 py-1 rounded text-xs focus:outline-none focus:border-accent"/>
+          <button class="btn btn-primary btn-sm" id="hil-connect">Connect</button>
+        </div>
+        <div id="hil-status" class="text-xs text-text-dim mb-2">Disconnected</div>
+        <button class="btn btn-secondary btn-sm w-full" id="hil-deploy" disabled>Deploy to MCU</button>
+        <div id="hil-deploy-status" class="text-xs mt-1 min-h-4"></div>
       </section>
       <section class="mb-5">
         <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Transport</h2>
@@ -266,15 +285,28 @@ input[type="range"] { padding: 2px 0; border: none; background: transparent; }
   <!-- Dataflow workspace -->
   <div class="df-canvas-wrap flex-1 relative">
     <div id="dataflow-workspace" class="df-workspace"></div>
+    <div id="df-sidebar-panel"></div>
     <div class="df-controls flex gap-1.5 items-center px-3 py-2 border-t border-border bg-surface text-xs">
       <span id="df-time-info" class="font-mono text-text-dim">t=0.000</span>
     </div>
   </div>
 
-  <!-- Dataflow right pane (plots) -->
-  <div class="df-right bg-surface border-l border-border p-3 overflow-y-auto">
-    <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-2">Plot</h2>
-    <canvas id="df-plot-canvas" class="w-full h-[200px] border border-border rounded"></canvas>
+  <!-- Dataflow right pane (tabbed: Plot / Pins / I2C) -->
+  <div class="df-right bg-surface border-l border-border flex flex-col overflow-hidden">
+    <div class="df-right-tabs flex border-b border-border">
+      <button class="df-right-tab active" data-dftab="df-tab-plot">Plot</button>
+      <button class="df-right-tab" data-dftab="df-tab-pins">Pins</button>
+      <button class="df-right-tab" data-dftab="df-tab-i2c">I2C</button>
+    </div>
+    <div id="df-tab-plot" class="df-tab-content active p-3 overflow-y-auto">
+      <canvas id="df-plot-canvas" class="w-full h-[200px] border border-border rounded"></canvas>
+    </div>
+    <div id="df-tab-pins" class="df-tab-content p-3 overflow-y-auto">
+      <div id="hil-pin-table"></div>
+    </div>
+    <div id="df-tab-i2c" class="df-tab-content p-3 overflow-y-auto">
+      <div id="hil-i2c-panel"></div>
+    </div>
   </div>
 </div>
 

@@ -1,0 +1,41 @@
+[package]
+name = "board-support-stm32"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["stm32f411ce"]
+stm32f401cc = ["embassy-stm32/stm32f401cc"]
+stm32f411ce = ["embassy-stm32/stm32f411ce"]
+stm32h743vi = ["embassy-stm32/stm32h743vi"]
+
+[dependencies]
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+
+defmt = { workspace = true }
+defmt-rtt = "0.4"
+panic-probe = { version = "0.3", features = ["print-defmt"] }
+
+embassy-executor = { version = "0.7", features = ["arch-cortex-m", "executor-thread", "defmt", "task-arena-size-32768"] }
+embassy-stm32 = { version = "0.2", features = ["defmt", "time-driver-any"] }
+embassy-usb = { workspace = true }
+embassy-net = { version = "0.8", features = ["defmt", "medium-ethernet", "proto-ipv4", "proto-ipv6", "tcp", "udp"] }
+embassy-sync = { version = "0.6", features = ["defmt"] }
+embassy-time = { version = "0.4", features = ["defmt", "defmt-timestamp-uptime"] }
+
+embedded-hal = { workspace = true }
+heapless = { version = "0.8", default-features = false }
+board-config-common = { workspace = true }
+i2c-hil-sim = { workspace = true }
+hil-firmware-support = { workspace = true, features = ["tcp"] }
+hil-backplane = { workspace = true, default-features = false, features = ["embassy"] }
+static_cell = "2"
+portable-atomic = { version = "1.5.1", features = ["critical-section"] }
+
+[build-dependencies]
+flate2 = "1"

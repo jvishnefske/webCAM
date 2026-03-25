@@ -1,0 +1,27 @@
+[package]
+name = "board-support-pi-zero"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Raspberry Pi Zero Linux HIL node with real and simulated I2C"
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "time"] }
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
+linux-embedded-hal = "0.4"
+embedded-hal = { workspace = true }
+i2c-hil-sim = { workspace = true }
+hil-firmware-support = { workspace = true }
+hil-backplane = { workspace = true, features = ["std"] }
+clap = { version = "4", features = ["derive"] }
+env_logger = "0.11"
+log = "0.4"
+heapless = "0.8"
+dap-dispatch = { workspace = true }
+
+[dev-dependencies]
+minicbor = { version = "0.25", features = ["std"] }

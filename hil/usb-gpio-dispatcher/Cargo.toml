@@ -1,0 +1,20 @@
+[package]
+name = "vprbrd-usb-gpio"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Viperboard-compatible USB GPIO device for embassy-usb — appears as /sys/class/gpio on Linux"
+categories = ["embedded", "no-std", "hardware-support"]
+keywords = ["gpio", "usb", "viperboard", "embedded", "linux"]
+
+[lints]
+workspace = true
+
+[dependencies]
+embassy-usb = { workspace = true }
+embedded-hal = { workspace = true }
+defmt = { workspace = true, optional = true }
+
+[features]
+default = []
+defmt = ["dep:defmt"]
