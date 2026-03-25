@@ -1,0 +1,20 @@
+[package]
+name = "dap-dispatch"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "CMSIS-DAP protocol dispatch: CBOR tag 40 encoding and embassy-usb vendor class"
+
+[lints]
+workspace = true
+
+[dependencies]
+minicbor = { version = "0.25", default-features = false }
+embassy-usb = { workspace = true, optional = true }
+embassy-usb-driver = { workspace = true, optional = true }
+defmt = { workspace = true, optional = true }
+
+[features]
+default = []
+embassy-usb = ["dep:embassy-usb", "dep:embassy-usb-driver"]
+defmt = ["dep:defmt"]

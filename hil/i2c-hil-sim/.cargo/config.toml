@@ -1,0 +1,3 @@
+[build]
+# Override parent config: build for host target, not thumbv6m
+target = "x86_64-unknown-linux-gnu"

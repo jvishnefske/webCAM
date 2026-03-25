@@ -6,6 +6,7 @@ import {
   dataflow_run, dataflow_set_speed, dataflow_snapshot, dataflow_block_types,
 } from '../../pkg/rustcam.js';
 import type { GraphSnapshot, BlockTypeInfo, NodePosition } from './types.js';
+import type { SavedProject } from './storage.js';
 
 export class DataflowManager {
   graphId: number;
@@ -95,6 +96,25 @@ export class DataflowManager {
     this.lastTime = now;
     this.rafId = requestAnimationFrame(this.tick);
   };
+
+  /** Replay a saved project into this (empty) graph. Returns old→new block ID map. */
+  restoreProject(project: SavedProject): Map<number, number> {
+    const idMap = new Map<number, number>();
+    for (const block of project.graph.blocks) {
+      const newId = this.addBlock(block.blockType, block.config);
+      idMap.set(block.id, newId);
+      const pos = project.positions[block.id];
+      if (pos) this.positions.set(newId, { x: pos.x, y: pos.y });
+    }
+    for (const ch of project.graph.channels) {
+      const from = idMap.get(ch.fromBlock);
+      const to = idMap.get(ch.toBlock);
+      if (from !== undefined && to !== undefined) {
+        this.connect(from, ch.fromPort, to, ch.toPort);
+      }
+    }
+    return idMap;
+  }
 
   static blockTypes(): BlockTypeInfo[] {
     return JSON.parse(dataflow_block_types());

@@ -1,0 +1,32 @@
+[package]
+name = "hil-frontend"
+edition = "2021"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+[lib]
+name = "hil_frontend"
+path = "src/lib.rs"
+
+[dependencies]
+leptos = { version = "0.7", features = ["csr"] }
+wasm-bindgen = "0.2"
+crc32fast = "1"
+web-sys = { version = "0.3", features = [
+    "WebSocket",
+    "BinaryType",
+    "MessageEvent",
+    "Blob",
+    "ErrorEvent",
+    "CloseEvent",
+    "HtmlInputElement",
+    "File",
+    "FileReader",
+    "FileList",
+    "ProgressEvent",
+    "console",
+] }
+js-sys = "0.3"
+minicbor = { version = "0.25", features = ["std"] }
+gloo-timers = "0.3"
+console_error_panic_hook = "0.1"

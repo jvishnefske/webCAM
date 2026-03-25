@@ -1,0 +1,22 @@
+[package]
+name = "gs-usb-device"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "gs_usb protocol device-side implementation for embassy-usb — appears as a SocketCAN device on Linux"
+categories = ["embedded", "no-std", "hardware-support"]
+keywords = ["can", "usb", "socketcan", "gs_usb", "embedded"]
+
+[lints]
+workspace = true
+
+[dependencies]
+embassy-usb = { workspace = true }
+embassy-usb-driver = { workspace = true }
+embedded-can = { workspace = true }
+defmt = { workspace = true, optional = true }
+
+[features]
+default = []
+defmt = ["dep:defmt"]
+canfd = []

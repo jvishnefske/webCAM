@@ -28,6 +28,8 @@ export class DataflowEditor {
   onSelect: ((blockId: number | null, snap: GraphSnapshot | null) => void) | null = null;
   /** Fires when edge selection changes. */
   onEdgeSelect: ((channelId: number | null, snap: GraphSnapshot | null) => void) | null = null;
+  /** Fires when graph structure changes (add/remove/connect/disconnect/move). */
+  onChange: (() => void) | null = null;
 
   constructor(container: HTMLDivElement, mgr: DataflowManager) {
     this.mgr = mgr;
@@ -66,7 +68,7 @@ export class DataflowEditor {
         this.reconcile();
         this.onSelect?.(blockId, this.snap);
       },
-      () => { /* drag end — edges already updated during drag */ },
+      () => { this.onChange?.(); },
     );
     this.cleanupFns.push(cleanupDrag);
 
@@ -81,6 +83,7 @@ export class DataflowEditor {
         }
         this.snap = mgr.snapshot();
         this.reconcile();
+        this.onChange?.();
       },
     );
     this.cleanupFns.push(cleanupDelete);
@@ -93,6 +96,7 @@ export class DataflowEditor {
       () => {
         this.snap = mgr.snapshot();
         this.reconcile();
+        this.onChange?.();
       },
     );
     this.cleanupFns.push(cleanupWire);
@@ -203,6 +207,7 @@ export class DataflowEditor {
       this.snap = this.mgr.snapshot();
       this.reconcile();
       this.onEdgeSelect?.(null, null);
+      this.onChange?.();
     } else if (this.selected !== null) {
       const id = this.selected;
       this.mgr.removeBlock(id);
@@ -210,6 +215,7 @@ export class DataflowEditor {
       this.snap = this.mgr.snapshot();
       this.reconcile();
       this.onSelect?.(null, null);
+      this.onChange?.();
     }
   };
 
@@ -300,6 +306,7 @@ export class DataflowEditor {
       () => {
         this.snap = this.mgr.snapshot();
         this.reconcile();
+        this.onChange?.();
       },
     );
   };

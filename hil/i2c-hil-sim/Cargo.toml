@@ -1,0 +1,12 @@
+[package]
+name = "i2c-hil-sim"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "no_std I2C bus simulator implementing embedded-hal I2c trait"
+
+[lints]
+workspace = true
+
+[dependencies]
+embedded-hal = { workspace = true }

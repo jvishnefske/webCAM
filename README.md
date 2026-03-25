@@ -26,6 +26,7 @@ zero server calls, and zero cost.
 - **Built-in sketcher** — draw constrained 2D geometry and send it straight to CAM
 - **Toolpath simulation** — watch the toolhead trace the path before you cut
 - **Dataflow editor** — wire up signal-processing blocks for custom workflows
+- **HIL testing** — hardware-in-the-loop I2C simulation and firmware for embedded targets
 
 ## Quick start
 
@@ -33,6 +34,38 @@ zero server calls, and zero cost.
 make test            # run unit tests
 make wasm            # build WASM (requires wasm-pack 0.12+)
 make serve           # http://localhost:8080
+```
+
+## Microcontroller targets
+
+The `hil/` directory contains crates for hardware-in-the-loop testing and embedded firmware. Each board-support crate targets a specific microcontroller:
+
+| Target | Crate | MCU |
+|--------|-------|-----|
+| **Pico** | `board-support-pico` | RP2040 |
+| **Pico 2** | `board-support-pico2` | RP2350 |
+| **STM32** | `board-support-stm32` | STM32 (via embassy-stm32) |
+| **Pi Zero** | `board-support-pi-zero` | BCM2835 (Linux) |
+
+Supporting crates:
+
+- `i2c-hil-sim` — software I2C bus simulator with pluggable device models
+- `i2c-hil-devices` — simulated I2C peripherals (temp sensors, GPIO expanders, PMBus, EEPROMs)
+- `hil-backplane` — message framing, DHCP, pub/sub, and request/response over USB or network
+- `board-config-common` — shared bus topology and device configuration across all boards
+- `hil-firmware-support` — common firmware utilities (USB setup, task spawning)
+- `hil-frontend` — Leptos web UI for live HIL monitoring
+- `usb-composite-dispatchers`, `usb-can-dispatcher`, `usb-gpio-dispatcher` — USB class dispatchers (composite, CAN, GPIO)
+- `dap-dispatch` — CMSIS-DAP debug probe dispatcher
+- `pico-bootloader` — UF2 bootloader for RP2040
+
+```bash
+make hil-test        # run host-side HIL tests
+make hil-firmware    # build Pico firmware
+make hil-stm32      # build STM32 firmware
+make hil-pi-zero    # build Pi Zero support
+make hil-verify     # clippy + test + firmware
+make all             # full CI + HIL verification
 ```
 
 ## How the pipeline works

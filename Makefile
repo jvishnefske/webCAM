@@ -1,6 +1,8 @@
-.PHONY: build wasm lint test ts ci release serve clean help
+.PHONY: build wasm lint test ts ci release serve clean help \
+       hil-analyze hil-test hil-firmware hil-stm32 hil-pi-zero hil-verify all
 
 WASM_TARGET = wasm32-unknown-unknown
+HIL_HOST_PKGS = -p i2c-hil-sim -p i2c-hil-devices -p hil-backplane -p board-config-common -p hil-frontend
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -33,3 +35,25 @@ serve: wasm ts ## Build and serve locally
 clean: ## Remove build artifacts
 	cargo clean
 	rm -rf www/pkg www/dist www/node_modules rustcam.zip
+
+# --- HIL targets ---
+
+hil-analyze: ## Run clippy on host-compatible HIL crates
+	cargo clippy $(HIL_HOST_PKGS) -- -D warnings
+
+hil-test: ## Run tests on host-compatible HIL crates
+	cargo test $(HIL_HOST_PKGS)
+	cargo test -p board-support-pi-zero
+
+hil-firmware: ## Build Pico firmware
+	cargo build-pico
+
+hil-stm32: ## Build STM32 firmware
+	hil/scripts/build-stm32.sh firmware-out
+
+hil-pi-zero: ## Build Pi Zero support crate
+	cargo build -p board-support-pi-zero
+
+hil-verify: hil-analyze hil-test hil-firmware ## Full HIL verification
+
+all: ci hil-verify ## Run everything

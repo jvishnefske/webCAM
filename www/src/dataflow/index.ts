@@ -6,10 +6,22 @@ import { DataflowManager } from './graph.js';
 import { DataflowEditor } from './editor.js';
 import { drawPlot } from './plot.js';
 import { createZip } from './zip.js';
+import { HilClient } from './hil-client.js';
+import { renderPinTable } from './pin-table.js';
+import { renderI2cPanel, updateI2cBuses } from './i2c-panel.js';
+import {
+  serializeProject, saveProject, loadProject, deleteProject,
+  listProjects, getActiveProjectName, setActiveProjectName,
+  uniqueName, createAutoSave,
+} from './storage.js';
+import { createSidebar } from './sidebar.js';
 import type { GraphSnapshot, Value } from './types.js';
 
 let mgr: DataflowManager | null = null;
 let editor: DataflowEditor | null = null;
+let hilClient: HilClient | null = null;
+let activeProjectName = 'Untitled';
+let triggerAutoSave: (() => void) | null = null;
 
 export function initDataflow(): void {
   mgr = new DataflowManager(0.01);
@@ -23,6 +35,123 @@ export function initDataflow(): void {
   editor.onEdgeSelect = (channelId, snap) => {
     updateEdgeInfo(channelId, snap);
   };
+
+  // ── Project management ──────────────────────────────────────────
+  const projectNameEl = $('df-project-name');
+
+  function currentSave() {
+    if (!mgr || !editor) return;
+    const snap = mgr.snapshot();
+    const viewport = { panX: 0, panY: 0, scale: 1 }; // TODO: expose from editor
+    const project = serializeProject(activeProjectName, snap, mgr.positions, viewport);
+    saveProject(project);
+    setActiveProjectName(activeProjectName);
+  }
+
+  triggerAutoSave = createAutoSave(() => currentSave(), 1000);
+
+  function updateProjectNameDisplay() {
+    projectNameEl.textContent = activeProjectName;
+  }
+
+  function refreshSidebar() {
+    const projects = listProjects();
+    const infos = projects.map(name => {
+      const p = loadProject(name);
+      return { name, lastModified: p?.lastModified ?? '' };
+    });
+    sidebar.renderProjects(infos, activeProjectName);
+  }
+
+  function resetEditor(dt: number) {
+    if (!mgr || !editor) return;
+    mgr.stop();
+    $btn('df-play').textContent = 'Play';
+    editor.destroy();
+    mgr.destroy();
+    mgr = new DataflowManager(dt);
+    editor = new DataflowEditor(container, mgr);
+    editor.onSelect = (blockId, snap) => updateBlockInfo(blockId, snap);
+    editor.onEdgeSelect = (channelId, snap) => updateEdgeInfo(channelId, snap);
+    editor.onChange = () => triggerAutoSave?.();
+    editor.resize();
+  }
+
+  function loadProjectByName(name: string) {
+    const project = loadProject(name);
+    if (!project) return;
+    const dt = parseFloat($input('df-dt').value) || 0.01;
+    resetEditor(dt);
+    mgr!.restoreProject(project);
+    activeProjectName = name;
+    setActiveProjectName(name);
+    updateProjectNameDisplay();
+    editor!.updateSnapshot();
+  }
+
+  // Set up sidebar panel
+  const sidebarContainer = $('df-sidebar-panel');
+  const sidebar = createSidebar({
+    onLoad: (name) => {
+      currentSave();
+      loadProjectByName(name);
+      refreshSidebar();
+    },
+    onDelete: (name) => {
+      deleteProject(name);
+      if (name === activeProjectName) {
+        const dt = parseFloat($input('df-dt').value) || 0.01;
+        resetEditor(dt);
+        activeProjectName = 'Untitled';
+        setActiveProjectName(activeProjectName);
+        updateProjectNameDisplay();
+      }
+      refreshSidebar();
+    },
+  });
+  sidebarContainer.appendChild(sidebar.element);
+
+  // Toolbar: New
+  $btn('df-new').addEventListener('click', () => {
+    currentSave();
+    const dt = parseFloat($input('df-dt').value) || 0.01;
+    resetEditor(dt);
+    activeProjectName = uniqueName('Untitled', listProjects());
+    setActiveProjectName(activeProjectName);
+    updateProjectNameDisplay();
+    refreshSidebar();
+  });
+
+  // Toolbar: Save As
+  $btn('df-save-as').addEventListener('click', () => {
+    const name = prompt('Project name:');
+    if (!name || !name.trim()) return;
+    const finalName = uniqueName(name.trim(), listProjects());
+    activeProjectName = finalName;
+    currentSave();
+    updateProjectNameDisplay();
+    refreshSidebar();
+  });
+
+  // Toolbar: Projects toggle
+  $btn('df-projects').addEventListener('click', () => {
+    refreshSidebar();
+    sidebar.toggle();
+  });
+
+  // Auto-save on graph changes
+  editor.onChange = () => triggerAutoSave?.();
+
+  // Also auto-save on config apply (handled in updateBlockInfo)
+
+  // Restore last active project on init
+  const lastActive = getActiveProjectName();
+  if (lastActive && loadProject(lastActive)) {
+    loadProjectByName(lastActive);
+  } else {
+    activeProjectName = 'Untitled';
+    updateProjectNameDisplay();
+  }
 
   // Transport controls
   $btn('df-play').addEventListener('click', () => {
@@ -38,16 +167,9 @@ export function initDataflow(): void {
 
   $btn('df-reset').addEventListener('click', () => {
     if (!mgr) return;
-    mgr.stop();
-    $btn('df-play').textContent = 'Play';
-    editor?.destroy();
-    mgr.destroy();
     const dt = parseFloat($input('df-dt').value) || 0.01;
-    mgr = new DataflowManager(dt);
-    editor = new DataflowEditor(container, mgr);
-    editor.onSelect = (blockId, snap) => updateBlockInfo(blockId, snap);
-    editor.onEdgeSelect = (channelId, snap) => updateEdgeInfo(channelId, snap);
-    editor.resize();
+    resetEditor(dt);
+    triggerAutoSave?.();
   });
 
   $input('df-speed').addEventListener('input', () => {
@@ -108,6 +230,10 @@ export function initDataflow(): void {
 
   // Set up target selection checkboxes
   setupTargetCheckboxes();
+
+  // HIL connection + tabs
+  setupHilConnection();
+  setupDfRightTabs();
 }
 
 export function resizeDataflow(): void {
@@ -332,6 +458,111 @@ function setupTargetCheckboxes(): void {
     row.appendChild(span);
     container.appendChild(row);
   }
+}
+
+// ── HIL connection ─────────────────────────────────────────────────
+
+function setupHilConnection(): void {
+  const connectBtn = $btn('hil-connect');
+  const statusEl = $('hil-status');
+  const deployBtn = document.getElementById('hil-deploy') as HTMLButtonElement;
+  const deployStatus = $('hil-deploy-status');
+  const pinContainer = $('hil-pin-table');
+  const i2cContainer = $('hil-i2c-panel');
+
+  connectBtn.addEventListener('click', () => {
+    if (hilClient?.connected) {
+      hilClient.disconnect();
+      return;
+    }
+    const url = $input('hil-ws-url').value.trim();
+    if (!url) return;
+
+    hilClient = new HilClient();
+
+    hilClient.onConnect = () => {
+      statusEl.textContent = 'Connected';
+      statusEl.className = 'text-xs text-success mb-2';
+      connectBtn.textContent = 'Disconnect';
+      deployBtn.disabled = false;
+    };
+
+    hilClient.onDisconnect = () => {
+      statusEl.textContent = 'Disconnected';
+      statusEl.className = 'text-xs text-text-dim mb-2';
+      connectBtn.textContent = 'Connect';
+      deployBtn.disabled = true;
+    };
+
+    hilClient.onBusList = (buses) => {
+      updateI2cBuses(i2cContainer, buses, hilClient!);
+    };
+
+    hilClient.onPinConfig = (pins) => {
+      renderPinTable(pinContainer, pins, (_idx, _pin) => {
+        // Send pin edit back to MCU (future: dedicated set-pin message)
+        hilClient?.getPinConfig();
+      });
+    };
+
+    hilClient.onError = (msg) => {
+      deployStatus.textContent = `Error: ${msg}`;
+      deployStatus.className = 'text-xs mt-1 min-h-4 text-danger';
+    };
+
+    hilClient.onDeployAck = () => {
+      deployStatus.textContent = 'Deployed successfully.';
+      deployStatus.className = 'text-xs mt-1 min-h-4 text-success';
+    };
+
+    // Render initial empty I2C panel
+    renderI2cPanel(i2cContainer, hilClient);
+
+    hilClient.connect(url);
+    statusEl.textContent = 'Connecting…';
+    statusEl.className = 'text-xs text-warning mb-2';
+  });
+
+  // Deploy button
+  deployBtn.addEventListener('click', () => {
+    if (!mgr || !hilClient?.connected) return;
+    const dt = parseFloat($input('df-dt').value) || 0.01;
+
+    // Get selected target
+    const targetChecks = document.querySelectorAll<HTMLInputElement>('.df-target-check:checked');
+    const target = targetChecks.length > 0 ? targetChecks[0].dataset.target! : 'Host';
+
+    try {
+      const snap = mgr.snapshot();
+      const snapshotJson = JSON.stringify(snap);
+      hilClient.deploy(snapshotJson, target, dt);
+      deployStatus.textContent = 'Deploying…';
+      deployStatus.className = 'text-xs mt-1 min-h-4 text-warning';
+    } catch (e) {
+      deployStatus.textContent = `Deploy error: ${e}`;
+      deployStatus.className = 'text-xs mt-1 min-h-4 text-danger';
+    }
+  });
+}
+
+// ── Right-pane tab switching ───────────────────────────────────────
+
+function setupDfRightTabs(): void {
+  const tabs = document.querySelectorAll<HTMLButtonElement>('.df-right-tab');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      const targetId = tab.dataset.dftab;
+      if (!targetId) return;
+
+      // Deactivate all tabs and panes
+      tabs.forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.df-tab-content').forEach(p => p.classList.remove('active'));
+
+      // Activate clicked
+      tab.classList.add('active');
+      document.getElementById(targetId)?.classList.add('active');
+    });
+  });
 }
 
 /** Download generated crate files as a ZIP archive. */
