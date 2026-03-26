@@ -1,4 +1,4 @@
-import { DagNode, DagState, NodeId } from './dag-types.js';
+import { DagNode, DagState, NodeId, SavedState } from './dag-types.js';
 
 // WASM imports -- loaded dynamically
 let wasm: any = null;
@@ -39,9 +39,94 @@ let state: DagState = {
 let nextId = 0;
 const svg = document.getElementById('canvas') as unknown as SVGSVGElement;
 
+// --- Undo/Redo ---
+
+const UNDO_MAX = 50;
+const undoStack: string[] = [];
+const redoStack: string[] = [];
+
+function captureState(): string {
+  const saved: SavedState = {
+    nodes: state.nodes,
+    nextId,
+    panX: state.panX,
+    panY: state.panY,
+    scale: state.scale,
+  };
+  return JSON.stringify(saved);
+}
+
+function pushUndo() {
+  undoStack.push(captureState());
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  redoStack.length = 0;
+  scheduleAutoSave();
+}
+
+function restoreState(json: string) {
+  const saved: SavedState = JSON.parse(json);
+  state.nodes = saved.nodes;
+  nextId = saved.nextId;
+  state.panX = saved.panX;
+  state.panY = saved.panY;
+  state.scale = saved.scale;
+  state.selectedId = null;
+  hideInspector();
+  render();
+  updateStatus();
+}
+
+function undo() {
+  if (undoStack.length === 0) return;
+  redoStack.push(captureState());
+  restoreState(undoStack.pop()!);
+  scheduleAutoSave();
+}
+
+function redo() {
+  if (redoStack.length === 0) return;
+  undoStack.push(captureState());
+  restoreState(redoStack.pop()!);
+  scheduleAutoSave();
+}
+
+// --- Auto-save ---
+
+const AUTOSAVE_KEY = 'dag:state';
+let autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleAutoSave() {
+  if (autoSaveTimer !== null) clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    localStorage.setItem(AUTOSAVE_KEY, captureState());
+    autoSaveTimer = null;
+  }, 1000);
+}
+
+function loadSavedState() {
+  const json = localStorage.getItem(AUTOSAVE_KEY);
+  if (json) {
+    try {
+      const saved: SavedState = JSON.parse(json);
+      state.nodes = saved.nodes;
+      nextId = saved.nextId;
+      state.panX = saved.panX;
+      state.panY = saved.panY;
+      state.scale = saved.scale;
+    } catch (_e) {
+      // Ignore corrupt saved state
+    }
+  }
+}
+
+function clearSavedState() {
+  localStorage.removeItem(AUTOSAVE_KEY);
+}
+
 // --- Node management ---
 
 function addNode(op: string): DagNode {
+  pushUndo();
   // Remap toolbar ops to internal op names
   let actualOp = op;
   if (op === 'sub_ps') actualOp = 'subscribe';
@@ -63,6 +148,7 @@ function addNode(op: string): DagNode {
 }
 
 function removeNode(id: NodeId) {
+  pushUndo();
   state.nodes = state.nodes.filter(n => n.id !== id);
   // Clear references to this node
   for (const n of state.nodes) {
@@ -224,6 +310,7 @@ function setupInteraction() {
       if (connectMode) {
         const destNode = state.nodes.find(n => n.id === id);
         if (destNode) {
+          pushUndo();
           if (port === 0) {
             if (destNode.src !== undefined) destNode.src = connectMode.nodeId;
             else destNode.a = connectMode.nodeId;
@@ -275,15 +362,32 @@ function setupInteraction() {
   });
 
   svg.addEventListener('mouseup', () => {
+    if (dragNode) {
+      pushUndo();
+    }
     dragNode = null;
   });
 
-  // Delete key removes selected node
+  // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
+    const active = document.activeElement;
+    const inInput = active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA');
+
+    // Undo/Redo (works even when input is focused? No -- skip if in input)
+    if ((e.key === 'z' || e.key === 'Z') && (e.ctrlKey || e.metaKey) && !inInput) {
+      e.preventDefault();
+      if (e.shiftKey) {
+        redo();
+      } else {
+        undo();
+      }
+      return;
+    }
+
+    // Delete key removes selected node
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (state.selectedId !== null) {
-        const active = document.activeElement;
-        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+        if (inInput) return;
         removeNode(state.selectedId);
         hideInspector();
       }
@@ -313,6 +417,7 @@ function showInspector(node: DagNode) {
     inp.value = String(node.value ?? 0);
     inp.step = 'any';
     inp.addEventListener('change', () => {
+      pushUndo();
       node.value = parseFloat(inp.value);
       render();
     });
@@ -328,6 +433,7 @@ function showInspector(node: DagNode) {
     inp.type = 'text';
     inp.value = node.name || '';
     inp.addEventListener('change', () => {
+      pushUndo();
       node.name = inp.value;
       render();
     });
@@ -531,6 +637,8 @@ async function init() {
   document.getElementById('btn-eval')!.addEventListener('click', evaluate);
   document.getElementById('btn-push')!.addEventListener('click', pushToMCU);
   document.getElementById('btn-clear')!.addEventListener('click', () => {
+    clearSavedState();
+    pushUndo();
     state.nodes = [];
     state.selectedId = null;
     nextId = 0;
@@ -539,6 +647,7 @@ async function init() {
     updateStatus();
   });
 
+  loadSavedState();
   render();
   updateStatus();
 }

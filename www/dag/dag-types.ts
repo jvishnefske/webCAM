@@ -25,3 +25,11 @@ export interface DagState {
   panY: number;
   scale: number;
 }
+
+export interface SavedState {
+  nodes: DagNode[];
+  nextId: number;
+  panX: number;
+  panY: number;
+  scale: number;
+}
