@@ -133,9 +133,10 @@ pub async fn run_with_api<B: I2cBusSet>(
                 let path =
                     crate::ws_framing::parse_request_path(&http_buf[..http_len]).unwrap_or("/");
 
-                if method != "GET" {
-                    // Non-GET request — try API handler
-                    // Extract body: read remaining bytes after headers
+                // Try API handler first (for /api/* paths or non-GET methods)
+                let is_api = method != "GET" || path.starts_with("/api/");
+                if is_api {
+                    // API request — extract body and delegate
                     let header_end = {
                         let mut pos = None;
                         let mut i = 0;
