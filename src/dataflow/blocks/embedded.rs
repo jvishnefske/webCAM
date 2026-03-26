@@ -1012,6 +1012,7 @@ mod tests {
         assert_eq!(out[1], Some(Value::Float(0.0)));
     }
 
+
     #[test]
     fn sim_mode_graph_adc_to_gain_to_pwm() {
         use crate::dataflow::graph::DataflowGraph;
