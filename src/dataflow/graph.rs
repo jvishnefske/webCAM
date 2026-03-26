@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::block::{Block, BlockId, Value};
+use super::block::{BlockId, Module, Value};
 use super::channel::{Channel, ChannelId};
 
 /// Snapshot of one block for serialization to the frontend.
@@ -22,6 +22,10 @@ pub struct BlockSnapshot {
     /// When None, the block runs on all targets.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target: Option<crate::dataflow::codegen::target::TargetFamily>,
+    /// Custom codegen output from blocks implementing the `Codegen` trait.
+    /// When present, emit.rs uses this instead of built-in code generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_codegen: Option<String>,
 }
 
 /// Snapshot of the entire graph.
@@ -34,7 +38,7 @@ pub struct GraphSnapshot {
 }
 
 pub struct DataflowGraph {
-    blocks: HashMap<BlockId, Box<dyn Block>>,
+    blocks: HashMap<BlockId, Box<dyn Module>>,
     channels: Vec<Channel>,
     next_block_id: u32,
     next_channel_id: u32,
@@ -42,6 +46,10 @@ pub struct DataflowGraph {
     outputs: HashMap<(BlockId, usize), Value>,
     pub tick_count: u64,
     pub time: f64,
+    /// When true, the tick loop uses SimModel dispatch for peripheral blocks.
+    pub simulation_mode: bool,
+    /// Simulated peripherals state (used when simulation_mode is true).
+    sim_peripherals: Option<crate::dataflow::sim_peripherals::WasmSimPeripherals>,
 }
 
 impl Default for DataflowGraph {
@@ -60,17 +68,52 @@ impl DataflowGraph {
             outputs: HashMap::new(),
             tick_count: 0,
             time: 0.0,
+            simulation_mode: false,
+            sim_peripherals: None,
         }
     }
 
-    pub fn add_block(&mut self, block: Box<dyn Block>) -> BlockId {
+    /// Enable or disable simulation mode.
+    pub fn set_simulation_mode(&mut self, enabled: bool) {
+        self.simulation_mode = enabled;
+    }
+
+    /// Check if sim peripherals are already set.
+    pub fn has_sim_peripherals(&self) -> bool {
+        self.sim_peripherals.is_some()
+    }
+
+    /// Set the SimPeripherals implementation.
+    pub fn set_sim_peripherals(&mut self, peripherals: crate::dataflow::sim_peripherals::WasmSimPeripherals) {
+        self.sim_peripherals = Some(peripherals);
+    }
+
+    /// Access WasmSimPeripherals for configuration.
+    pub fn with_sim_peripherals<F>(&mut self, f: F)
+    where
+        F: FnOnce(&mut crate::dataflow::sim_peripherals::WasmSimPeripherals),
+    {
+        if let Some(ref mut p) = self.sim_peripherals {
+            f(p);
+        }
+    }
+
+    /// Read the last PWM duty value for a channel from sim peripherals.
+    pub fn get_sim_pwm(&self, channel: u8) -> f64 {
+        if let Some(ref p) = self.sim_peripherals {
+            return p.get_pwm_duty(channel);
+        }
+        0.0
+    }
+
+    pub fn add_block(&mut self, block: Box<dyn Module>) -> BlockId {
         let id = BlockId(self.next_block_id);
         self.next_block_id += 1;
         self.blocks.insert(id, block);
         id
     }
 
-    pub fn replace_block(&mut self, id: BlockId, new_block: Box<dyn Block>) -> Result<(), String> {
+    pub fn replace_block(&mut self, id: BlockId, new_block: Box<dyn Module>) -> Result<(), String> {
         if !self.blocks.contains_key(&id) {
             return Err("block not found".into());
         }
@@ -165,6 +208,7 @@ impl DataflowGraph {
         for &bid in &block_ids {
             let block = self.blocks.get(&bid).unwrap();
             let n_inputs = block.input_ports().len();
+            let n_outputs = block.output_ports().len();
 
             // Gather inputs from connected channels.
             let mut inputs: Vec<Option<&Value>> = vec![None; n_inputs];
@@ -178,10 +222,31 @@ impl DataflowGraph {
                 }
             }
 
-            // SAFETY: we only hold a shared ref to self.outputs and a mutable ref
-            // to the block.  We need to temporarily take the block out.
+            // Take block out temporarily for mutable access.
             let mut block = self.blocks.remove(&bid).unwrap();
-            let results = block.tick(&inputs, dt);
+
+            let results = if self.simulation_mode {
+                // Simulation mode: try SimModel first, then Tick, then empty.
+                if let Some(sim) = block.as_sim_model() {
+                    if let Some(peripherals) = self.sim_peripherals.as_mut() {
+                        sim.sim_tick(&inputs, dt, peripherals)
+                    } else {
+                        vec![None; n_outputs]
+                    }
+                } else if let Some(tick) = block.as_tick() {
+                    tick.tick(&inputs, dt)
+                } else {
+                    vec![None; n_outputs]
+                }
+            } else {
+                // Normal mode: try Tick, then empty.
+                if let Some(tick) = block.as_tick() {
+                    tick.tick(&inputs, dt)
+                } else {
+                    vec![None; n_outputs]
+                }
+            };
+
             self.blocks.insert(bid, block);
 
             for (port_idx, val) in results.into_iter().enumerate() {
@@ -216,6 +281,9 @@ impl DataflowGraph {
                     .collect();
                 let config = serde_json::from_str(&block.config_json())
                     .unwrap_or(serde_json::Value::Null);
+                let custom_codegen = block.as_codegen().and_then(|cg| {
+                    cg.emit_rust("host").ok()
+                });
                 BlockSnapshot {
                     id,
                     block_type: block.block_type().to_string(),
@@ -225,6 +293,7 @@ impl DataflowGraph {
                     config,
                     output_values,
                     target: None,
+                    custom_codegen,
                 }
             })
             .collect();
@@ -358,6 +427,7 @@ mod tests {
             config: serde_json::json!({"value": 42.0}),
             output_values: vec![Some(Value::Float(42.0))],
             target: Some(TargetFamily::Rp2040),
+            custom_codegen: None,
         };
 
         let json = serde_json::to_string(&snap).unwrap();
@@ -379,6 +449,7 @@ mod tests {
             config: serde_json::json!({}),
             output_values: vec![None],
             target: None,
+            custom_codegen: None,
         };
 
         let json = serde_json::to_string(&snap).unwrap();
@@ -386,5 +457,17 @@ mod tests {
         assert!(!json.contains("\"target\""));
         let deser: BlockSnapshot = serde_json::from_str(&json).unwrap();
         assert!(deser.target.is_none());
+    }
+
+    #[test]
+    fn embedded_block_outputs_none_without_simulation() {
+        use crate::dataflow::blocks::embedded::{AdcBlock, AdcConfig};
+
+        let mut g = DataflowGraph::new();
+        let adc = g.add_block(Box::new(AdcBlock::from_config(AdcConfig::default())));
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let adc_snap = snap.blocks.iter().find(|b| b.id == adc.0).unwrap();
+        assert_eq!(adc_snap.output_values[0], None);
     }
 }

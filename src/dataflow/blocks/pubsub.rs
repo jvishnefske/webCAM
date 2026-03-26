@@ -1,6 +1,6 @@
 //! Pub/Sub source and sink blocks for cross-graph or external messaging.
 
-use crate::dataflow::block::{Block, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -48,7 +48,7 @@ impl PubSubSinkBlock {
     }
 }
 
-impl Block for PubSubSinkBlock {
+impl Module for PubSubSinkBlock {
     fn name(&self) -> &str {
         &self.display_name
     }
@@ -65,17 +65,23 @@ impl Block for PubSubSinkBlock {
         vec![]
     }
 
-    fn tick(&mut self, inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        self.last_value = inputs.first().and_then(|v| v.cloned());
-        vec![]
-    }
-
     fn config_json(&self) -> String {
         serde_json::to_string(&PubSubConfig {
             topic: self.topic.clone(),
             port_kind: self.port_kind.clone(),
         })
         .unwrap_or_default()
+    }
+
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for PubSubSinkBlock {
+    fn tick(&mut self, inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        self.last_value = inputs.first().and_then(|v| v.cloned());
+        vec![]
     }
 }
 
@@ -118,7 +124,7 @@ impl PubSubSourceBlock {
     }
 }
 
-impl Block for PubSubSourceBlock {
+impl Module for PubSubSourceBlock {
     fn name(&self) -> &str {
         &self.display_name
     }
@@ -135,16 +141,22 @@ impl Block for PubSubSourceBlock {
         vec![PortDef::new("out", self.port_kind.clone())]
     }
 
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        vec![self.current_value.clone()]
-    }
-
     fn config_json(&self) -> String {
         serde_json::to_string(&PubSubConfig {
             topic: self.topic.clone(),
             port_kind: self.port_kind.clone(),
         })
         .unwrap_or_default()
+    }
+
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for PubSubSourceBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        vec![self.current_value.clone()]
     }
 }
 

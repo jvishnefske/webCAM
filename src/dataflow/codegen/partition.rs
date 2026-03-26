@@ -74,6 +74,7 @@ pub fn partition_graph(snap: &GraphSnapshot) -> Result<PartitionResult, Partitio
             config: b.config.clone(),
             output_values: b.output_values.clone(),
             target: b.target,
+            custom_codegen: b.custom_codegen.clone(),
         });
     }
 
@@ -125,6 +126,7 @@ pub fn partition_graph(snap: &GraphSnapshot) -> Result<PartitionResult, Partitio
                 config: json!({"topic": topic}),
                 output_values: vec![],
                 target: Some(from_target),
+                custom_codegen: None,
             };
             target_blocks
                 .entry(from_target)
@@ -157,6 +159,7 @@ pub fn partition_graph(snap: &GraphSnapshot) -> Result<PartitionResult, Partitio
                 config: json!({"topic": topic}),
                 output_values: vec![None],
                 target: Some(to_target),
+                custom_codegen: None,
             };
             target_blocks
                 .entry(to_target)
@@ -229,6 +232,7 @@ mod tests {
             config: serde_json::json!({}),
             output_values: vec![None],
             target: Some(target),
+        custom_codegen: None,
         }
     }
 
@@ -242,6 +246,7 @@ mod tests {
             config: serde_json::json!({"value": 1.0}),
             output_values: vec![None],
             target: Some(target),
+        custom_codegen: None,
         }
     }
 
@@ -255,6 +260,7 @@ mod tests {
             config: serde_json::json!({}),
             output_values: vec![],
             target: Some(target),
+        custom_codegen: None,
         }
     }
 

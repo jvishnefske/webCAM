@@ -9,10 +9,10 @@ pub mod serde_block;
 pub mod state_machine;
 pub mod udp;
 
-use super::block::Block;
+use super::block::Module;
 
 /// Create a block from its type name and JSON config.
-pub fn create_block(block_type: &str, config_json: &str) -> Result<Box<dyn Block>, String> {
+pub fn create_block(block_type: &str, config_json: &str) -> Result<Box<dyn Module>, String> {
     match block_type {
         "constant" => {
             let cfg: constant::ConstantConfig =

@@ -1,6 +1,6 @@
 //! Constant block: emits a fixed value every tick.
 
-use crate::dataflow::block::{Block, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -22,7 +22,7 @@ impl ConstantBlock {
     }
 }
 
-impl Block for ConstantBlock {
+impl Module for ConstantBlock {
     fn name(&self) -> &str {
         "Constant"
     }
@@ -39,11 +39,17 @@ impl Block for ConstantBlock {
         vec![PortDef::new("out", PortKind::Float)]
     }
 
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        vec![Some(Value::Float(self.value))]
-    }
-
     fn config_json(&self) -> String {
         serde_json::to_string(&ConstantConfig { value: self.value }).unwrap_or_default()
+    }
+
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for ConstantBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        vec![Some(Value::Float(self.value))]
     }
 }

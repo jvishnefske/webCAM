@@ -1,10 +1,12 @@
-//! Embedded peripheral blocks: ADC, PWM, GPIO, UART.
+//! Embedded peripheral blocks: ADC, PWM, GPIO, UART, Encoder, Display, Stepper.
 //!
-//! In WASM these are stubbed — real hardware access requires native execution
+//! In WASM these produce no output — real hardware access requires native execution
 //! on an embedded target. The blocks participate in the graph so the topology
 //! can be designed in the browser and later code-generated for a specific MCU.
+//!
+//! In simulation mode, blocks with `SimModel` impls interact with `SimPeripherals`.
 
-use crate::dataflow::block::{Block, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, PortDef, PortKind, SimModel, SimPeripherals, Value};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -27,9 +29,9 @@ impl Default for AdcConfig {
 }
 
 /// Reads an analog-to-digital converter channel.
-/// Stubbed in WASM — always outputs None.
+/// Without simulation, outputs None.
 pub struct AdcBlock {
-    config: AdcConfig,
+    pub(crate) config: AdcConfig,
 }
 
 impl AdcBlock {
@@ -38,7 +40,7 @@ impl AdcBlock {
     }
 }
 
-impl Block for AdcBlock {
+impl Module for AdcBlock {
     fn name(&self) -> &str {
         "ADC Source"
     }
@@ -51,12 +53,23 @@ impl Block for AdcBlock {
     fn output_ports(&self) -> Vec<PortDef> {
         vec![PortDef::new("value", PortKind::Float)]
     }
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        // Stub: no actual ADC in WASM.
-        vec![None]
-    }
     fn config_json(&self) -> String {
         serde_json::to_string(&self.config).unwrap_or_default()
+    }
+    fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
+        Some(self)
+    }
+}
+
+impl SimModel for AdcBlock {
+    fn sim_tick(
+        &mut self,
+        _inputs: &[Option<&Value>],
+        _dt: f64,
+        peripherals: &mut dyn SimPeripherals,
+    ) -> Vec<Option<Value>> {
+        let voltage = peripherals.adc_read(self.config.channel);
+        vec![Some(Value::Float(voltage))]
     }
 }
 
@@ -80,9 +93,9 @@ impl Default for PwmConfig {
 }
 
 /// Drives a PWM output channel with a duty cycle (0.0 to 1.0).
-/// Stubbed in WASM.
+/// Without simulation, consumes input silently.
 pub struct PwmBlock {
-    config: PwmConfig,
+    pub(crate) config: PwmConfig,
 }
 
 impl PwmBlock {
@@ -91,7 +104,7 @@ impl PwmBlock {
     }
 }
 
-impl Block for PwmBlock {
+impl Module for PwmBlock {
     fn name(&self) -> &str {
         "PWM Sink"
     }
@@ -104,12 +117,25 @@ impl Block for PwmBlock {
     fn output_ports(&self) -> Vec<PortDef> {
         vec![]
     }
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        // Stub: no actual PWM in WASM.
-        vec![]
-    }
     fn config_json(&self) -> String {
         serde_json::to_string(&self.config).unwrap_or_default()
+    }
+    fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
+        Some(self)
+    }
+}
+
+impl SimModel for PwmBlock {
+    fn sim_tick(
+        &mut self,
+        inputs: &[Option<&Value>],
+        _dt: f64,
+        peripherals: &mut dyn SimPeripherals,
+    ) -> Vec<Option<Value>> {
+        if let Some(duty) = inputs.first().and_then(|i| i.and_then(|v| v.as_float())) {
+            peripherals.pwm_write(self.config.channel, duty);
+        }
+        vec![]
     }
 }
 
@@ -129,9 +155,9 @@ impl Default for GpioOutConfig {
 }
 
 /// Sets a GPIO pin high (>0.5) or low (<=0.5).
-/// Stubbed in WASM.
+/// Without simulation, consumes input silently.
 pub struct GpioOutBlock {
-    config: GpioOutConfig,
+    pub(crate) config: GpioOutConfig,
 }
 
 impl GpioOutBlock {
@@ -140,7 +166,7 @@ impl GpioOutBlock {
     }
 }
 
-impl Block for GpioOutBlock {
+impl Module for GpioOutBlock {
     fn name(&self) -> &str {
         "GPIO Out"
     }
@@ -153,12 +179,25 @@ impl Block for GpioOutBlock {
     fn output_ports(&self) -> Vec<PortDef> {
         vec![]
     }
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        // Stub: no actual GPIO in WASM.
-        vec![]
-    }
     fn config_json(&self) -> String {
         serde_json::to_string(&self.config).unwrap_or_default()
+    }
+    fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
+        Some(self)
+    }
+}
+
+impl SimModel for GpioOutBlock {
+    fn sim_tick(
+        &mut self,
+        inputs: &[Option<&Value>],
+        _dt: f64,
+        peripherals: &mut dyn SimPeripherals,
+    ) -> Vec<Option<Value>> {
+        if let Some(v) = inputs.first().and_then(|i| i.and_then(|v| v.as_float())) {
+            peripherals.gpio_write(self.config.pin, v > 0.5);
+        }
+        vec![]
     }
 }
 
@@ -178,9 +217,9 @@ impl Default for GpioInConfig {
 }
 
 /// Reads a GPIO pin state (0.0 or 1.0).
-/// Stubbed in WASM — always outputs None.
+/// Without simulation, outputs None.
 pub struct GpioInBlock {
-    config: GpioInConfig,
+    pub(crate) config: GpioInConfig,
 }
 
 impl GpioInBlock {
@@ -189,7 +228,7 @@ impl GpioInBlock {
     }
 }
 
-impl Block for GpioInBlock {
+impl Module for GpioInBlock {
     fn name(&self) -> &str {
         "GPIO In"
     }
@@ -202,12 +241,23 @@ impl Block for GpioInBlock {
     fn output_ports(&self) -> Vec<PortDef> {
         vec![PortDef::new("state", PortKind::Float)]
     }
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        // Stub: no actual GPIO in WASM.
-        vec![None]
-    }
     fn config_json(&self) -> String {
         serde_json::to_string(&self.config).unwrap_or_default()
+    }
+    fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
+        Some(self)
+    }
+}
+
+impl SimModel for GpioInBlock {
+    fn sim_tick(
+        &mut self,
+        _inputs: &[Option<&Value>],
+        _dt: f64,
+        peripherals: &mut dyn SimPeripherals,
+    ) -> Vec<Option<Value>> {
+        let state = if peripherals.gpio_read(self.config.pin) { 1.0 } else { 0.0 };
+        vec![Some(Value::Float(state))]
     }
 }
 
@@ -231,9 +281,9 @@ impl Default for UartTxConfig {
 }
 
 /// Transmits bytes over a UART port.
-/// Stubbed in WASM.
+/// Without simulation, consumes input silently.
 pub struct UartTxBlock {
-    config: UartTxConfig,
+    pub(crate) config: UartTxConfig,
 }
 
 impl UartTxBlock {
@@ -242,7 +292,7 @@ impl UartTxBlock {
     }
 }
 
-impl Block for UartTxBlock {
+impl Module for UartTxBlock {
     fn name(&self) -> &str {
         "UART TX"
     }
@@ -255,12 +305,25 @@ impl Block for UartTxBlock {
     fn output_ports(&self) -> Vec<PortDef> {
         vec![]
     }
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        // Stub: no actual UART in WASM.
-        vec![]
-    }
     fn config_json(&self) -> String {
         serde_json::to_string(&self.config).unwrap_or_default()
+    }
+    fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
+        Some(self)
+    }
+}
+
+impl SimModel for UartTxBlock {
+    fn sim_tick(
+        &mut self,
+        inputs: &[Option<&Value>],
+        _dt: f64,
+        peripherals: &mut dyn SimPeripherals,
+    ) -> Vec<Option<Value>> {
+        if let Some(data) = inputs.first().and_then(|i| i.and_then(|v| v.as_bytes())) {
+            peripherals.uart_write(self.config.port, data);
+        }
+        vec![]
     }
 }
 
@@ -284,9 +347,9 @@ impl Default for UartRxConfig {
 }
 
 /// Receives bytes from a UART port.
-/// Stubbed in WASM — always outputs None.
+/// Without simulation, outputs None.
 pub struct UartRxBlock {
-    config: UartRxConfig,
+    pub(crate) config: UartRxConfig,
 }
 
 impl UartRxBlock {
@@ -295,7 +358,7 @@ impl UartRxBlock {
     }
 }
 
-impl Block for UartRxBlock {
+impl Module for UartRxBlock {
     fn name(&self) -> &str {
         "UART RX"
     }
@@ -308,12 +371,29 @@ impl Block for UartRxBlock {
     fn output_ports(&self) -> Vec<PortDef> {
         vec![PortDef::new("data", PortKind::Bytes)]
     }
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        // Stub: no actual UART in WASM.
-        vec![None]
-    }
     fn config_json(&self) -> String {
         serde_json::to_string(&self.config).unwrap_or_default()
+    }
+    fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
+        Some(self)
+    }
+}
+
+impl SimModel for UartRxBlock {
+    fn sim_tick(
+        &mut self,
+        _inputs: &[Option<&Value>],
+        _dt: f64,
+        peripherals: &mut dyn SimPeripherals,
+    ) -> Vec<Option<Value>> {
+        let mut buf = vec![0u8; 256];
+        let n = peripherals.uart_read(self.config.port, &mut buf);
+        if n > 0 {
+            buf.truncate(n);
+            vec![Some(Value::Bytes(buf))]
+        } else {
+            vec![None]
+        }
     }
 }
 
@@ -327,9 +407,9 @@ pub struct EncoderConfig {
 }
 
 /// Reads a quadrature encoder channel.
-/// Stubbed in WASM — always outputs None.
+/// Without simulation, outputs None.
 pub struct EncoderBlock {
-    config: EncoderConfig,
+    pub(crate) config: EncoderConfig,
 }
 
 impl EncoderBlock {
@@ -338,7 +418,7 @@ impl EncoderBlock {
     }
 }
 
-impl Block for EncoderBlock {
+impl Module for EncoderBlock {
     fn name(&self) -> &str {
         "Encoder"
     }
@@ -354,12 +434,26 @@ impl Block for EncoderBlock {
             PortDef::new("velocity", PortKind::Float),
         ]
     }
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        // Stub: no actual encoder in WASM.
-        vec![None, None]
-    }
     fn config_json(&self) -> String {
         serde_json::to_string(&self.config).unwrap_or_default()
+    }
+    fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
+        Some(self)
+    }
+}
+
+impl SimModel for EncoderBlock {
+    fn sim_tick(
+        &mut self,
+        _inputs: &[Option<&Value>],
+        dt: f64,
+        peripherals: &mut dyn SimPeripherals,
+    ) -> Vec<Option<Value>> {
+        let position = peripherals.encoder_read(self.config.channel);
+        let pos_f64 = position as f64;
+        // Velocity estimation: delta position / dt (crude, but functional)
+        let velocity = if dt > 0.0 { pos_f64 / dt } else { 0.0 };
+        vec![Some(Value::Float(pos_f64)), Some(Value::Float(velocity))]
     }
 }
 
@@ -383,9 +477,9 @@ impl Default for Ssd1306DisplayConfig {
 }
 
 /// Writes two lines to an SSD1306 OLED display.
-/// Stubbed in WASM.
+/// Without simulation, consumes input silently.
 pub struct Ssd1306DisplayBlock {
-    config: Ssd1306DisplayConfig,
+    pub(crate) config: Ssd1306DisplayConfig,
 }
 
 impl Ssd1306DisplayBlock {
@@ -394,7 +488,7 @@ impl Ssd1306DisplayBlock {
     }
 }
 
-impl Block for Ssd1306DisplayBlock {
+impl Module for Ssd1306DisplayBlock {
     fn name(&self) -> &str {
         "SSD1306 Display"
     }
@@ -410,12 +504,25 @@ impl Block for Ssd1306DisplayBlock {
     fn output_ports(&self) -> Vec<PortDef> {
         vec![]
     }
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        // Stub: no actual display in WASM.
-        vec![]
-    }
     fn config_json(&self) -> String {
         serde_json::to_string(&self.config).unwrap_or_default()
+    }
+    fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
+        Some(self)
+    }
+}
+
+impl SimModel for Ssd1306DisplayBlock {
+    fn sim_tick(
+        &mut self,
+        inputs: &[Option<&Value>],
+        _dt: f64,
+        peripherals: &mut dyn SimPeripherals,
+    ) -> Vec<Option<Value>> {
+        let line1 = inputs.first().and_then(|i| i.and_then(|v| v.as_text())).unwrap_or("");
+        let line2 = inputs.get(1).and_then(|i| i.and_then(|v| v.as_text())).unwrap_or("");
+        peripherals.display_write(self.config.i2c_bus, self.config.address, line1, line2);
+        vec![]
     }
 }
 
@@ -443,9 +550,9 @@ impl Default for Tmc2209StepperConfig {
 }
 
 /// Controls a TMC2209 stepper driver.
-/// Stubbed in WASM.
+/// Without simulation, consumes input silently.
 pub struct Tmc2209StepperBlock {
-    config: Tmc2209StepperConfig,
+    pub(crate) config: Tmc2209StepperConfig,
 }
 
 impl Tmc2209StepperBlock {
@@ -454,7 +561,7 @@ impl Tmc2209StepperBlock {
     }
 }
 
-impl Block for Tmc2209StepperBlock {
+impl Module for Tmc2209StepperBlock {
     fn name(&self) -> &str {
         "TMC2209 Stepper"
     }
@@ -470,12 +577,29 @@ impl Block for Tmc2209StepperBlock {
     fn output_ports(&self) -> Vec<PortDef> {
         vec![PortDef::new("actual_position", PortKind::Float)]
     }
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        // Stub: no actual stepper in WASM.
-        vec![None]
-    }
     fn config_json(&self) -> String {
         serde_json::to_string(&self.config).unwrap_or_default()
+    }
+    fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
+        Some(self)
+    }
+}
+
+impl SimModel for Tmc2209StepperBlock {
+    fn sim_tick(
+        &mut self,
+        inputs: &[Option<&Value>],
+        _dt: f64,
+        peripherals: &mut dyn SimPeripherals,
+    ) -> Vec<Option<Value>> {
+        let enabled = inputs.get(1).and_then(|i| i.and_then(|v| v.as_float())).unwrap_or(0.0) > 0.5;
+        if enabled {
+            if let Some(target) = inputs.first().and_then(|i| i.and_then(|v| v.as_float())) {
+                peripherals.stepper_move(self.config.uart_port, target as i64);
+            }
+        }
+        let pos = peripherals.stepper_position(self.config.uart_port);
+        vec![Some(Value::Float(pos as f64))]
     }
 }
 
@@ -501,9 +625,9 @@ impl Default for Tmc2209StallGuardConfig {
 }
 
 /// Reads TMC2209 StallGuard value for stall detection.
-/// Stubbed in WASM.
+/// Without simulation, outputs None.
 pub struct Tmc2209StallGuardBlock {
-    config: Tmc2209StallGuardConfig,
+    pub(crate) config: Tmc2209StallGuardConfig,
 }
 
 impl Tmc2209StallGuardBlock {
@@ -512,7 +636,7 @@ impl Tmc2209StallGuardBlock {
     }
 }
 
-impl Block for Tmc2209StallGuardBlock {
+impl Module for Tmc2209StallGuardBlock {
     fn name(&self) -> &str {
         "TMC2209 StallGuard"
     }
@@ -528,12 +652,24 @@ impl Block for Tmc2209StallGuardBlock {
             PortDef::new("stall_detected", PortKind::Float),
         ]
     }
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        // Stub: no actual StallGuard in WASM.
-        vec![None, None]
-    }
     fn config_json(&self) -> String {
         serde_json::to_string(&self.config).unwrap_or_default()
+    }
+    fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
+        Some(self)
+    }
+}
+
+impl SimModel for Tmc2209StallGuardBlock {
+    fn sim_tick(
+        &mut self,
+        _inputs: &[Option<&Value>],
+        _dt: f64,
+        _peripherals: &mut dyn SimPeripherals,
+    ) -> Vec<Option<Value>> {
+        // StallGuard values would come from more sophisticated motor simulation.
+        // For now, return zeros (no stall).
+        vec![Some(Value::Float(0.0)), Some(Value::Float(0.0))]
     }
 }
 
@@ -544,13 +680,13 @@ impl Block for Tmc2209StallGuardBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dataflow::block::Module;
 
     #[test]
-    fn adc_source_outputs_none() {
-        let mut block = AdcBlock::from_config(AdcConfig::default());
-        let result = block.tick(&[], 0.01);
-        assert_eq!(result.len(), 1);
-        assert!(result[0].is_none());
+    fn adc_source_module_only() {
+        let block = AdcBlock::from_config(AdcConfig::default());
+        assert_eq!(block.output_ports().len(), 1);
+        assert_eq!(block.block_type(), "adc_source");
     }
 
     #[test]
@@ -567,27 +703,23 @@ mod tests {
     }
 
     #[test]
-    fn gpio_out_accepts_float() {
-        let mut block = GpioOutBlock::from_config(GpioOutConfig::default());
-        let val = Value::Float(0.8);
-        let result = block.tick(&[Some(&val)], 0.01);
-        assert!(result.is_empty());
+    fn gpio_out_ports() {
+        let block = GpioOutBlock::from_config(GpioOutConfig::default());
+        assert_eq!(block.input_ports().len(), 1);
+        assert!(block.output_ports().is_empty());
     }
 
     #[test]
-    fn uart_rx_outputs_none() {
-        let mut block = UartRxBlock::from_config(UartRxConfig::default());
-        let result = block.tick(&[], 0.01);
-        assert_eq!(result.len(), 1);
-        assert!(result[0].is_none());
+    fn uart_rx_ports() {
+        let block = UartRxBlock::from_config(UartRxConfig::default());
+        assert_eq!(block.output_ports().len(), 1);
+        assert!(block.input_ports().is_empty());
     }
 
     #[test]
-    fn encoder_outputs_none() {
-        let mut block = EncoderBlock::from_config(EncoderConfig::default());
-        let result = block.tick(&[], 0.01);
-        assert_eq!(result.len(), 2);
-        assert!(result[0].is_none());
+    fn encoder_ports() {
+        let block = EncoderBlock::from_config(EncoderConfig::default());
+        assert_eq!(block.output_ports().len(), 2);
     }
 
     #[test]
@@ -611,10 +743,85 @@ mod tests {
     }
 
     #[test]
-    fn tmc2209_stallguard_outputs_none() {
-        let mut block = Tmc2209StallGuardBlock::from_config(Tmc2209StallGuardConfig::default());
-        let result = block.tick(&[], 0.01);
-        assert_eq!(result.len(), 2);
-        assert!(result[0].is_none());
+    fn tmc2209_stallguard_ports() {
+        let block = Tmc2209StallGuardBlock::from_config(Tmc2209StallGuardConfig::default());
+        assert_eq!(block.output_ports().len(), 2);
+        assert!(block.input_ports().is_empty());
+    }
+
+    // --- SimModel tests ---
+
+    #[test]
+    fn adc_sim_reads_configured_voltage() {
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut block = AdcBlock::from_config(AdcConfig { channel: 2, resolution_bits: 12 });
+        let mut peripherals = WasmSimPeripherals::new();
+        peripherals.set_adc_voltage(2, 3.3);
+
+        let sim = block.as_sim_model().unwrap();
+        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
+        assert_eq!(out[0], Some(Value::Float(3.3)));
+    }
+
+    #[test]
+    fn pwm_sim_writes_duty() {
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut block = PwmBlock::from_config(PwmConfig { channel: 1, frequency_hz: 1000 });
+        let mut peripherals = WasmSimPeripherals::new();
+        let duty = Value::Float(0.75);
+
+        let sim = block.as_sim_model().unwrap();
+        sim.sim_tick(&[Some(&duty)], 0.01, &mut peripherals);
+        assert_eq!(peripherals.get_pwm_duty(1), 0.75);
+    }
+
+    #[test]
+    fn gpio_sim_roundtrip() {
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut peripherals = WasmSimPeripherals::new();
+        peripherals.set_gpio_state(5, true);
+
+        let mut in_block = GpioInBlock::from_config(GpioInConfig { pin: 5 });
+        let sim = in_block.as_sim_model().unwrap();
+        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
+        assert_eq!(out[0], Some(Value::Float(1.0)));
+
+        let mut out_block = GpioOutBlock::from_config(GpioOutConfig { pin: 7 });
+        let val = Value::Float(1.0);
+        let sim = out_block.as_sim_model().unwrap();
+        sim.sim_tick(&[Some(&val)], 0.01, &mut peripherals);
+        assert!(peripherals.get_gpio_state(7));
+    }
+
+    #[test]
+    fn sim_mode_graph_adc_to_gain_to_pwm() {
+        use crate::dataflow::graph::DataflowGraph;
+        use crate::dataflow::blocks::function::FunctionBlock;
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut g = DataflowGraph::new();
+        g.set_simulation_mode(true);
+        let mut peripherals = WasmSimPeripherals::new();
+        peripherals.set_adc_voltage(0, 2.5);
+        g.set_sim_peripherals(peripherals);
+
+        let adc = g.add_block(Box::new(AdcBlock::from_config(AdcConfig::default())));
+        let gain = g.add_block(Box::new(FunctionBlock::gain(0.4)));
+        let pwm = g.add_block(Box::new(PwmBlock::from_config(PwmConfig::default())));
+
+        g.connect(adc, 0, gain, 0).unwrap();
+        g.connect(gain, 0, pwm, 0).unwrap();
+
+        // Tick 1: ADC reads 2.5
+        g.tick(0.01);
+        // Tick 2: Gain receives 2.5, outputs 1.0
+        g.tick(0.01);
+        // Tick 3: PWM receives 1.0
+        g.tick(0.01);
+
+        assert_eq!(g.get_sim_pwm(0), 1.0);
     }
 }

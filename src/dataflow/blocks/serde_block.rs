@@ -1,6 +1,6 @@
 //! Serde blocks: serialize/deserialize between typed values and bytes/text.
 
-use crate::dataflow::block::{Block, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
 
 /// Encode a Float input as JSON text.
 #[derive(Default)]
@@ -12,7 +12,7 @@ impl JsonEncodeBlock {
     }
 }
 
-impl Block for JsonEncodeBlock {
+impl Module for JsonEncodeBlock {
     fn name(&self) -> &str {
         "JSON Encode"
     }
@@ -25,6 +25,12 @@ impl Block for JsonEncodeBlock {
     fn output_ports(&self) -> Vec<PortDef> {
         vec![PortDef::new("text", PortKind::Text)]
     }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for JsonEncodeBlock {
     fn tick(&mut self, inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
         let out = inputs
             .first()
@@ -45,7 +51,7 @@ impl JsonDecodeBlock {
     }
 }
 
-impl Block for JsonDecodeBlock {
+impl Module for JsonDecodeBlock {
     fn name(&self) -> &str {
         "JSON Decode"
     }
@@ -58,6 +64,12 @@ impl Block for JsonDecodeBlock {
     fn output_ports(&self) -> Vec<PortDef> {
         vec![PortDef::new("out", PortKind::Any)]
     }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for JsonDecodeBlock {
     fn tick(&mut self, inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
         let out = inputs
             .first()

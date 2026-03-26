@@ -10,8 +10,9 @@ pub mod channel;
 pub mod codegen;
 pub mod graph;
 pub mod scheduler;
+pub mod sim_peripherals;
 
-pub use block::{Block, BlockId, PortDef, PortKind, Value};
+pub use block::{BlockId, Module, PortDef, PortKind, Tick, Value};
 pub use channel::{Channel, ChannelId};
 pub use graph::DataflowGraph;
 pub use scheduler::Scheduler;

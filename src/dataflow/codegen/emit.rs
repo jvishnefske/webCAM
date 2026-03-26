@@ -927,6 +927,13 @@ fn generate_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
         // Comment header
         writeln!(out, "/// Block {id}: {} ({bt})", block.name).unwrap();
 
+        // Check for custom codegen from the Codegen trait
+        if let Some(ref custom_code) = block.custom_codegen {
+            writeln!(out, "{custom_code}").unwrap();
+            writeln!(out).unwrap();
+            continue;
+        }
+
         match bt {
             "constant" => {
                 let value = config_float(block, "value");
@@ -1481,6 +1488,7 @@ mod tests {
             config: serde_json::json!({ "value": value }),
             output_values: vec![Some(Value::Float(value))],
             target: None,
+        custom_codegen: None,
         }
     }
 
@@ -1494,6 +1502,7 @@ mod tests {
             config: serde_json::json!({ "op": "Gain", "param1": factor, "param2": 0.0 }),
             output_values: vec![Some(Value::Float(0.0))],
             target: None,
+        custom_codegen: None,
         }
     }
 
@@ -1510,6 +1519,7 @@ mod tests {
             config: serde_json::json!({ "op": "Add", "param1": 0.0, "param2": 0.0 }),
             output_values: vec![Some(Value::Float(0.0))],
             target: None,
+        custom_codegen: None,
         }
     }
 
@@ -1523,6 +1533,7 @@ mod tests {
             config: serde_json::json!({ "max_samples": 1000 }),
             output_values: vec![],
             target: None,
+        custom_codegen: None,
         }
     }
 
@@ -1661,6 +1672,7 @@ mod tests {
                 config: serde_json::json!({ "op": "Clamp", "param1": -1.0, "param2": 1.0 }),
                 output_values: vec![],
                 target: None,
+            custom_codegen: None,
             }],
             channels: vec![],
             tick_count: 0,
@@ -1684,6 +1696,7 @@ mod tests {
                 config: serde_json::json!({ "address": "127.0.0.1:9000" }),
                 output_values: vec![],
                 target: None,
+            custom_codegen: None,
             }],
             channels: vec![],
             tick_count: 0,
@@ -1762,6 +1775,7 @@ mod tests {
                     config: serde_json::json!({ "channel": 2, "resolution_bits": 10 }),
                     output_values: vec![],
                     target: None,
+                custom_codegen: None,
                 },
                 BlockSnapshot {
                     id: 2,
@@ -1772,6 +1786,7 @@ mod tests {
                     config: serde_json::json!({ "channel": 1, "frequency_hz": 2000 }),
                     output_values: vec![],
                     target: None,
+                custom_codegen: None,
                 },
             ],
             channels: vec![ch(1, 1, 0, 2, 0)],
@@ -1859,6 +1874,7 @@ mod tests {
                     config: serde_json::json!({ "channel": 0 }),
                     output_values: vec![],
                     target: None,
+                custom_codegen: None,
                 },
                 make_gain_snapshot(2, 2.5),
                 BlockSnapshot {
@@ -1870,6 +1886,7 @@ mod tests {
                     config: serde_json::json!({ "channel": 0 }),
                     output_values: vec![],
                     target: None,
+                custom_codegen: None,
                 },
             ],
             channels: vec![ch(1, 1, 0, 2, 0), ch(2, 2, 0, 3, 0)],
@@ -1981,6 +1998,7 @@ mod tests {
                     }),
                     output_values: vec![],
                     target: None,
+                custom_codegen: None,
                 },
             ],
             channels: vec![ch(1, 1, 0, 5, 0)],
@@ -2080,6 +2098,7 @@ mod tests {
                     }),
                     output_values: vec![],
                     target: None,
+                custom_codegen: None,
                 },
             ],
             channels: vec![ch(1, 1, 0, 5, 0)],

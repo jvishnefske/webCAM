@@ -1305,3 +1305,49 @@ pub fn dataflow_codegen_multi(
         serde_json::to_string(&ws.files).map_err(|e| JsValue::from_str(&e.to_string()))
     })
 }
+
+/// Enable or disable simulation mode for a graph.
+/// When enabled, peripheral blocks use SimModel dispatch with simulated peripherals.
+#[wasm_bindgen]
+pub fn dataflow_set_simulation_mode(graph_id: u32, enabled: bool) -> Result<(), JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        graph.set_simulation_mode(enabled);
+        if enabled && !graph.has_sim_peripherals() {
+            graph.set_sim_peripherals(
+                dataflow::sim_peripherals::WasmSimPeripherals::new(),
+            );
+        }
+        Ok(())
+    })
+}
+
+/// Set a simulated ADC channel voltage.
+#[wasm_bindgen]
+pub fn dataflow_set_sim_adc(graph_id: u32, channel: u8, voltage: f64) -> Result<(), JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        graph.with_sim_peripherals(|p| {
+            p.set_adc_voltage(channel, voltage);
+        });
+        Ok(())
+    })
+}
+
+/// Read the last PWM duty written by a simulated PWM block.
+#[wasm_bindgen]
+pub fn dataflow_get_sim_pwm(graph_id: u32, channel: u8) -> Result<f64, JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let graphs = g.borrow();
+        let graph = graphs
+            .get(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        Ok(graph.get_sim_pwm(channel))
+    })
+}
