@@ -152,6 +152,18 @@ async fn main(spawner: Spawner) {
     // DAG executor API handler
     static DAG_HANDLER: StaticCell<dag_handler::DagApiHandler> = StaticCell::new();
     let dag = DAG_HANDLER.init(dag_handler::DagApiHandler::new());
+
+    // Register default channels
+    dag.register_input("adc0");
+    dag.register_input("adc1");
+    dag.register_input("adc2");
+    dag.register_input("gpio0");
+    dag.register_input("gpio1");
+    dag.register_output("pwm0");
+    dag.register_output("pwm1");
+    dag.register_output("gpio2");
+    dag.register_output("gpio3");
+
     unwrap!(spawner.spawn(ws_server::ws_server_task(stack, shared, dag)));
 
     info!("10-bus shared i2c-tiny-usb + CDC NCM + WebSocket + CMSIS-DAP + DAG ready");
