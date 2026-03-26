@@ -40,8 +40,19 @@ pub fn http_response_error(status: u16, message: &str) -> Vec<u8> {
 ///
 /// Returns `(method, path)` or `None` if the request line is invalid.
 pub fn parse_request_line(data: &[u8]) -> Option<(&str, &str)> {
-    let line = core::str::from_utf8(data).ok()?;
-    let first_line = line.lines().next()?;
+    // Find the end of the first line (look for \r\n or \n).
+    // Only parse the request line as UTF-8, not the entire body which may
+    // contain binary data (e.g., CBOR).
+    let line_end = data
+        .iter()
+        .position(|&b| b == b'\n')
+        .unwrap_or(data.len());
+    let line_bytes = if line_end > 0 && data.get(line_end - 1) == Some(&b'\r') {
+        &data[..line_end - 1]
+    } else {
+        &data[..line_end]
+    };
+    let first_line = core::str::from_utf8(line_bytes).ok()?;
     let mut parts = first_line.split_whitespace();
     let method = parts.next()?;
     let path = parts.next()?;

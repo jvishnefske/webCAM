@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DAG Editor</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: #1a1a2e; color: #e0e0e0; display: flex; flex-direction: column; height: 100vh; }
+  #toolbar { display: flex; gap: 4px; padding: 6px; background: #16213e; flex-wrap: wrap; align-items: center; }
+  #toolbar button { padding: 4px 8px; background: #0f3460; border: 1px solid #533483; color: #e0e0e0; cursor: pointer; border-radius: 3px; font-size: 12px; }
+  #toolbar button:hover { background: #533483; }
+  #toolbar .sep { width: 1px; height: 20px; background: #533483; margin: 0 4px; }
+  #workspace { flex: 1; position: relative; overflow: hidden; }
+  #canvas { width: 100%; height: 100%; }
+  #status { padding: 4px 8px; background: #16213e; font-size: 12px; display: flex; justify-content: space-between; }
+  #node-inspector { position: absolute; top: 8px; right: 8px; background: #16213e; border: 1px solid #533483; border-radius: 4px; padding: 8px; min-width: 180px; font-size: 12px; display: none; }
+  #node-inspector h3 { margin-bottom: 4px; }
+  #node-inspector .field { margin: 2px 0; }
+  #node-inspector input { width: 80px; background: #0f3460; border: 1px solid #533483; color: #e0e0e0; padding: 2px 4px; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button data-op="const" title="Constant value">Const</button>
+  <button data-op="input" title="Input channel">In</button>
+  <button data-op="output" title="Output channel">Out</button>
+  <span class="sep"></span>
+  <button data-op="add">+</button>
+  <button data-op="mul">&times;</button>
+  <button data-op="sub">&minus;</button>
+  <button data-op="div">&divide;</button>
+  <button data-op="pow">x^y</button>
+  <span class="sep"></span>
+  <button data-op="neg">&minus;x</button>
+  <button data-op="relu">ReLU</button>
+  <span class="sep"></span>
+  <button data-op="sub_ps" title="Subscribe to topic">Sub</button>
+  <button data-op="pub_ps" title="Publish to topic">Pub</button>
+  <span class="sep"></span>
+  <button id="btn-eval" title="Evaluate DAG">&#9654; Eval</button>
+  <button id="btn-push" title="Push CBOR to MCU">&#8593; Push</button>
+  <button id="btn-clear" title="Clear DAG">Clear</button>
+</div>
+<div id="workspace">
+  <svg id="canvas"></svg>
+  <div id="node-inspector">
+    <h3 id="insp-title">Node</h3>
+    <div id="insp-body"></div>
+  </div>
+</div>
+<div id="status">
+  <span id="st-nodes">Nodes: 0</span>
+  <span id="st-result"></span>
+  <span id="st-cbor"></span>
+</div>
+<script type="module" src="dag-editor.js"></script>
+</body>
+</html>

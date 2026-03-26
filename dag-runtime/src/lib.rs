@@ -6,3 +6,5 @@ pub mod executor;
 pub mod channels;
 pub mod pubsub;
 pub mod http;
+pub mod generated;
+pub mod serve;

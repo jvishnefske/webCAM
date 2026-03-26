@@ -1,8 +1,8 @@
 .PHONY: build wasm lint test ts ci release serve clean help \
-       hil-analyze hil-test hil-firmware hil-stm32 hil-pi-zero hil-verify all
+       hil-firmware hil-stm32 hil-pi-zero hil-jlink-flash hil-verify all \
+       dag-frontend embed-assets
 
 WASM_TARGET = wasm32-unknown-unknown
-HIL_HOST_PKGS = -p i2c-hil-sim -p i2c-hil-devices -p hil-backplane -p board-config-common -p hil-frontend
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -13,14 +13,14 @@ build: ## Build native (for testing)
 lint: ## Run clippy (matches CI)
 	cargo clippy --all-targets -- -D warnings
 
-test: ## Run all workspace tests (matches CI)
-	cargo test --all
+test: ## Run all default-member tests (matches CI)
+	cargo test
 
 wasm: ## Build WASM + JS bindings (requires wasm-pack)
 	wasm-pack build --target web --out-dir www/pkg --release
 
-ts: ## Build TypeScript frontend (matches CI)
-	cd www && npm ci && npm run typecheck && npm run build
+ts: ## Build and test TypeScript frontend (matches CI)
+	cd www && npm ci && npm run typecheck && npm run test && npm run build
 
 ci: lint test wasm ts ## Run full CI pipeline locally
 
@@ -38,12 +38,15 @@ clean: ## Remove build artifacts
 
 # --- HIL targets ---
 
-hil-analyze: ## Run clippy on host-compatible HIL crates
-	cargo clippy $(HIL_HOST_PKGS) -- -D warnings
+PICO_ELF    = hil/board-support-pico/target/thumbv6m-none-eabi/release/board-support-pico
+PICO_BIN    = $(PICO_ELF).bin
+JLINK       = JLinkExe
+JLINK_SPEED = 4000
 
-hil-test: ## Run tests on host-compatible HIL crates
-	cargo test $(HIL_HOST_PKGS)
-	cargo test -p board-support-pi-zero
+hil-jlink-flash: hil-firmware ## Flash Pico firmware via JLink
+	arm-none-eabi-objcopy -O binary $(PICO_ELF) $(PICO_BIN)
+	@printf 'r\nloadbin %s, 0x10000000\nr\ng\nq\n' "$(PICO_BIN)" > /tmp/jlink-pico.jlink
+	$(JLINK) -device RP2040_M0_0 -if SWD -speed $(JLINK_SPEED) -autoconnect 1 -CommandFile /tmp/jlink-pico.jlink
 
 hil-firmware: ## Build Pico firmware
 	cargo build-pico
@@ -54,6 +57,14 @@ hil-stm32: ## Build STM32 firmware
 hil-pi-zero: ## Build Pi Zero support crate
 	cargo build -p board-support-pi-zero
 
-hil-verify: hil-analyze hil-test hil-firmware ## Full HIL verification
+hil-verify: hil-firmware ## Build all HIL firmware (host crates covered by ci)
+
+# --- Embedded assets ---
+
+dag-frontend: ## Build DAG editor JS bundle
+	cd www && npx esbuild dag/dag-editor.ts --bundle --format=esm --target=es2022 --minify --external:../pkg/rustcam.js --outfile=dag/dag-editor.js
+
+embed-assets: dag-frontend ## Gzip frontend assets and generate Rust source
+	bash tools/embed-assets.sh
 
 all: ci hil-verify ## Run everything
