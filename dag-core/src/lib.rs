@@ -6,3 +6,4 @@ pub mod op;
 pub mod builder;
 pub mod eval;
 pub mod cbor;
+pub mod templates;
