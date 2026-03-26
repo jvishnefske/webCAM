@@ -1,0 +1,16 @@
+[package]
+name = "dag-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Expression DAG core: Op IR, evaluator, CBOR serialization, builder API"
+
+[features]
+default = ["std"]
+std = ["minicbor/std"]
+
+[dependencies]
+minicbor = { version = "0.25", default-features = false, features = ["derive", "alloc"] }
+libm = "0.2"
+
+[dev-dependencies]
