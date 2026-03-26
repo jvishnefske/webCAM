@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     ".",
     "module-traits",
+    "dag-core",
     "dataflow-rt",
     "pubsub",
     "parser",
@@ -25,12 +26,15 @@ members = [
 default-members = [
     ".",
     "module-traits",
+    "dag-core",
     "dataflow-rt",
     "pubsub",
     "parser",
     "hil/i2c-hil-sim",
     "hil/i2c-hil-devices",
+    "hil/hil-backplane",
     "hil/board-config-common",
+    "hil/board-support-pi-zero",
     "hil/hil-frontend",
 ]
 
@@ -49,6 +53,7 @@ unnecessary_safety_doc = "warn"
 
 [workspace.dependencies]
 module-traits = { path = "module-traits" }
+dag-core = { path = "dag-core" }
 embedded-hal = "1.0"
 embedded-can = "0.4"
 embassy-usb = { version = "0.4", default-features = false, features = ["defmt"] }
