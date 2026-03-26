@@ -1,66 +1,75 @@
-# RustCAM Design: CAD/CAM MVP with Machine Tool Profiles
+# RustCAM Design
 
 ## Overview
 
-Browser-based CAD/CAM tool running entirely in WASM. Supports multiple machine types
-(CNC mill, laser cutter) through a profile system that adapts parameters, strategies,
-and G-code output per machine. Ports useful Rust code from the cnc-sender project.
+Browser-based CNC/CAM tool with a reactive dataflow engine. Compiles Rust to
+WebAssembly for in-browser CAD/CAM toolpath generation and a visual block-based
+control system editor with multi-target embedded codegen.
 
-## Functional Requirements
+Two major subsystems:
 
-### FR-1: Type-Safe Unit System (ported from cnc-sender)
-- [x] **FR-1.1**: Phantom-typed Distance<Mm>/Distance<Inch>, FeedRate<U>, SpindleSpeed
+1. **CAD/CAM**: STL/SVG → toolpath → G-code with machine tool profiles (CNC mill, laser cutter)
+2. **Dataflow engine**: Visual block editor → multi-target embedded code generation with MCU inventory, deployment manifest, and hardware-in-the-loop testing
+
+---
+
+## Part I: CAD/CAM MVP
+
+### Functional Requirements
+
+#### FR-1: Type-Safe Unit System (ported from cnc-sender)
+- [x] **FR-1.1**: Phantom-typed Distance\<Mm\>/Distance\<Inch\>, FeedRate\<U\>, SpindleSpeed
 - [x] **FR-1.2**: Compile-time prevention of unit mixing
 - [x] **FR-1.3**: Conversion methods between unit systems
 
-### FR-2: G-code Parser & Validator (ported from cnc-sender)
+#### FR-2: G-code Parser & Validator (ported from cnc-sender)
 - [x] **FR-2.1**: Parse G-code lines into structured GCodeCommand enum
 - [x] **FR-2.2**: Validate generated G-code against configurable machine limits
 - [x] **FR-2.3**: Support all common G/M codes (G0-G3, G20/21, G90/91, M3-M5, M7-M9)
 
-### FR-3: Machine Profile System
+#### FR-3: Machine Profile System
 - [x] **FR-3.1**: MachineType enum (CncMill, LaserCutter) with distinct capabilities
 - [x] **FR-3.2**: Profile defines available strategies, axis capabilities, power source
 - [x] **FR-3.3**: Default profiles with sensible parameters per machine type
 - [x] **FR-3.4**: JSON-serializable for WASM boundary passing
 
-### FR-4: CNC Mill Profile
+#### FR-4: CNC Mill Profile
 - [x] **FR-4.1**: Wraps all existing functionality (spindle, Z-axis, all strategies)
 - [x] **FR-4.2**: Output: M3 spindle, Z-axis plunges, coolant control
 - [x] **FR-4.3**: Backward compatible - default behavior unchanged
 
-### FR-5: Laser Cutter Profile
+#### FR-5: Laser Cutter Profile
 - [x] **FR-5.1**: Dynamic power mode (M4) with S-value power control
 - [x] **FR-5.2**: No Z-axis moves (2D only), S0 for rapid traversals
 - [x] **FR-5.3**: Supports contour (cut) and raster fill (engrave) strategies
 - [x] **FR-5.4**: Multi-pass cutting for thicker materials
 
-### FR-6: Laser Cut Strategy
+#### FR-6: Laser Cut Strategy
 - [x] **FR-6.1**: Follow 2D contour paths with configurable laser power
 - [x] **FR-6.2**: Multi-pass support (repeat path N times)
 - [x] **FR-6.3**: Lead-in overcut for clean edge closure
 
-### FR-7: Laser Engrave Strategy
+#### FR-7: Laser Engrave Strategy
 - [x] **FR-7.1**: Scanline raster fill of closed paths
 - [x] **FR-7.2**: Bidirectional serpentine scanning
 - [x] **FR-7.3**: Configurable line spacing (mm or DPI-derived)
 
-### FR-8: Profile-Aware G-code Emission
+#### FR-8: Profile-Aware G-code Emission
 - [x] **FR-8.1**: Preamble/postamble per machine profile
 - [x] **FR-8.2**: Rapid moves differ by profile (Z retract vs S0 power-off)
 - [x] **FR-8.3**: Correct M-codes per machine (M3 vs M4, coolant, etc.)
 
-### FR-9: WASM API Extensions
+#### FR-9: WASM API Extensions
 - [x] **FR-9.1**: Config JSON accepts machine_type field (backward compatible)
 - [x] **FR-9.2**: available_profiles() export returns profile metadata
 - [x] **FR-9.3**: default_config(machine_type) export returns defaults
 
-### FR-10: Web UI Profile Integration
+#### FR-10: Web UI Profile Integration
 - [x] **FR-10.1**: Machine type selector dynamically shows/hides parameters
 - [x] **FR-10.2**: Strategy dropdown filtered by profile capabilities
 - [x] **FR-10.3**: Canvas preview adapts to profile (Z-color vs power-color)
 
-## Architecture
+### CAM Architecture
 
 ```
                     ┌─────────────────┐
@@ -79,69 +88,178 @@ and G-code output per machine. Ports useful Rust code from the cnc-sender projec
                                                └──────────┘
 ```
 
-### Source Files from cnc-sender to Port
-- `cnc-types/src/units.rs` → `src/units.rs` (phantom type units)
-- `cnc-gcode/src/parser.rs` → `src/gcode_parser.rs` (G-code parsing)
-- `cnc-gcode/src/validator.rs` → `src/gcode_validator.rs` (validation)
+---
 
-## Implementation Checklist
+## Part II: Reactive Dataflow Engine
 
-### Phase 1: Foundation (parallel)
-- [x] task-001: Port type-safe unit system from cnc-sender → FR-1
-- [x] task-002: Port G-code parser and validator → FR-2
-- [x] task-003: Define MachineProfile and MachineType → FR-3
+### Trait Hierarchy (module-traits)
 
-### Phase 2: Profiles (parallel after Phase 1)
-- [x] task-004: CNC mill profile wrapping existing behavior → FR-4
-- [x] task-005: Laser cutter profile → FR-5
+```
+Module ─── identity, ports, config, capability queries
+  ├── Tick ─────── pure computation (browser sim + codegen)
+  ├── SimModel ─── simulated hardware peripherals (WASM sim mode)
+  ├── Codegen ──── custom code emission for embedded targets
+  └── AnalysisModel ── math model analysis (planned)
+```
 
-### Phase 3: Strategies & Emitter (parallel after Phase 2)
-- [x] task-006: Profile-aware G-code emitter → FR-8
-- [x] task-007: Laser cut strategy → FR-6
-- [x] task-008: Laser engrave strategy → FR-7
+### Block Types
 
-### Phase 4: WASM API
-- [x] task-009: WASM API profile selection → FR-9
+| Category | Blocks |
+|----------|--------|
+| Math | constant, gain, add, multiply, clamp |
+| Logic | state_machine (FSM with guarded transitions) |
+| Serde | json_encode, json_decode |
+| I/O | udp_source, udp_sink, pubsub_source, pubsub_sink |
+| Embedded | adc_source, pwm_sink, gpio_in, gpio_out, uart_tx, uart_rx, encoder |
+| Display/Motion | ssd1306_display, tmc2209_stepper, tmc2209_stallguard |
+| Visualization | plot |
 
-### Phase 5: UI & Testing (parallel after Phase 4)
-- [x] task-010: Web UI profile selector → FR-10
-- [x] task-011: Profile-aware canvas preview → FR-10.3
-- [x] task-012: End-to-end integration tests
+### Multi-Target Code Generation
 
-### Phase 6: Validation
-- [x] task-013: Post-generation G-code validation → FR-2.2
+Two codegen backends:
 
-## Traceability Matrix
+1. **Rust emit** (legacy) — string-interpolation Rust code generation
+2. **MLIR emit** — MLIR pipeline → C via mlir-opt/mlir-translate
 
-| Requirement | Tasks |
-|-------------|-------|
-| FR-1 (Units) | task-001 |
-| FR-2 (Parser) | task-002, task-013 |
-| FR-3 (Profiles) | task-003 |
-| FR-4 (CNC Mill) | task-004 |
-| FR-5 (Laser) | task-005 |
-| FR-6 (Laser Cut) | task-007 |
-| FR-7 (Laser Engrave) | task-008 |
-| FR-8 (G-code Emit) | task-006 |
-| FR-9 (WASM API) | task-009 |
-| FR-10 (UI) | task-010, task-011 |
+```
+GraphSnapshot ──► partition.rs ──► per-target subgraphs
+                                        │
+                    ┌───────────────────┼───────────────────┐
+                    │                   │                   │
+                    ▼                   ▼                   ▼
+              Rust emit            MLIR lower         MLIR lower
+              (Embassy)            → .mlir             → .mlir
+                 │                   │                   │
+                 ▼                   ▼                   ▼
+              firmware            mlir-opt            mlir-opt
+              (.rs)               → .c/.h             → .c/.h
+```
 
-## Non-Goals (Out of Scope for MVP)
-- Plasma cutter profile (future: port cnc-plasma layer system)
-- Machine communication / serial connection (stays in cnc-sender)
-- DXF/STEP/3MF import formats
-- Image-to-raster engraving (grayscale bitmap input)
-- Multi-tool operations in single job
-- 5-axis toolpaths
-- Material database / feeds & speeds calculator
+### Supported Targets
+
+| Target | MCU | Framework | Thumb Target |
+|--------|-----|-----------|-------------|
+| Host | x86/ARM | std | native |
+| RP2040 | Cortex-M0+ | embassy-rp | thumbv6m-none-eabi |
+| STM32F4 | Cortex-M4F | embassy-stm32 | thumbv7em-none-eabihf |
+| STM32G0B1 | Cortex-M0+ | embassy-stm32 | thumbv6m-none-eabi |
+| ESP32-C3 | RISC-V | esp-hal | riscv32imc-unknown-none-elf |
+
+### Multi-MCU Partitioning
+
+`partition_graph()` splits a single GraphSnapshot into per-target subgraphs. Cross-partition channels are replaced with pub/sub bridge pairs using deterministic topic names.
+
+```
+┌─────────────┐  topic: "bridge_adc_0_out"  ┌─────────────┐
+│  RP2040      │ ──── pubsub_sink ──────────► │  STM32F4     │
+│  (ADC block) │                   pubsub_src │  (PID block) │
+└─────────────┘                               └─────────────┘
+```
+
+### MCU Inventory (module-traits/inventory.rs)
+
+Digital twin of each MCU, mirroring CubeMX:
+- `McuDef`: CPU core, clock tree (HSI/HSE/PLL), memory map, peripheral instances
+- `PinDef`: GPIO pins with alternate-function muxing
+- `PeripheralInst`: DMA channels, interrupt numbers
+- Pre-built definitions for all supported targets
+
+### Deployment Manifest (module-traits/deployment.rs)
+
+Links control logic IR to hardware topology:
+- `SystemTopology`: MCU nodes + physical links (CAN, RS485, SPI, UART, I2C, Ethernet, WiFi)
+- `TaskBinding`: Sub-graphs assigned to nodes with scheduling frequency/priority
+- `ChannelBinding`: Logical signals → intra-node memory or inter-node pub/sub
+- `PeripheralBinding`: Block ports → specific MCU peripherals and pins
+
+### Hardware Configuration (module-traits/hardware.rs)
+
+Three-layer model:
+1. **PeripheralRequirement**: What the graph needs (extracted from blocks)
+2. **TargetCapabilities**: What each MCU can provide
+3. **HardwareConfig**: User's mapping from logical channels to physical pins
 
 ---
 
-## Multi-Frontend Model-Based Development
+## Part III: Expression DAG (dag-core)
 
-RustCAM's reactive dataflow engine supports three frontend paradigms — all sharing the same `GraphSnapshot` IR and codegen pipeline. No server required.
+Compact `no_std` expression DAG for signal processing, distinct from the dataflow graph:
 
-### Architecture
+- `Op` enum: Const, Input, Output, Add, Mul, Sub, Div, Pow, Neg, Relu, Subscribe, Publish
+- `Dag` struct: Vec-based with forward-reference validation
+- CBOR serialization for embedded transport
+- Block templates for common patterns (constant, gain, add, clamp, adc, pwm)
+- Evaluator with topological ordering
+
+---
+
+## Part IV: Pub/Sub (pubsub)
+
+`no_std` message broker for inter-MCU communication:
+
+- `NodeAddr`: Hierarchical addressing (bus, device, endpoint)
+- `TopicId`: Hashed topic identifier
+- `Frame`: 17-byte binary envelope + CBOR payload
+- Transport trait with UDP and embassy-net backends
+- `CompositeTransport` for dual-bus bridge nodes
+
+---
+
+## Part V: Hardware-in-the-Loop (hil/)
+
+### Board Support
+
+| Crate | Target | Features |
+|-------|--------|----------|
+| board-support-pico2 | RP2350 | DAG runtime, USB CDC-NCM, WebSocket, HTTP API |
+| board-support-pico | RP2040 | DAP/SWD firmware |
+| board-support-stm32 | STM32 | Embassy firmware |
+| board-support-pi-zero | Pi Zero | Host-side I2C bridge |
+
+### HIL Infrastructure
+
+- **hil-backplane**: UDP multicast message envelope + pub/sub transport
+- **dap-dispatch**: CMSIS-DAP v2 CBOR protocol
+- **i2c-hil-sim**: Simulated I2C buses (no hardware required)
+- **i2c-hil-devices**: Simulated I2C device models (INA230, LTC4287, ADM1272)
+- **hil-firmware-support**: Shared USB builder, WebSocket server, HTTP API handler
+
+### Pico2 HTTP API
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | /api/dag | Deploy CBOR-encoded DAG |
+| POST | /api/tick | Evaluate DAG once |
+| GET | /api/pubsub | Snapshot all topic values |
+| GET | /api/channels | List registered I/O channels |
+| GET | /api/status | DAG status (loaded/nodes/ticks) |
+| POST | /api/debug | Toggle debug topic publishing |
+
+---
+
+## Part VI: MLIR Codegen Pipeline (mlir-codegen)
+
+### Pipeline
+
+```
+GraphSnapshot (JSON)
+  → lower.rs     → .mlir text (block lowering, FSM regions)
+  → mlir-opt     → optimized .mlir
+  → mlir-translate → .c / .h files
+```
+
+### Runtime (mlir-codegen/runtime.rs)
+
+- `BlockFn` enum: Captures config via partial application (Constant, Gain, Add, AdcRead, PwmWrite, ...)
+- `DagRuntime`: Deserialize graph, build tickable object
+- `HardwareBridge` trait: Hardware abstraction
+- `NullHardware`: No-op bridge for pure-logic testing
+
+---
+
+## Multi-Frontend Architecture
+
+Three frontend paradigms share the same `GraphSnapshot` IR and codegen pipeline:
 
 ```
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
@@ -153,13 +271,12 @@ RustCAM's reactive dataflow engine supports three frontend paradigms — all sha
          ▼                    ▼                     ▼
     ┌─────────────────────────────────────────────────────┐
     │              GraphSnapshot JSON IR                   │
-    │         (universal contract — see schema)            │
     └──────────────────────┬──────────────────────────────┘
                            │
                            ▼
     ┌─────────────────────────────────────────────────────┐
-    │              Rust Codegen Engine                      │
-    │     generate_workspace(snapshot, dt, targets)         │
+    │              Codegen Engine                           │
+    │   generate_workspace(snapshot, dt, targets)           │
     └──────┬──────────┬──────────┬──────────┬─────────────┘
            │          │          │          │
            ▼          ▼          ▼          ▼
@@ -167,43 +284,20 @@ RustCAM's reactive dataflow engine supports three frontend paradigms — all sha
       (std bin)  (embassy)  (embassy)   (esp-hal)
 ```
 
-### Approach: Hybrid (WASM + PyO3)
-
-- **Browser**: WASM via `wasm-bindgen` powers the block editor (existing)
-- **Python**: PyO3 bindings wrap the same Rust `DataflowGraph` for the API and notebook frontends
-- **Contract**: `GraphSnapshot` JSON is the interchange format — any frontend can produce/consume it
-- **No server**: both WASM and PyO3 run the engine locally, no network round-trips
-
-### Market Positioning
-
-| Capability | RustCAM | Simulink | Keras | Node-RED |
-|-----------|---------|----------|-------|----------|
-| Visual block editor | Yes | Yes | No | Yes |
-| Programmatic API | Yes (Python) | Yes (MATLAB) | Yes | Limited |
-| Notebook integration | Yes (Jupyter) | No | Yes | No |
-| Embedded codegen | Yes (Rust, multi-target) | Yes (C) | No | No |
-| Runs in browser | Yes (WASM) | No | No | Yes (server) |
-| Open source | Yes | No | Yes | Yes |
-| No server required | Yes | N/A | Yes | No |
-
-### URL Structure
-
-Each frontend is served at its own path on `jvishnefske.github.io/cam/`. One user sees one frontend at a time — no shared mode switcher.
-
-| Path | Frontend | Content |
-|------|----------|---------|
-| `/cam/` | CAM Tool | STL/SVG → G-code (existing) |
-| `/cam/blocks/` | Block Editor | Visual dataflow editor (WASM) |
-| `/cam/api/` | Python API | Landing page, install instructions, examples |
-| `/cam/notebook/` | Jupyter Notebook | Landing page, example notebooks, Binder links |
-
-Each path has its own `index.html`. A minimal nav bar links between them, but each page is self-contained — no tabbed mode switcher.
-
-The existing single-page mode switcher (CAM / 2D Sketch / Dataflow) in `www/index.html` will be split into separate entry points during the multi-frontend migration.
-
 ### Frontend Design Documents
 
-- **[Block Editor](docs/block-frontend.md)** — DOM/SVG visual editor (~70% built on `feature-dataflow`)
+- **[Block Editor](docs/block-frontend.md)** — DOM/SVG visual editor
 - **[Python API](docs/api-frontend.md)** — Keras-style programmatic graph building via PyO3
-- **[Jupyter Notebook](docs/notebook-frontend.md)** — IPython display integration with SVG and matplotlib
-- **[GraphSnapshot Schema](docs/graph-snapshot-schema.md)** — formal IR specification (the contract all frontends share)
+- **[Jupyter Notebook](docs/notebook-frontend.md)** — IPython display integration
+- **[GraphSnapshot Schema](docs/graph-snapshot-schema.md)** — formal IR specification
+
+---
+
+## Non-Goals (Out of Scope)
+- Plasma cutter profile
+- Machine communication / serial connection
+- DXF/STEP/3MF import formats
+- Image-to-raster engraving (grayscale bitmap input)
+- Multi-tool operations in single job
+- 5-axis toolpaths
+- Material database / feeds & speeds calculator
