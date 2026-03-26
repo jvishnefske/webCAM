@@ -10,8 +10,15 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
 #[cfg(not(target_arch = "arm"))]
 compile_error!("board-support-pico2 must be built for ARM. Use: cargo build-pico2");
+
+use embedded_alloc::LlffHeap as Heap;
+
+#[global_allocator]
+static HEAP: Heap = Heap::empty();
 
 // RP2350 IMAGE_DEF block — required for the boot ROM to recognize this as a valid image.
 // Must include VECTOR_TABLE item pointing to 0x10000100 (start of FLASH region).
@@ -20,6 +27,7 @@ compile_error!("board-support-pico2 must be built for ARM. Use: cargo build-pico
 pub static IMAGE_DEF: embassy_rp::block::ImageDefVt =
     embassy_rp::block::ImageDefVt::secure_exe_vt(0x10000100);
 
+mod dag_handler;
 mod dap_pins;
 mod dap_task;
 mod http_static;
@@ -64,6 +72,19 @@ async fn dap_usb_task(
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     info!("Pico 2 (RP2350A) program start");
+
+    // Initialize heap allocator (8KB for DAG eval buffers)
+    {
+        const HEAP_SIZE: usize = 8192;
+        static mut HEAP_MEM: [core::mem::MaybeUninit<u8>; HEAP_SIZE] =
+            [core::mem::MaybeUninit::uninit(); HEAP_SIZE];
+        // SAFETY: called once at startup, HEAP_MEM is static mut only used here
+        #[allow(static_mut_refs)]
+        unsafe {
+            HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE);
+        }
+    }
+
     let p = embassy_rp::init(Default::default());
 
     // LED for status indication (GPIO 25 on Pico 2)
@@ -127,10 +148,14 @@ async fn main(spawner: Spawner) {
     );
     unwrap!(spawner.spawn(net_task(net_runner)));
     unwrap!(spawner.spawn(dhcp_responder_task(stack)));
-    unwrap!(spawner.spawn(ws_server::ws_server_task(stack, shared)));
 
-    info!("10-bus shared i2c-tiny-usb + CDC NCM + WebSocket + CMSIS-DAP ready");
-    info!("Devices added via WebSocket will appear on /dev/i2c-*");
+    // DAG executor API handler
+    static DAG_HANDLER: StaticCell<dag_handler::DagApiHandler> = StaticCell::new();
+    let dag = DAG_HANDLER.init(dag_handler::DagApiHandler::new());
+    unwrap!(spawner.spawn(ws_server::ws_server_task(stack, shared, dag)));
+
+    info!("10-bus shared i2c-tiny-usb + CDC NCM + WebSocket + CMSIS-DAP + DAG ready");
+    info!("DAG editor at http://169.254.1.61:8080/");
 
     // Main loop - LED heartbeat
     loop {

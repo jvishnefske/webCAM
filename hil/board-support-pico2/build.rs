@@ -41,6 +41,7 @@ fn main() {
     println!("cargo:rustc-link-arg-bins=-Tdefmt.x");
 
     compress_frontend(out);
+    compress_dag_frontend(out);
 }
 
 fn compress_frontend(out: &PathBuf) {
@@ -110,5 +111,46 @@ fn compress_frontend(out: &PathBuf) {
         println!("cargo:rustc-cfg=has_frontend");
     } else {
         println!("cargo:warning=Frontend dist/ incomplete, building without static assets");
+    }
+}
+
+fn compress_dag_frontend(out: &PathBuf) {
+    println!("cargo::rustc-check-cfg=cfg(has_dag_frontend)");
+
+    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let dag_dir = manifest_dir.join("../../www/dag");
+    println!("cargo:rerun-if-changed={}", dag_dir.display());
+
+    let files: &[(&str, &str)] = &[
+        ("index.html", "dag_index.html.gz"),
+        ("dag-editor.js", "dag_editor.js.gz"),
+    ];
+
+    let mut found_all = true;
+    for (src_name, out_name) in files {
+        let src = dag_dir.join(src_name);
+        if !src.is_file() {
+            println!(
+                "cargo:warning=DAG frontend: {} not found, skipping",
+                src.display()
+            );
+            found_all = false;
+            continue;
+        }
+        let data = fs::read(&src).unwrap();
+        let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        encoder.write_all(&data).unwrap();
+        let compressed = encoder.finish().unwrap();
+        fs::write(out.join(out_name), &compressed).unwrap();
+        println!(
+            "cargo:warning=DAG frontend: {src_name} {} -> {} bytes ({:.0}%)",
+            data.len(),
+            compressed.len(),
+            (compressed.len() as f64 / data.len() as f64) * 100.0,
+        );
+    }
+
+    if found_all {
+        println!("cargo:rustc-cfg=has_dag_frontend");
     }
 }

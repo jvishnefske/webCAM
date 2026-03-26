@@ -15,6 +15,29 @@ use crate::fw_update::{self, DfuFlashWriter, FwUpdateState};
 use crate::http_static::StaticAssets;
 use crate::ws_dispatch::I2cBusSet;
 
+/// Handler for HTTP API requests (POST endpoints, etc.).
+///
+/// Board binaries implement this to handle REST-style API calls
+/// alongside the WebSocket server. The default implementation
+/// returns 404 for all requests.
+pub trait ApiHandler {
+    /// Handle an HTTP request that is not a WebSocket upgrade or static file.
+    ///
+    /// `method` is "POST", "PUT", etc. `path` is the URL path.
+    /// `body` is the request body (may be empty for GET).
+    /// Returns the HTTP response bytes to send back.
+    fn handle(&mut self, method: &str, path: &str, body: &[u8]) -> Option<heapless::Vec<u8, 512>>;
+}
+
+/// No-op API handler that rejects all requests.
+pub struct NullApiHandler;
+
+impl ApiHandler for NullApiHandler {
+    fn handle(&mut self, _method: &str, _path: &str, _body: &[u8]) -> Option<heapless::Vec<u8, 512>> {
+        None
+    }
+}
+
 /// Runs the HTTP and WebSocket server on port 8080.
 ///
 /// Accepts one TCP connection at a time. Each connection is routed
@@ -35,6 +58,17 @@ pub async fn run<B: I2cBusSet>(
     buses: &mut B,
     assets: &StaticAssets,
     fw: &mut impl DfuFlashWriter,
+) -> ! {
+    run_with_api(stack, buses, assets, fw, &mut NullApiHandler).await
+}
+
+/// Like [`run`], but with an [`ApiHandler`] for POST/PUT endpoints.
+pub async fn run_with_api<B: I2cBusSet>(
+    stack: Stack<'static>,
+    buses: &mut B,
+    assets: &StaticAssets,
+    fw: &mut impl DfuFlashWriter,
+    api: &mut impl ApiHandler,
 ) -> ! {
     // Wait for network link
     stack.wait_config_up().await;
@@ -90,19 +124,57 @@ pub async fn run<B: I2cBusSet>(
             continue;
         }
 
-        // Route: WebSocket upgrade or HTTP static file
+        // Route: WebSocket upgrade, API handler, or static file
         let key = match crate::ws_framing::parse_upgrade_key(&http_buf[..http_len]) {
             Some(k) => k,
             None => {
-                // Not a WebSocket upgrade — serve static file
+                let method =
+                    crate::ws_framing::parse_request_method(&http_buf[..http_len]).unwrap_or("GET");
                 let path =
                     crate::ws_framing::parse_request_path(&http_buf[..http_len]).unwrap_or("/");
-                defmt::info!("HTTP: GET {=str}", path);
-                if crate::http_static::serve_static(&mut socket, path, assets)
-                    .await
-                    .is_err()
-                {
-                    defmt::warn!("HTTP: failed to serve static file");
+
+                if method != "GET" {
+                    // Non-GET request — try API handler
+                    // Extract body: read remaining bytes after headers
+                    let header_end = {
+                        let mut pos = None;
+                        let mut i = 0;
+                        while i + 3 < http_len {
+                            if http_buf[i] == b'\r'
+                                && http_buf[i + 1] == b'\n'
+                                && http_buf[i + 2] == b'\r'
+                                && http_buf[i + 3] == b'\n'
+                            {
+                                pos = Some(i + 4);
+                                break;
+                            }
+                            i += 1;
+                        }
+                        pos.unwrap_or(http_len)
+                    };
+                    let body = &http_buf[header_end..http_len];
+
+                    defmt::info!("HTTP: {=str} {=str} body={=usize}B", method, path, body.len());
+
+                    if let Some(resp) = api.handle(method, path, body) {
+                        if crate::ws_framing::write_all_to_socket(&mut socket, &resp)
+                            .await
+                            .is_err()
+                        {
+                            defmt::warn!("HTTP: failed to send API response");
+                        }
+                    } else {
+                        let not_found = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                        let _ = crate::ws_framing::write_all_to_socket(&mut socket, not_found).await;
+                    }
+                } else {
+                    defmt::info!("HTTP: GET {=str}", path);
+                    if crate::http_static::serve_static(&mut socket, path, assets)
+                        .await
+                        .is_err()
+                    {
+                        defmt::warn!("HTTP: failed to serve static file");
+                    }
                 }
                 socket.close();
                 embassy_time::Timer::after_millis(10).await;
