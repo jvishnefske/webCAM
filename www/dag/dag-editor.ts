@@ -147,8 +147,9 @@ function addNode(op: string): DagNode {
     y: 100 + Math.random() * 200,
   };
   if (actualOp === 'const') node.value = 0;
-  if (actualOp === 'input' || actualOp === 'output') node.name = '';
-  if (actualOp === 'subscribe' || actualOp === 'publish') node.name = '';
+  if (actualOp === 'output') node.name = `out_${node.id}`;
+  if (actualOp === 'publish') node.name = `pub_${node.id}`;
+  if (actualOp === 'input' || actualOp === 'subscribe') node.name = '';
   state.nodes.push(node);
   render();
   updateStatus();
@@ -434,19 +435,61 @@ function showInspector(node: DagNode) {
   }
 
   if (node.name !== undefined) {
-    const field = document.createElement('div');
-    field.className = 'field';
-    field.textContent = 'Name: ';
-    const inp = document.createElement('input');
-    inp.type = 'text';
-    inp.value = node.name || '';
-    inp.addEventListener('change', () => {
-      pushUndo();
-      node.name = inp.value;
-      render();
-    });
-    field.appendChild(inp);
-    body.appendChild(field);
+    if (node.op === 'input' || node.op === 'subscribe') {
+      // Dropdown populated from known channels
+      const field = document.createElement('div');
+      field.className = 'field';
+      field.textContent = 'Channel: ';
+      const sel = document.createElement('select');
+      const emptyOpt = document.createElement('option');
+      emptyOpt.value = '';
+      emptyOpt.textContent = '(select)';
+      sel.appendChild(emptyOpt);
+      for (const ch of knownChannels.inputs) {
+        const opt = document.createElement('option');
+        opt.value = ch;
+        opt.textContent = ch;
+        if (node.name === ch) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      sel.addEventListener('change', () => {
+        pushUndo();
+        node.name = sel.value;
+        render();
+      });
+      field.appendChild(sel);
+      body.appendChild(field);
+
+      // Also allow custom name entry
+      const customField = document.createElement('div');
+      customField.className = 'field';
+      customField.textContent = 'Custom: ';
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.value = node.name || '';
+      inp.addEventListener('change', () => {
+        pushUndo();
+        node.name = inp.value;
+        render();
+      });
+      customField.appendChild(inp);
+      body.appendChild(customField);
+    } else {
+      // output / publish — editable text input with auto-generated name
+      const field = document.createElement('div');
+      field.className = 'field';
+      field.textContent = 'Name: ';
+      const inp = document.createElement('input');
+      inp.type = 'text';
+      inp.value = node.name || '';
+      inp.addEventListener('change', () => {
+        pushUndo();
+        node.name = inp.value;
+        render();
+      });
+      field.appendChild(inp);
+      body.appendChild(field);
+    }
   }
 
   if (node.result !== undefined) {
@@ -671,6 +714,8 @@ async function pollPubSub() {
       }
     }
 
+    renderHwPanel(data);
+
     if (changed) {
       render();
       if (state.selectedId !== null) {
@@ -680,6 +725,61 @@ async function pollPubSub() {
     }
   } catch (_e) {
     // ignore network errors during polling
+  }
+}
+
+// --- Hardware panel ---
+
+async function fetchChannels() {
+  try {
+    const resp = await fetch('/api/channels');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (data.inputs) knownChannels.inputs = data.inputs;
+    if (data.outputs) knownChannels.outputs = data.outputs;
+  } catch (_e) {
+    // ignore network errors
+  }
+}
+
+function renderHwPanel(topics: Record<string, number> = {}) {
+  const body = document.getElementById('hw-body');
+  if (!body) return;
+  const parts: string[] = [];
+
+  // Show inputs from nodes
+  for (const n of state.nodes) {
+    if (n.op === 'input' && n.name) {
+      const val = n.result !== undefined ? n.result.toFixed(2) : '?';
+      parts.push(`IN:${n.name}=${val}`);
+    }
+  }
+
+  // Show outputs from nodes
+  for (const n of state.nodes) {
+    if (n.op === 'output' && n.name) {
+      const val = n.result !== undefined ? n.result.toFixed(2) : '?';
+      parts.push(`OUT:${n.name}=${val}`);
+    }
+  }
+
+  // Show non-debug pubsub topics
+  for (const [topic, value] of Object.entries(topics)) {
+    if (topic.startsWith('_dbg/')) continue;
+    parts.push(`PS:${topic}=${value.toFixed(2)}`);
+  }
+
+  body.textContent = parts.length > 0 ? ' ' + parts.join('  ') : ' (none)';
+}
+
+function toggleHwPanel() {
+  const panel = document.getElementById('hw-panel')!;
+  const visible = panel.style.display !== 'none';
+  panel.style.display = visible ? 'none' : 'block';
+  document.getElementById('btn-hw')!.classList.toggle('active', !visible);
+  if (!visible) {
+    fetchChannels();
+    renderHwPanel();
   }
 }
 
@@ -724,6 +824,7 @@ async function init() {
   document.getElementById('btn-push')!.addEventListener('click', pushToMCU);
   document.getElementById('btn-debug')!.addEventListener('click', toggleDebug);
   document.getElementById('btn-autotick')!.addEventListener('click', toggleAutoTick);
+  document.getElementById('btn-hw')!.addEventListener('click', toggleHwPanel);
   document.getElementById('btn-clear')!.addEventListener('click', () => {
     clearSavedState();
     pushUndo();
@@ -736,6 +837,7 @@ async function init() {
   });
 
   loadSavedState();
+  fetchChannels();
   render();
   updateStatus();
 }
