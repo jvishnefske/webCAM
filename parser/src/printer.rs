@@ -145,7 +145,11 @@ impl fmt::Display for Graph {
             if !self.blocks.is_empty() {
                 writeln!(f)?;
             }
-            for conn in &self.connections {
+            let mut sorted_conns: Vec<_> = self.connections.iter().collect();
+            sorted_conns.sort_by(|a, b| {
+                a.from_block.cmp(&b.from_block).then(a.from_port.cmp(&b.from_port))
+            });
+            for conn in sorted_conns {
                 writeln!(f, "{conn}")?;
             }
         }

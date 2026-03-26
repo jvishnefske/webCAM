@@ -23,10 +23,11 @@ amp.out -> display.input
     assert_eq!(graph.connections[0].from_block, "sensor");
     assert_eq!(graph.connections[0].to_block, "amp");
 
-    // Round-trip
+    // Round-trip: serialize normalizes (sorts connections), so re-serialize should be stable
     let output = parser::serialize(&graph);
     let graph2 = parser::parse(&output).unwrap();
-    assert_eq!(graph, graph2);
+    let output2 = parser::serialize(&graph2);
+    assert_eq!(output, output2, "serialized form should be stable after one round-trip");
 }
 
 #[test]
