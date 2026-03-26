@@ -30,6 +30,7 @@ pub mod svg;
 pub mod tool;
 pub mod toolpath;
 pub mod units;
+pub mod dag_api;
 pub mod dataflow;
 
 use gcode::{emit_gcode, emit_gcode_with_profile, GcodeParams, LaserParams};

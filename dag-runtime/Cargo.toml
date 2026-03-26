@@ -1,0 +1,13 @@
+[package]
+name = "dag-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Embedded DAG runtime: executor, channels, pubsub, and HTTP serving"
+
+[features]
+default = ["std"]
+std = ["dag-core/std"]
+
+[dependencies]
+dag-core = { path = "../dag-core", default-features = false }
