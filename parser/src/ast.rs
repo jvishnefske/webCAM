@@ -1,5 +1,6 @@
 /// A value in the DSL.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Value {
     Int(i64),
     Float(f64),
@@ -11,6 +12,7 @@ pub enum Value {
 
 /// An annotation like @target(rp2040).
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Annotation {
     pub name: String,
     pub args: Vec<Value>,
@@ -18,6 +20,7 @@ pub struct Annotation {
 
 /// Block configuration.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Config {
     Empty,
     Positional(Vec<Value>),
@@ -27,6 +30,7 @@ pub enum Config {
 
 /// A block declaration.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct BlockDecl {
     pub id: String,
     pub block_type: String,
@@ -36,6 +40,7 @@ pub struct BlockDecl {
 
 /// A connection between ports.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Connection {
     pub from_block: String,
     pub from_port: String,
@@ -45,6 +50,7 @@ pub struct Connection {
 
 /// A complete dataflow graph.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Graph {
     pub blocks: Vec<BlockDecl>,
     pub connections: Vec<Connection>,
