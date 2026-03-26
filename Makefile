@@ -51,6 +51,14 @@ hil-jlink-flash: hil-firmware ## Flash Pico firmware via JLink
 hil-firmware: ## Build Pico firmware
 	cargo build-pico
 
+hil-pico2: dag-frontend ## Build Pico 2 firmware with DAG runtime
+	EMBASSY_USB_MAX_INTERFACE_COUNT=16 EMBASSY_USB_MAX_HANDLER_COUNT=8 \
+	cargo build -p board-support-pico2 --target thumbv8m.main-none-eabihf --release
+
+hil-pico2-flash: hil-pico2 ## Flash Pico 2 via probe-rs
+	probe-rs download --chip RP235x target/thumbv8m.main-none-eabihf/release/board-support-pico2
+	probe-rs reset --chip RP235x
+
 hil-stm32: ## Build STM32 firmware
 	hil/scripts/build-stm32.sh firmware-out
 
