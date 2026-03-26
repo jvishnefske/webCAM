@@ -15,6 +15,7 @@ impl Default for DagHandle {
     }
 }
 
+
 #[wasm_bindgen]
 impl DagHandle {
     #[wasm_bindgen(constructor)]
