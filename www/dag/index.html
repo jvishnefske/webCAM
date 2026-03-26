@@ -19,6 +19,7 @@
   #node-inspector h3 { margin-bottom: 4px; }
   #node-inspector .field { margin: 2px 0; }
   #node-inspector input { width: 80px; background: #0f3460; border: 1px solid #533483; color: #e0e0e0; padding: 2px 4px; }
+  #node-inspector select { width: 80px; background: #0f3460; border: 1px solid #533483; color: #e0e0e0; padding: 2px; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -45,6 +46,11 @@
   <span class="sep"></span>
   <button id="btn-debug" title="Toggle debug mode">Debug</button>
   <button id="btn-autotick" title="Auto-tick at 2Hz">Auto</button>
+  <button id="btn-hw" title="Toggle hardware panel">HW</button>
+</div>
+<div id="hw-panel" style="display:none; padding:4px 8px; background:#0f3460; font-size:11px; border-bottom:1px solid #533483;">
+  <strong>Channels</strong>
+  <span id="hw-body"></span>
 </div>
 <div id="workspace">
   <svg id="canvas"></svg>
