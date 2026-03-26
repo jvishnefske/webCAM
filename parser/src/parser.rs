@@ -5,8 +5,8 @@ peg::parser! {
         // Horizontal whitespace (spaces and tabs only)
         rule _() = [' ' | '\t']*
 
-        // Any whitespace including newlines
-        rule __() = [' ' | '\t' | '\n' | '\r']*
+        // Any whitespace including newlines and comments
+        rule __() = ([' ' | '\t' | '\n' | '\r'] / "#" [^ '\n']* "\n")*
 
         // Identifiers: [a-zA-Z_][a-zA-Z0-9_]*
         pub rule ident() -> String
