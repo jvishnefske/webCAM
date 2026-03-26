@@ -1,6 +1,6 @@
 //! Function blocks: math operations on float inputs.
 
-use crate::dataflow::block::{Block, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,7 +74,7 @@ impl FunctionBlock {
     }
 }
 
-impl Block for FunctionBlock {
+impl Module for FunctionBlock {
     fn name(&self) -> &str {
         match self.config.op {
             FunctionOp::Gain => "Gain",
@@ -111,6 +111,16 @@ impl Block for FunctionBlock {
         vec![PortDef::new("out", PortKind::Float)]
     }
 
+    fn config_json(&self) -> String {
+        serde_json::to_string(&self.config).unwrap_or_default()
+    }
+
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for FunctionBlock {
     fn tick(&mut self, inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
         let result = match self.config.op {
             FunctionOp::Gain => {
@@ -141,10 +151,6 @@ impl Block for FunctionBlock {
             }
         };
         vec![result.map(Value::Float)]
-    }
-
-    fn config_json(&self) -> String {
-        serde_json::to_string(&self.config).unwrap_or_default()
     }
 }
 

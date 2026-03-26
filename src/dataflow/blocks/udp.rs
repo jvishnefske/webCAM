@@ -4,7 +4,7 @@
 //! The blocks still participate in the graph so the topology can be
 //! designed in the browser and later run natively.
 
-use crate::dataflow::block::{Block, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -26,7 +26,7 @@ impl UdpSourceBlock {
     }
 }
 
-impl Block for UdpSourceBlock {
+impl Module for UdpSourceBlock {
     fn name(&self) -> &str {
         "UDP Source"
     }
@@ -39,15 +39,21 @@ impl Block for UdpSourceBlock {
     fn output_ports(&self) -> Vec<PortDef> {
         vec![PortDef::new("data", PortKind::Bytes)]
     }
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        // Stub: no actual UDP in WASM.
-        vec![None]
-    }
     fn config_json(&self) -> String {
         serde_json::to_string(&UdpConfig {
             address: self.address.clone(),
         })
         .unwrap_or_default()
+    }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for UdpSourceBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        // Stub: no actual UDP in WASM.
+        vec![None]
     }
 }
 
@@ -65,7 +71,7 @@ impl UdpSinkBlock {
     }
 }
 
-impl Block for UdpSinkBlock {
+impl Module for UdpSinkBlock {
     fn name(&self) -> &str {
         "UDP Sink"
     }
@@ -78,14 +84,20 @@ impl Block for UdpSinkBlock {
     fn output_ports(&self) -> Vec<PortDef> {
         vec![]
     }
-    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        // Stub: no actual UDP in WASM.
-        vec![]
-    }
     fn config_json(&self) -> String {
         serde_json::to_string(&UdpConfig {
             address: self.address.clone(),
         })
         .unwrap_or_default()
+    }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for UdpSinkBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        // Stub: no actual UDP in WASM.
+        vec![]
     }
 }

@@ -31,6 +31,7 @@ fn constant_block(id: u32, value: f64, target: TargetFamily) -> BlockSnapshot {
         config: serde_json::json!({"value": value}),
         output_values: vec![Some(Value::Float(value))],
         target: Some(target),
+        custom_codegen: None,
     }
 }
 
@@ -44,6 +45,7 @@ fn gain_block(id: u32, gain: f64, target: TargetFamily) -> BlockSnapshot {
         config: serde_json::json!({"gain": gain}),
         output_values: vec![Some(Value::Float(0.0))],
         target: Some(target),
+        custom_codegen: None,
     }
 }
 
@@ -60,6 +62,7 @@ fn add_block(id: u32, target: TargetFamily) -> BlockSnapshot {
         config: serde_json::json!({}),
         output_values: vec![Some(Value::Float(0.0))],
         target: Some(target),
+        custom_codegen: None,
     }
 }
 
@@ -369,7 +372,7 @@ fn e2e_bridge_topics_match_across_partitions() {
 
 #[test]
 fn e2e_pubsub_blocks_in_dataflow_graph() {
-    use rustcam::dataflow::block::{Block, Value};
+    use rustcam::dataflow::{Tick, Value};
     use rustcam::dataflow::blocks::pubsub::{PubSubSinkBlock, PubSubSourceBlock};
 
     // Simulate the bridge: source publishes, sink receives

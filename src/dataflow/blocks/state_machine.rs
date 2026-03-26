@@ -16,7 +16,7 @@
 //! Input ports: one per guard (Float, >0.5 = true)
 //! Output ports: `state` (Float, enum index), plus `active_<name>` per state (0.0 or 1.0)
 
-use crate::dataflow::block::{Block, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -73,7 +73,7 @@ impl StateMachineBlock {
     }
 }
 
-impl Block for StateMachineBlock {
+impl Module for StateMachineBlock {
     fn name(&self) -> &str {
         "State Machine"
     }
@@ -99,6 +99,16 @@ impl Block for StateMachineBlock {
         ports
     }
 
+    fn config_json(&self) -> String {
+        serde_json::to_string(&self.config).unwrap_or_default()
+    }
+
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for StateMachineBlock {
     fn tick(&mut self, inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
         let current_name = &self.config.states[self.current_state].clone();
 
@@ -134,10 +144,6 @@ impl Block for StateMachineBlock {
             })));
         }
         outputs
-    }
-
-    fn config_json(&self) -> String {
-        serde_json::to_string(&self.config).unwrap_or_default()
     }
 }
 

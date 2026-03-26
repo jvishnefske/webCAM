@@ -1,6 +1,6 @@
 //! Plot block: accumulates time-series data for frontend visualization.
 
-use crate::dataflow::block::{Block, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -32,7 +32,7 @@ impl PlotBlock {
     }
 }
 
-impl Block for PlotBlock {
+impl Module for PlotBlock {
     fn name(&self) -> &str {
         "Plot"
     }
@@ -49,6 +49,19 @@ impl Block for PlotBlock {
         vec![PortDef::new("series", PortKind::Series)]
     }
 
+    fn config_json(&self) -> String {
+        serde_json::to_string(&PlotConfig {
+            max_samples: self.max_samples,
+        })
+        .unwrap_or_default()
+    }
+
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for PlotBlock {
     fn tick(&mut self, inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
         if let Some(v) = inputs.first().and_then(|i| i.and_then(|v| v.as_float())) {
             self.buffer.push(v);
@@ -57,13 +70,6 @@ impl Block for PlotBlock {
             }
         }
         vec![Some(Value::Series(self.buffer.clone()))]
-    }
-
-    fn config_json(&self) -> String {
-        serde_json::to_string(&PlotConfig {
-            max_samples: self.max_samples,
-        })
-        .unwrap_or_default()
     }
 }
 

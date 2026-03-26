@@ -1,0 +1,9 @@
+[package]
+name = "module-traits"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Trait definitions for the RustCAM dataflow module system"
+
+[dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
