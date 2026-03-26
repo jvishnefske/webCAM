@@ -8,6 +8,7 @@ description = "Embedded DAG runtime: executor, channels, pubsub, and HTTP servin
 [features]
 default = ["std"]
 std = ["dag-core/std"]
+embedded-assets = []
 
 [dependencies]
 dag-core = { path = "../dag-core", default-features = false }
