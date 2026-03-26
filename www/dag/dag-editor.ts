@@ -39,6 +39,14 @@ let state: DagState = {
 let nextId = 0;
 const svg = document.getElementById('canvas') as unknown as SVGSVGElement;
 
+// --- Debug / polling state ---
+
+let debugMode = false;
+let autoTickInterval: number | null = null;
+let pollInterval: number | null = null;
+let lastNodeMap: Map<number, number> = new Map();
+let knownChannels: { inputs: string[]; outputs: string[] } = { inputs: [], outputs: [] };
+
 // --- Undo/Redo ---
 
 const UNDO_MAX = 50;
@@ -590,7 +598,8 @@ async function pushToMCU() {
   }
 
   try {
-    const { handle } = buildDagHandle();
+    const { handle, nodeMap } = buildDagHandle();
+    lastNodeMap = nodeMap;
     const cbor: Uint8Array = handle.to_cbor();
     handle.free();
 
@@ -611,6 +620,83 @@ async function pushToMCU() {
 
 function updateStatus() {
   document.getElementById('st-nodes')!.textContent = `Nodes: ${state.nodes.length}`;
+}
+
+// --- Debug / PubSub polling ---
+
+async function toggleDebug() {
+  try {
+    await fetch('/api/debug', { method: 'POST' });
+  } catch (_e) {
+    // ignore network errors
+  }
+  debugMode = !debugMode;
+  document.getElementById('btn-debug')!.classList.toggle('active', debugMode);
+
+  if (debugMode) {
+    if (pollInterval === null) {
+      pollInterval = window.setInterval(pollPubSub, 250);
+    }
+  } else {
+    if (pollInterval !== null) {
+      clearInterval(pollInterval);
+      pollInterval = null;
+    }
+  }
+}
+
+async function pollPubSub() {
+  try {
+    const resp = await fetch('/api/pubsub');
+    if (!resp.ok) return;
+    const data: Record<string, number> = await resp.json();
+
+    // Build reverse map: DAG index -> visual node id
+    const dagToVisual = new Map<number, number>();
+    for (const [visualId, dagIdx] of lastNodeMap.entries()) {
+      dagToVisual.set(dagIdx, visualId);
+    }
+
+    let changed = false;
+    for (const [topic, value] of Object.entries(data)) {
+      const match = topic.match(/^_dbg\/(\d+)$/);
+      if (!match) continue;
+      const dagIdx = parseInt(match[1], 10);
+      const visualId = dagToVisual.get(dagIdx);
+      if (visualId === undefined) continue;
+      const node = state.nodes.find(n => n.id === visualId);
+      if (node && node.result !== value) {
+        node.result = value;
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      render();
+      if (state.selectedId !== null) {
+        const sel = state.nodes.find(n => n.id === state.selectedId);
+        if (sel) showInspector(sel);
+      }
+    }
+  } catch (_e) {
+    // ignore network errors during polling
+  }
+}
+
+function toggleAutoTick() {
+  if (autoTickInterval !== null) {
+    clearInterval(autoTickInterval);
+    autoTickInterval = null;
+  } else {
+    autoTickInterval = window.setInterval(async () => {
+      try {
+        await fetch('/api/tick', { method: 'POST' });
+      } catch (_e) {
+        // ignore
+      }
+    }, 500);
+  }
+  document.getElementById('btn-autotick')!.classList.toggle('active', autoTickInterval !== null);
 }
 
 // --- Init ---
@@ -636,6 +722,8 @@ async function init() {
 
   document.getElementById('btn-eval')!.addEventListener('click', evaluate);
   document.getElementById('btn-push')!.addEventListener('click', pushToMCU);
+  document.getElementById('btn-debug')!.addEventListener('click', toggleDebug);
+  document.getElementById('btn-autotick')!.addEventListener('click', toggleAutoTick);
   document.getElementById('btn-clear')!.addEventListener('click', () => {
     clearSavedState();
     pushUndo();
