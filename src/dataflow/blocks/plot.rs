@@ -1,6 +1,6 @@
 //! Plot block: accumulates time-series data for frontend visualization.
 
-use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]

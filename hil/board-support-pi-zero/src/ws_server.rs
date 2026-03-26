@@ -70,12 +70,7 @@ pub async fn run(
                 match msg {
                     Message::Binary(data) => {
                         let mut resp_buf = [0u8; 4096];
-                        let result = dispatch_request(
-                            &buses,
-                            &dap,
-                            &data,
-                            &mut resp_buf,
-                        );
+                        let result = dispatch_request(&buses, &dap, &data, &mut resp_buf);
                         match result {
                             Ok(n) => {
                                 if sink

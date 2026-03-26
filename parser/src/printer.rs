@@ -147,7 +147,9 @@ impl fmt::Display for Graph {
             }
             let mut sorted_conns: Vec<_> = self.connections.iter().collect();
             sorted_conns.sort_by(|a, b| {
-                a.from_block.cmp(&b.from_block).then(a.from_port.cmp(&b.from_port))
+                a.from_block
+                    .cmp(&b.from_block)
+                    .then(a.from_port.cmp(&b.from_port))
             });
             for conn in sorted_conns {
                 writeln!(f, "{conn}")?;

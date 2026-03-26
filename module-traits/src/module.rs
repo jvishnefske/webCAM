@@ -3,11 +3,11 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use crate::analysis::AnalysisModel;
 use crate::codegen_trait::Codegen;
 use crate::sim::SimModel;
 use crate::tick::Tick;
 use crate::value::PortDef;
-use crate::analysis::AnalysisModel;
 
 /// Identity and metadata. Every block implements this.
 /// The registry stores `Box<dyn Module>`.

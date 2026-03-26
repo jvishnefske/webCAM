@@ -62,6 +62,9 @@ mod tests {
             column: 5,
             expected: vec!["\"block\"".into(), "identifier".into()],
         };
-        assert_eq!(e.to_string(), "parse error at line 3:5: expected \"block\" or identifier");
+        assert_eq!(
+            e.to_string(),
+            "parse error at line 3:5: expected \"block\" or identifier"
+        );
     }
 }

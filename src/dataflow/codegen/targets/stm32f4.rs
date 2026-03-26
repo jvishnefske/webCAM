@@ -92,21 +92,9 @@ fn generate_main_rs(dt: f64) -> String {
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "impl Peripherals for HwPeripherals {{").unwrap();
-    writeln!(
-        out,
-        "    fn adc_read(&mut self, _ch: u8) -> f32 {{ 0.0 }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    fn pwm_write(&mut self, _ch: u8, _duty: f32) {{}}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    fn gpio_read(&self, _pin: u8) -> bool {{ false }}"
-    )
-    .unwrap();
+    writeln!(out, "    fn adc_read(&mut self, _ch: u8) -> f32 {{ 0.0 }}").unwrap();
+    writeln!(out, "    fn pwm_write(&mut self, _ch: u8, _duty: f32) {{}}").unwrap();
+    writeln!(out, "    fn gpio_read(&self, _pin: u8) -> bool {{ false }}").unwrap();
     writeln!(
         out,
         "    fn gpio_write(&mut self, _pin: u8, _high: bool) {{}}"
@@ -126,11 +114,7 @@ fn generate_main_rs(dt: f64) -> String {
     writeln!(out).unwrap();
     writeln!(out, "#[embassy_executor::main]").unwrap();
     writeln!(out, "async fn main(_spawner: Spawner) {{").unwrap();
-    writeln!(
-        out,
-        "    let _p = embassy_stm32::init(Default::default());"
-    )
-    .unwrap();
+    writeln!(out, "    let _p = embassy_stm32::init(Default::default());").unwrap();
     writeln!(out, "    let mut hw = HwPeripherals {{ _marker: () }};").unwrap();
     writeln!(out, "    let mut state = logic::State::default();").unwrap();
     writeln!(
@@ -146,7 +130,11 @@ fn generate_main_rs(dt: f64) -> String {
 
     // Append C-FFI hw_* stubs for MLIR backend
     writeln!(out).unwrap();
-    writeln!(out, "static mut HW: HwPeripherals = HwPeripherals {{ _marker: () }};").unwrap();
+    writeln!(
+        out,
+        "static mut HW: HwPeripherals = HwPeripherals {{ _marker: () }};"
+    )
+    .unwrap();
     out.push_str(&super::generate_hw_ffi_stubs("HW"));
 
     out

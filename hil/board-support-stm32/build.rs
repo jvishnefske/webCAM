@@ -17,7 +17,9 @@ fn main() {
     } else if cfg!(feature = "stm32h743vi") {
         "stm32h743vi"
     } else {
-        panic!("No STM32 chip feature selected. Enable one of: stm32f401cc, stm32f411ce, stm32h743vi");
+        panic!(
+            "No STM32 chip feature selected. Enable one of: stm32f401cc, stm32f411ce, stm32h743vi"
+        );
     };
 
     let out = &PathBuf::from(env::var_os("OUT_DIR").unwrap());
@@ -25,12 +27,8 @@ fn main() {
 
     // Copy chip-specific linker script to OUT_DIR as memory.x
     let memory_src = manifest_dir.join(format!("memory-{chip}.x"));
-    fs::copy(&memory_src, out.join("memory.x")).unwrap_or_else(|e| {
-        panic!(
-            "Failed to copy {}: {e}",
-            memory_src.display()
-        )
-    });
+    fs::copy(&memory_src, out.join("memory.x"))
+        .unwrap_or_else(|e| panic!("Failed to copy {}: {e}", memory_src.display()));
     println!("cargo:rustc-link-search={}", out.display());
 
     println!("cargo:rerun-if-changed=memory-{chip}.x");

@@ -98,7 +98,10 @@ mod tests {
     fn raw_buffer_too_small() {
         let data = [0u8; 10];
         let mut buf = [0u8; 5];
-        assert_eq!(encode_raw(&data, &mut buf), Err(PayloadError::BufferTooSmall));
+        assert_eq!(
+            encode_raw(&data, &mut buf),
+            Err(PayloadError::BufferTooSmall)
+        );
     }
 
     // ---- CBOR tests (only when feature enabled) ----

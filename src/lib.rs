@@ -19,6 +19,8 @@
 //! Each layer is a trait / module boundary. Add new formats or strategies
 //! without touching existing code.
 
+pub mod dag_api;
+pub mod dataflow;
 pub mod gcode;
 pub mod gcode_parser;
 pub mod geometry;
@@ -30,8 +32,6 @@ pub mod svg;
 pub mod tool;
 pub mod toolpath;
 pub mod units;
-pub mod dag_api;
-pub mod dataflow;
 
 use gcode::{emit_gcode, emit_gcode_with_profile, GcodeParams, LaserParams};
 use geometry::Toolpath;
@@ -813,9 +813,7 @@ pub fn sketch_add_constraint(
         "parallel" if ids.len() >= 4 => {
             sketch_actor::Constraint::Parallel(ids[0], ids[1], ids[2], ids[3])
         }
-        "midpoint" if ids.len() >= 3 => {
-            sketch_actor::Constraint::Midpoint(ids[0], ids[1], ids[2])
-        }
+        "midpoint" if ids.len() >= 3 => sketch_actor::Constraint::Midpoint(ids[0], ids[1], ids[2]),
         "equal_length" if ids.len() >= 4 => {
             sketch_actor::Constraint::EqualLength(ids[0], ids[1], ids[2], ids[3])
         }
@@ -1111,12 +1109,12 @@ mod tests {
         DATAFLOW_GRAPHS.with(|g| {
             let mut graphs = g.borrow_mut();
             let graph = graphs.get_mut(&gid).unwrap();
-            let src = graph.add_block(Box::new(
-                dataflow::blocks::constant::ConstantBlock::new(1.0),
-            ));
-            let dst = graph.add_block(Box::new(
-                dataflow::blocks::function::FunctionBlock::gain(2.0),
-            ));
+            let src = graph.add_block(Box::new(dataflow::blocks::constant::ConstantBlock::new(
+                1.0,
+            )));
+            let dst = graph.add_block(Box::new(dataflow::blocks::function::FunctionBlock::gain(
+                2.0,
+            )));
             let ch = graph.connect(src, 0, dst, 0).unwrap();
             graph.disconnect(ch);
         });
@@ -1230,10 +1228,8 @@ mod tests {
     #[test]
     fn test_sketch_add_and_remove_constraint() {
         sketch_reset();
-        let p1: serde_json::Value =
-            serde_json::from_str(&sketch_add_point(0.0, 0.0)).unwrap();
-        let p2: serde_json::Value =
-            serde_json::from_str(&sketch_add_point(10.0, 0.0)).unwrap();
+        let p1: serde_json::Value = serde_json::from_str(&sketch_add_point(0.0, 0.0)).unwrap();
+        let p2: serde_json::Value = serde_json::from_str(&sketch_add_point(10.0, 0.0)).unwrap();
         let id1 = p1["id"].as_u64().unwrap() as u32;
         let id2 = p2["id"].as_u64().unwrap() as u32;
         let ids_json = format!("[{id1},{id2}]");
@@ -1348,11 +1344,20 @@ endsolid test"
     #[test]
     fn test_scan_direction_from_config() {
         let mut config = CamConfig::default();
-        assert!(matches!(scan_direction_from_config(&config), ScanDirection::X));
+        assert!(matches!(
+            scan_direction_from_config(&config),
+            ScanDirection::X
+        ));
         config.scan_direction = "y".into();
-        assert!(matches!(scan_direction_from_config(&config), ScanDirection::Y));
+        assert!(matches!(
+            scan_direction_from_config(&config),
+            ScanDirection::Y
+        ));
         config.scan_direction = "Y".into();
-        assert!(matches!(scan_direction_from_config(&config), ScanDirection::Y));
+        assert!(matches!(
+            scan_direction_from_config(&config),
+            ScanDirection::Y
+        ));
     }
 
     #[test]
@@ -1375,7 +1380,13 @@ endsolid test"
     #[test]
     fn test_strategy_from_config() {
         // Just ensure all branches produce a strategy without panic
-        for s in &["contour", "pocket", "perimeter", "laser_cut", "laser_engrave"] {
+        for s in &[
+            "contour",
+            "pocket",
+            "perimeter",
+            "laser_cut",
+            "laser_engrave",
+        ] {
             let config = CamConfig {
                 strategy: s.to_string(),
                 ..CamConfig::default()
@@ -1404,10 +1415,7 @@ pub fn dataflow_new(dt: f64) -> u32 {
         let id = *next.borrow();
         *next.borrow_mut() = id + 1;
         DATAFLOW_GRAPHS.with(|g| g.borrow_mut().insert(id, dataflow::DataflowGraph::new()));
-        DATAFLOW_SCHEDULERS.with(|s| {
-            s.borrow_mut()
-                .insert(id, dataflow::Scheduler::new(dt))
-        });
+        DATAFLOW_SCHEDULERS.with(|s| s.borrow_mut().insert(id, dataflow::Scheduler::new(dt)));
         id
     })
 }
@@ -1590,8 +1598,8 @@ pub fn dataflow_codegen(graph_id: u32, dt: f64) -> Result<String, JsValue> {
             .get(&graph_id)
             .ok_or_else(|| JsValue::from_str("graph not found"))?;
         let snap = graph.snapshot();
-        let generated = dataflow::codegen::generate_rust(&snap, dt)
-            .map_err(|e| JsValue::from_str(&e))?;
+        let generated =
+            dataflow::codegen::generate_rust(&snap, dt).map_err(|e| JsValue::from_str(&e))?;
         let files_json: Vec<(String, String)> = generated.files;
         serde_json::to_string(&files_json).map_err(|e| JsValue::from_str(&e.to_string()))
     })
@@ -1633,9 +1641,7 @@ pub fn dataflow_set_simulation_mode(graph_id: u32, enabled: bool) -> Result<(), 
             .ok_or_else(|| JsValue::from_str("graph not found"))?;
         graph.set_simulation_mode(enabled);
         if enabled && !graph.has_sim_peripherals() {
-            graph.set_sim_peripherals(
-                dataflow::sim_peripherals::WasmSimPeripherals::new(),
-            );
+            graph.set_sim_peripherals(dataflow::sim_peripherals::WasmSimPeripherals::new());
         }
         Ok(())
     })

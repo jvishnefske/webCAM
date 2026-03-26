@@ -52,7 +52,12 @@ mod tests {
 
     #[test]
     fn non_float_collapse_to_double() {
-        for kind in &[PortKind::Bytes, PortKind::Text, PortKind::Series, PortKind::Any] {
+        for kind in &[
+            PortKind::Bytes,
+            PortKind::Text,
+            PortKind::Series,
+            PortKind::Any,
+        ] {
             assert_eq!(c_type(kind), "double");
             assert_eq!(c_default(kind), "0.0");
             assert_eq!(mlir_type(kind), "f64");

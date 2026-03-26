@@ -28,8 +28,8 @@ use embedded_can::nb::Can;
 use embedded_can::{ExtendedId, Frame as CanFrame, Id};
 use heapless::Vec;
 
-use crate::frame::{Frame, FRAME_HEADER_SIZE, MAX_FRAME_PAYLOAD};
 use super::{Transport, TransportError};
+use crate::frame::{Frame, FRAME_HEADER_SIZE, MAX_FRAME_PAYLOAD};
 
 /// Maximum serialised pubsub frame size: header + max payload.
 const MAX_WIRE_SIZE: usize = FRAME_HEADER_SIZE + MAX_FRAME_PAYLOAD;
@@ -66,8 +66,7 @@ impl<C: Can> CanTransport<C> {
         let src_bits = source_device as u32;
         // SAFETY: The value is at most 0x1FFF_FFFF (29 bits), since
         // prio(3) + topic(18) + src(8) = 29 bits and each field is masked.
-        ExtendedId::new(prio_bits | topic_bits | src_bits)
-            .expect("29-bit CAN ID must be valid")
+        ExtendedId::new(prio_bits | topic_bits | src_bits).expect("29-bit CAN ID must be valid")
     }
 
     /// Reset the reassembly state, discarding any partial message.
@@ -100,7 +99,11 @@ where
         let total_chunks = chunks.len();
 
         for (seq, chunk) in wire[..wire_len].chunks(CAN_DATA_PER_FRAME).enumerate() {
-            let more = if seq < total_chunks - 1 { 0x80u8 } else { 0x00u8 };
+            let more = if seq < total_chunks - 1 {
+                0x80u8
+            } else {
+                0x00u8
+            };
             let seq_byte = more | (seq as u8 & 0x7F);
 
             let mut can_data = [0u8; 8];
@@ -166,8 +169,8 @@ where
         }
 
         // All fragments received — deserialise the pubsub frame.
-        let result = Frame::from_bytes(&self.reassembly_buf)
-            .map_err(|_| TransportError::RecvFailed)?;
+        let result =
+            Frame::from_bytes(&self.reassembly_buf).map_err(|_| TransportError::RecvFailed)?;
 
         *buf = result;
         self.reset_reassembly();
@@ -203,7 +206,10 @@ mod tests {
             }
             let mut v = heapless::Vec::new();
             v.extend_from_slice(data).ok()?;
-            Some(Self { id: id.into(), data: v })
+            Some(Self {
+                id: id.into(),
+                data: v,
+            })
         }
 
         fn new_remote(_id: impl Into<Id>, _dlc: usize) -> Option<Self> {

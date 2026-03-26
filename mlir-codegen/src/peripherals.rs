@@ -81,9 +81,17 @@ pub fn generate_peripherals_h() -> String {
     let mut out = String::with_capacity(1024);
 
     writeln!(out, "// Auto-generated peripheral interface header.").unwrap();
-    writeln!(out, "// Maps the dataflow-rt Peripherals trait to C externs.").unwrap();
+    writeln!(
+        out,
+        "// Maps the dataflow-rt Peripherals trait to C externs."
+    )
+    .unwrap();
     writeln!(out, "//").unwrap();
-    writeln!(out, "// Each target's main.rs provides #[no_mangle] extern \"C\"").unwrap();
+    writeln!(
+        out,
+        "// Each target's main.rs provides #[no_mangle] extern \"C\""
+    )
+    .unwrap();
     writeln!(out, "// implementations that delegate to the HAL.").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "#ifndef PERIPHERALS_H").unwrap();
@@ -132,7 +140,11 @@ pub fn generate_ffi_rs(state_fields: &[(String, &str)]) -> String {
 
     writeln!(out, "impl Default for State {{").unwrap();
     writeln!(out, "    fn default() -> Self {{").unwrap();
-    writeln!(out, "        // SAFETY: State is all-zero-initializable (f64 fields)").unwrap();
+    writeln!(
+        out,
+        "        // SAFETY: State is all-zero-initializable (f64 fields)"
+    )
+    .unwrap();
     writeln!(out, "        unsafe {{ core::mem::zeroed() }}").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();

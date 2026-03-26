@@ -32,11 +32,7 @@ impl Point {
         Self { x, y, fixed: false }
     }
     pub fn fixed(x: f64, y: f64) -> Self {
-        Self {
-            x,
-            y,
-            fixed: true,
-        }
+        Self { x, y, fixed: true }
     }
 }
 
@@ -247,7 +243,8 @@ impl SketchActor {
     pub fn remove_point(&mut self, id: PointId) {
         self.points.remove(&id);
         // Remove all constraints referencing this point.
-        self.constraints.retain(|_, c| !constraint_refs_point(c, id));
+        self.constraints
+            .retain(|_, c| !constraint_refs_point(c, id));
     }
 
     pub fn add_constraint(&mut self, c: Constraint) -> ConstraintId {
@@ -406,9 +403,7 @@ impl SketchActor {
             }
             Constraint::Parallel(a0, a1, b0, b1) => self.apply_parallel(*a0, *a1, *b0, *b1),
             Constraint::Midpoint(mid, a, b) => self.apply_midpoint(*mid, *a, *b),
-            Constraint::EqualLength(a0, a1, b0, b1) => {
-                self.apply_equal_length(*a0, *a1, *b0, *b1)
-            }
+            Constraint::EqualLength(a0, a1, b0, b1) => self.apply_equal_length(*a0, *a1, *b0, *b1),
             Constraint::Symmetric(p, q, m0, m1) => self.apply_symmetric(*p, *q, *m0, *m1),
         }
     }
@@ -548,13 +543,7 @@ impl SketchActor {
         err
     }
 
-    fn apply_perpendicular(
-        &mut self,
-        a0: PointId,
-        a1: PointId,
-        b0: PointId,
-        b1: PointId,
-    ) -> f64 {
+    fn apply_perpendicular(&mut self, a0: PointId, a1: PointId, b0: PointId, b1: PointId) -> f64 {
         let pts = match (
             self.points.get(&a0).copied(),
             self.points.get(&a1).copied(),
@@ -650,13 +639,7 @@ impl SketchActor {
         err
     }
 
-    fn apply_equal_length(
-        &mut self,
-        a0: PointId,
-        a1: PointId,
-        b0: PointId,
-        b1: PointId,
-    ) -> f64 {
+    fn apply_equal_length(&mut self, a0: PointId, a1: PointId, b0: PointId, b1: PointId) -> f64 {
         let pts = match (
             self.points.get(&a0).copied(),
             self.points.get(&a1).copied(),
@@ -676,13 +659,7 @@ impl SketchActor {
         err_a.max(err_b)
     }
 
-    fn apply_symmetric(
-        &mut self,
-        p: PointId,
-        q: PointId,
-        m0: PointId,
-        m1: PointId,
-    ) -> f64 {
+    fn apply_symmetric(&mut self, p: PointId, q: PointId, m0: PointId, m1: PointId) -> f64 {
         let pts = match (
             self.points.get(&p).copied(),
             self.points.get(&q).copied(),
@@ -766,28 +743,26 @@ impl SketchActor {
                 Some(p) => ((p.x - x).powi(2) + (p.y - y).powi(2)).sqrt(),
                 None => 0.0,
             },
-            Constraint::Angle(a, b, target) => {
-                match (self.points.get(a), self.points.get(b)) {
-                    (Some(pa), Some(pb)) => {
-                        let dx = pb.x - pa.x;
-                        let dy = pb.y - pa.y;
-                        let len = (dx * dx + dy * dy).sqrt();
-                        if len < 1e-12 {
-                            return 0.0;
-                        }
-                        let current = dy.atan2(dx);
-                        let mut diff = target - current;
-                        while diff > std::f64::consts::PI {
-                            diff -= 2.0 * std::f64::consts::PI;
-                        }
-                        while diff < -std::f64::consts::PI {
-                            diff += 2.0 * std::f64::consts::PI;
-                        }
-                        diff.abs() * len
+            Constraint::Angle(a, b, target) => match (self.points.get(a), self.points.get(b)) {
+                (Some(pa), Some(pb)) => {
+                    let dx = pb.x - pa.x;
+                    let dy = pb.y - pa.y;
+                    let len = (dx * dx + dy * dy).sqrt();
+                    if len < 1e-12 {
+                        return 0.0;
                     }
-                    _ => 0.0,
+                    let current = dy.atan2(dx);
+                    let mut diff = target - current;
+                    while diff > std::f64::consts::PI {
+                        diff -= 2.0 * std::f64::consts::PI;
+                    }
+                    while diff < -std::f64::consts::PI {
+                        diff += 2.0 * std::f64::consts::PI;
+                    }
+                    diff.abs() * len
                 }
-            }
+                _ => 0.0,
+            },
             Constraint::Perpendicular(a0, a1, b0, b1) => {
                 match (
                     self.points.get(a0),
@@ -899,7 +874,7 @@ fn weights(a_fixed: bool, b_fixed: bool) -> (f64, f64) {
 /// How many scalar equations a constraint contributes.
 fn constraint_equation_count(c: &Constraint) -> u32 {
     match c {
-        Constraint::Coincident(..) => 2,  // x and y
+        Constraint::Coincident(..) => 2, // x and y
         Constraint::Distance(..) => 1,
         Constraint::Horizontal(..) => 1,
         Constraint::Vertical(..) => 1,
@@ -1242,10 +1217,10 @@ mod tests {
     fn test_rectangle_fully_constrained() {
         // A rectangle: 4 points, fixed origin, width=20, height=10
         let mut actor = SketchActor::new();
-        let p0 = actor.add_point_fixed(0.0, 0.0);  // bottom-left
-        let p1 = actor.add_point(20.0, 1.0);        // bottom-right
-        let p2 = actor.add_point(21.0, 11.0);       // top-right
-        let p3 = actor.add_point(1.0, 9.0);         // top-left
+        let p0 = actor.add_point_fixed(0.0, 0.0); // bottom-left
+        let p1 = actor.add_point(20.0, 1.0); // bottom-right
+        let p2 = actor.add_point(21.0, 11.0); // top-right
+        let p3 = actor.add_point(1.0, 9.0); // top-left
 
         // Bottom edge: horizontal, length 20
         actor.add_constraint(Constraint::Horizontal(p0, p1));

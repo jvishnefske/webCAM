@@ -136,10 +136,7 @@ impl<const MAX_SUBS: usize> Broker<MAX_SUBS> {
     /// address are accepted; all others are silently dropped.
     ///
     /// Returns the number of frames processed.
-    pub fn poll<T: Transport>(
-        &self,
-        transport: &mut T,
-    ) -> Result<usize, BrokerError> {
+    pub fn poll<T: Transport>(&self, transport: &mut T) -> Result<usize, BrokerError> {
         let mut processed = 0usize;
         let mut frame = Frame::new(
             NodeAddr::new(0, 0, 0),
@@ -371,7 +368,9 @@ mod tests {
         broker.unsubscribe(h1).unwrap();
         assert_eq!(broker.subscription_count(), 1);
 
-        let h3 = broker.subscribe(TopicId::from_name("x"), handler_a).unwrap();
+        let h3 = broker
+            .subscribe(TopicId::from_name("x"), handler_a)
+            .unwrap();
         assert_eq!(broker.subscription_count(), 2);
         // Reused slot has the same index as h1.
         assert_eq!(h3, h1);

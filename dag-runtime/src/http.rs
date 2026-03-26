@@ -43,10 +43,7 @@ pub fn parse_request_line(data: &[u8]) -> Option<(&str, &str)> {
     // Find the end of the first line (look for \r\n or \n).
     // Only parse the request line as UTF-8, not the entire body which may
     // contain binary data (e.g., CBOR).
-    let line_end = data
-        .iter()
-        .position(|&b| b == b'\n')
-        .unwrap_or(data.len());
+    let line_end = data.iter().position(|&b| b == b'\n').unwrap_or(data.len());
     let line_bytes = if line_end > 0 && data.get(line_end - 1) == Some(&b'\r') {
         &data[..line_end - 1]
     } else {

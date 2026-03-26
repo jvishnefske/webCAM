@@ -20,9 +20,7 @@ use embedded_hal::i2c::I2c;
 use i2c_hil_sim::RuntimeBus;
 
 use hil_firmware_support::ws_dispatch::I2cBusSet;
-use usb_composite_dispatchers::i2c_tiny_usb::{
-    Command, InterfaceState, Status, I2C_M_RD,
-};
+use usb_composite_dispatchers::i2c_tiny_usb::{Command, InterfaceState, Status, I2C_M_RD};
 
 /// Maximum buses exposed over USB.
 const MAX_BUSES: usize = 10;
@@ -128,7 +126,11 @@ impl Handler for UsbI2cHandler {
 
             debug!(
                 "USB OUT cmd={} bus={} wValue={} wIndex={} len={}",
-                cmd, bus, req.value, req.index, data.len(),
+                cmd,
+                bus,
+                req.value,
+                req.index,
+                data.len(),
             );
 
             match cmd {
@@ -273,7 +275,9 @@ impl I2cBusSet for WsBusAccess {
                 // the data immediately within the same call.
                 let name_ptr = name.as_ptr();
                 let name_len = name.len();
-                (addr, unsafe { core::slice::from_raw_parts(name_ptr, name_len) })
+                (addr, unsafe {
+                    core::slice::from_raw_parts(name_ptr, name_len)
+                })
             })
         })
     }
@@ -293,13 +297,7 @@ impl I2cBusSet for WsBusAccess {
         })
     }
 
-    fn add_device(
-        &mut self,
-        bus: u8,
-        addr: u8,
-        name: &[u8],
-        registers: &[u8],
-    ) -> Result<(), ()> {
+    fn add_device(&mut self, bus: u8, addr: u8, name: &[u8], registers: &[u8]) -> Result<(), ()> {
         self.shared.lock(|inner| {
             let mut state = inner.borrow_mut();
             let idx = bus as usize;

@@ -20,7 +20,7 @@
 
 use embedded_hal::i2c::I2c;
 
-use crate::frame::{Frame, MAX_FRAME_PAYLOAD, FRAME_HEADER_SIZE};
+use crate::frame::{Frame, FRAME_HEADER_SIZE, MAX_FRAME_PAYLOAD};
 use crate::transport::{Transport, TransportError};
 use heapless::Vec;
 
@@ -95,7 +95,11 @@ impl<I: I2c> PmbusTransport<I> {
     ///
     /// Sends `[command]` then reads `[byte_count, data...]`.
     /// Returns the number of data bytes read into `out`.
-    fn block_read(&mut self, command: u8, out: &mut [u8; SMBUS_BLOCK_MAX]) -> Result<usize, TransportError> {
+    fn block_read(
+        &mut self,
+        command: u8,
+        out: &mut [u8; SMBUS_BLOCK_MAX],
+    ) -> Result<usize, TransportError> {
         // Write the command byte, then read the response.
         // Response format: [byte_count, data_0, data_1, ...]
         let mut resp = [0u8; 1 + SMBUS_BLOCK_MAX];
@@ -132,7 +136,11 @@ impl<I: I2c> Transport for PmbusTransport<I> {
         while offset < total {
             let remaining = total - offset;
             let chunk = remaining.min(PMBUS_FRAGMENT_PAYLOAD);
-            let more = if offset + chunk < total { 0x80u8 } else { 0x00u8 };
+            let more = if offset + chunk < total {
+                0x80u8
+            } else {
+                0x00u8
+            };
 
             // Build block data: [frag_header, payload_chunk...]
             let mut block = [0u8; SMBUS_BLOCK_MAX];
@@ -212,8 +220,14 @@ mod tests {
     #[derive(Debug, Clone)]
     #[allow(dead_code)]
     enum I2cOp {
-        Write { addr: u8, data: heapless::Vec<u8, 64> },
-        WriteRead { addr: u8, command: u8 },
+        Write {
+            addr: u8,
+            data: heapless::Vec<u8, 64>,
+        },
+        WriteRead {
+            addr: u8,
+            command: u8,
+        },
     }
 
     /// Mock I2C bus backed by heapless queues.
@@ -286,7 +300,10 @@ mod tests {
             for &b in data {
                 let _ = v.push(b);
             }
-            let _ = self.ops.borrow_mut().push(I2cOp::Write { addr: address, data: v });
+            let _ = self.ops.borrow_mut().push(I2cOp::Write {
+                addr: address,
+                data: v,
+            });
             Ok(())
         }
 
@@ -301,7 +318,10 @@ mod tests {
             read: &mut [u8],
         ) -> Result<(), Self::Error> {
             let command = if write.is_empty() { 0 } else { write[0] };
-            let _ = self.ops.borrow_mut().push(I2cOp::WriteRead { addr: address, command });
+            let _ = self.ops.borrow_mut().push(I2cOp::WriteRead {
+                addr: address,
+                command,
+            });
 
             // Fill read buffer from canned response
             let mut responses = self.read_responses.borrow_mut();

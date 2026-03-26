@@ -13,9 +13,7 @@ pub fn lookup(path: &str) -> Option<(&'static [u8], &'static str)> {
         "/" | "/index.html" if !INDEX_HTML.is_empty() => {
             Some((INDEX_HTML, "text/html; charset=utf-8"))
         }
-        "/dag-editor.js" if !EDITOR_JS.is_empty() => {
-            Some((EDITOR_JS, "application/javascript"))
-        }
+        "/dag-editor.js" if !EDITOR_JS.is_empty() => Some((EDITOR_JS, "application/javascript")),
         _ => None,
     }
 }

@@ -77,11 +77,7 @@ impl<T: Transport, const MAX_SUBS: usize> Node<T, MAX_SUBS> {
     }
 
     /// Publish to all subscribers of a topic (broadcast).
-    pub fn publish(
-        &mut self,
-        topic: TopicId,
-        payload: &[u8],
-    ) -> Result<(), BrokerError> {
+    pub fn publish(&mut self, topic: TopicId, payload: &[u8]) -> Result<(), BrokerError> {
         self.broker.publish(&mut self.transport, topic, payload)
     }
 
@@ -363,8 +359,7 @@ mod tests {
     #[test]
     fn node_publish_exceeds_mtu() {
         let transport = MockTransport::with_mtu(8);
-        let mut node: Node<MockTransport, 4> =
-            Node::new(NodeAddr::new(1, 0, 0), transport);
+        let mut node: Node<MockTransport, 4> = Node::new(NodeAddr::new(1, 0, 0), transport);
         let payload = [0u8; 16]; // 16 > mtu of 8
         assert_eq!(
             node.publish(TopicId::from_name("x"), &payload),
@@ -383,8 +378,7 @@ mod tests {
         let topic = TopicId::from_name("sensor/temp");
         let payload = [10, 20, 30];
 
-        let mut node: Node<MockTransport, 8> =
-            Node::new(local, MockTransport::new());
+        let mut node: Node<MockTransport, 8> = Node::new(local, MockTransport::new());
 
         // Subscribe to the topic.
         let _h = node.subscribe(topic, test_handler).unwrap();
@@ -408,8 +402,7 @@ mod tests {
         let other = NodeAddr::new(3, 0, 0);
         let topic = TopicId::from_name("x");
 
-        let mut node: Node<MockTransport, 4> =
-            Node::new(local, MockTransport::new());
+        let mut node: Node<MockTransport, 4> = Node::new(local, MockTransport::new());
         node.subscribe(topic, test_handler).unwrap();
 
         // Frame addressed to a different node.
@@ -428,13 +421,11 @@ mod tests {
         let local = NodeAddr::new(1, 0, 0);
         let topic = TopicId::from_name("announce");
 
-        let mut node: Node<MockTransport, 4> =
-            Node::new(local, MockTransport::new());
+        let mut node: Node<MockTransport, 4> = Node::new(local, MockTransport::new());
         node.subscribe(topic, test_handler).unwrap();
 
         // Broadcast frame.
-        let incoming =
-            make_incoming_frame(NodeAddr::new(9, 0, 0), NodeAddr::BROADCAST, topic, &[]);
+        let incoming = make_incoming_frame(NodeAddr::new(9, 0, 0), NodeAddr::BROADCAST, topic, &[]);
         node.transport_mut().enqueue(incoming);
 
         let count = node.poll().unwrap();
@@ -450,8 +441,7 @@ mod tests {
         let subscribed = TopicId::from_name("alpha");
         let incoming_topic = TopicId::from_name("beta");
 
-        let mut node: Node<MockTransport, 4> =
-            Node::new(local, MockTransport::new());
+        let mut node: Node<MockTransport, 4> = Node::new(local, MockTransport::new());
         node.subscribe(subscribed, test_handler).unwrap();
 
         let incoming = make_incoming_frame(NodeAddr::new(2, 0, 0), local, incoming_topic, &[]);
@@ -471,8 +461,7 @@ mod tests {
         let local = NodeAddr::new(1, 0, 0);
         let topic = TopicId::from_name("multi");
 
-        let mut node: Node<MockTransport, 4> =
-            Node::new(local, MockTransport::new());
+        let mut node: Node<MockTransport, 4> = Node::new(local, MockTransport::new());
         node.subscribe(topic, test_handler).unwrap();
 
         for i in 0..3u8 {
@@ -492,20 +481,27 @@ mod tests {
         let local = NodeAddr::new(1, 0, 0);
         let topic = TopicId::from_name("unsub_test");
 
-        let mut node: Node<MockTransport, 4> =
-            Node::new(local, MockTransport::new());
+        let mut node: Node<MockTransport, 4> = Node::new(local, MockTransport::new());
         let h = node.subscribe(topic, test_handler).unwrap();
 
         // Deliver one frame.
-        node.transport_mut()
-            .enqueue(make_incoming_frame(NodeAddr::new(2, 0, 0), local, topic, &[1]));
+        node.transport_mut().enqueue(make_incoming_frame(
+            NodeAddr::new(2, 0, 0),
+            local,
+            topic,
+            &[1],
+        ));
         node.poll().unwrap();
         assert_eq!(HANDLER_CALL_COUNT.load(Ordering::SeqCst), 1);
 
         // Unsubscribe and deliver another.
         node.unsubscribe(h).unwrap();
-        node.transport_mut()
-            .enqueue(make_incoming_frame(NodeAddr::new(2, 0, 0), local, topic, &[2]));
+        node.transport_mut().enqueue(make_incoming_frame(
+            NodeAddr::new(2, 0, 0),
+            local,
+            topic,
+            &[2],
+        ));
         node.poll().unwrap();
         // Count should not have increased.
         assert_eq!(HANDLER_CALL_COUNT.load(Ordering::SeqCst), 1);

@@ -1,6 +1,6 @@
 //! Serde blocks: serialize/deserialize between typed values and bytes/text.
 
-use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
 
 /// Encode a Float input as JSON text.
 #[derive(Default)]

@@ -53,10 +53,7 @@ impl Default for PipelineConfig {
         Self {
             mlir_opt: "mlir-opt".to_string(),
             mlir_translate: "mlir-translate".to_string(),
-            opt_passes: vec![
-                "--canonicalize".to_string(),
-                "--cse".to_string(),
-            ],
+            opt_passes: vec!["--canonicalize".to_string(), "--cse".to_string()],
             work_dir: std::env::temp_dir().join("mlir-codegen"),
         }
     }
@@ -167,22 +164,31 @@ pub fn generate_mlir_logic_files(
     let mut files = Vec::new();
 
     // Always emit the raw .mlir for debugging
-    files.push(("logic/csrc/graph.mlir".to_string(), pipeline.mlir_text.clone()));
+    files.push((
+        "logic/csrc/graph.mlir".to_string(),
+        pipeline.mlir_text.clone(),
+    ));
 
     // Emit peripherals.h
-    files.push(("logic/csrc/peripherals.h".to_string(), pipeline.peripherals_h));
+    files.push((
+        "logic/csrc/peripherals.h".to_string(),
+        pipeline.peripherals_h,
+    ));
 
     // Emit logic.c — either from mlir-translate or a fallback stub
-    let c_source = pipeline.c_source.unwrap_or_else(|| {
-        generate_fallback_c(&pipeline.mlir_text)
-    });
+    let c_source = pipeline
+        .c_source
+        .unwrap_or_else(|| generate_fallback_c(&pipeline.mlir_text));
     files.push(("logic/csrc/logic.c".to_string(), c_source));
 
     // Emit build.rs for cc crate
     files.push(("logic/build.rs".to_string(), generate_logic_build_rs()));
 
     // Emit Cargo.toml with cc build-dependency
-    files.push(("logic/Cargo.toml".to_string(), generate_logic_cargo_toml_mlir()));
+    files.push((
+        "logic/Cargo.toml".to_string(),
+        generate_logic_cargo_toml_mlir(),
+    ));
 
     // Emit ffi.rs with #[repr(C)] State struct
     let state_fields = collect_state_fields(snap);

@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 // Re-export core types from module-traits.
 pub use module_traits::{
-    AnalysisMetadata, AnalysisModel, Codegen, Module, PortDef, PortKind, SimModel,
-    SimPeripherals, Tick, Value,
+    AnalysisMetadata, AnalysisModel, Codegen, Module, PortDef, PortKind, SimModel, SimPeripherals,
+    Tick, Value,
 };
 
 /// Opaque block identifier.

@@ -36,10 +36,7 @@ pub fn handle_request(
         ("POST", "/api/dag") => match http::extract_body(request_data) {
             Some(body) => match executor.load_cbor(body) {
                 Ok(()) => {
-                    let msg = alloc::format!(
-                        r#"{{"ok":true,"nodes":{}}}"#,
-                        executor.node_count()
-                    );
+                    let msg = alloc::format!(r#"{{"ok":true,"nodes":{}}}"#, executor.node_count());
                     http::http_response_ok(msg.as_bytes())
                 }
                 Err(e) => {

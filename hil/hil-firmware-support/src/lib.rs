@@ -112,11 +112,11 @@
 pub mod fw_update;
 #[cfg(feature = "tcp")]
 pub mod http_static;
+pub mod runtime_buses;
 pub mod ws_dispatch;
 pub mod ws_framing;
 #[cfg(feature = "tcp")]
 pub mod ws_server;
-pub mod runtime_buses;
 
 #[cfg(feature = "embassy")]
 use embassy_net::{

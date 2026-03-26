@@ -1,6 +1,6 @@
 //! Pub/Sub source and sink blocks for cross-graph or external messaging.
 
-use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -351,7 +351,12 @@ mod tests {
 
     #[test]
     fn sink_various_port_kinds() {
-        for kind in &[PortKind::Float, PortKind::Bytes, PortKind::Text, PortKind::Series] {
+        for kind in &[
+            PortKind::Float,
+            PortKind::Bytes,
+            PortKind::Text,
+            PortKind::Series,
+        ] {
             let block = PubSubSinkBlock::new("t".into(), kind.clone());
             let ports = block.input_ports();
             assert_eq!(ports[0].kind, *kind);
@@ -360,7 +365,10 @@ mod tests {
 
     #[test]
     fn sink_from_config() {
-        let cfg = PubSubConfig { topic: "t".into(), port_kind: PortKind::Float };
+        let cfg = PubSubConfig {
+            topic: "t".into(),
+            port_kind: PortKind::Float,
+        };
         let block = PubSubSinkBlock::from_config(cfg);
         assert_eq!(block.topic(), "t");
         assert_eq!(block.block_type(), "pubsub_sink");
@@ -377,7 +385,10 @@ mod tests {
 
     #[test]
     fn source_from_config() {
-        let cfg = PubSubConfig { topic: "s".into(), port_kind: PortKind::Text };
+        let cfg = PubSubConfig {
+            topic: "s".into(),
+            port_kind: PortKind::Text,
+        };
         let block = PubSubSourceBlock::from_config(cfg);
         assert_eq!(block.topic(), "s");
         assert_eq!(block.block_type(), "pubsub_source");
@@ -394,7 +405,12 @@ mod tests {
 
     #[test]
     fn source_various_port_kinds() {
-        for kind in &[PortKind::Float, PortKind::Bytes, PortKind::Text, PortKind::Series] {
+        for kind in &[
+            PortKind::Float,
+            PortKind::Bytes,
+            PortKind::Text,
+            PortKind::Series,
+        ] {
             let block = PubSubSourceBlock::new("t".into(), kind.clone());
             let ports = block.output_ports();
             assert_eq!(ports[0].kind, *kind);

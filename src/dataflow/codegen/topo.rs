@@ -15,7 +15,8 @@ pub fn topological_sort(
 ) -> Result<Vec<BlockId>, String> {
     // Build in-degree map and adjacency list.
     let mut in_degree: HashMap<BlockId, usize> = block_ids.iter().map(|&id| (id, 0)).collect();
-    let mut adj: HashMap<BlockId, Vec<BlockId>> = block_ids.iter().map(|&id| (id, Vec::new())).collect();
+    let mut adj: HashMap<BlockId, Vec<BlockId>> =
+        block_ids.iter().map(|&id| (id, Vec::new())).collect();
 
     for ch in channels {
         // Only count edges between blocks that are in the input set.

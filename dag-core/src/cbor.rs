@@ -208,8 +208,8 @@ pub fn decode_dag(bytes: &[u8]) -> Result<Dag, DecodeError> {
 
     let mut dag = Dag::new();
     for _ in 0..len {
-        let op = Op::decode(&mut d, &mut ())
-            .map_err(|e| DecodeError::Cbor(alloc::format!("{}", e)))?;
+        let op =
+            Op::decode(&mut d, &mut ()).map_err(|e| DecodeError::Cbor(alloc::format!("{}", e)))?;
         dag.add_op(op).map_err(DecodeError::Dag)?;
     }
     Ok(dag)

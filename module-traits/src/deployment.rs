@@ -337,14 +337,20 @@ pub enum GpioPull {
 pub fn validate_manifest(manifest: &DeploymentManifest) -> Result<(), Vec<String>> {
     let mut errors = Vec::new();
 
-    let node_ids: Vec<&str> = manifest.topology.nodes.iter().map(|n| n.id.as_str()).collect();
+    let node_ids: Vec<&str> = manifest
+        .topology
+        .nodes
+        .iter()
+        .map(|n| n.id.as_str())
+        .collect();
 
     // Every task must reference a valid node
     for task in &manifest.tasks {
         if !node_ids.contains(&task.node.as_str()) {
             errors.push(alloc::format!(
                 "task '{}' references unknown node '{}'",
-                task.name, task.node
+                task.name,
+                task.node
             ));
         }
     }
@@ -355,13 +361,15 @@ pub fn validate_manifest(manifest: &DeploymentManifest) -> Result<(), Vec<String
         if !task_names.contains(&ch.from_task.as_str()) {
             errors.push(alloc::format!(
                 "channel '{}' references unknown source task '{}'",
-                ch.name, ch.from_task
+                ch.name,
+                ch.from_task
             ));
         }
         if !task_names.contains(&ch.to_task.as_str()) {
             errors.push(alloc::format!(
                 "channel '{}' references unknown dest task '{}'",
-                ch.name, ch.to_task
+                ch.name,
+                ch.to_task
             ));
         }
     }
@@ -372,7 +380,8 @@ pub fn validate_manifest(manifest: &DeploymentManifest) -> Result<(), Vec<String
             if !manifest.topology.links.iter().any(|l| l.id == *link) {
                 errors.push(alloc::format!(
                     "channel '{}' references unknown link '{}'",
-                    ch.name, link
+                    ch.name,
+                    link
                 ));
             }
         }
@@ -383,13 +392,16 @@ pub fn validate_manifest(manifest: &DeploymentManifest) -> Result<(), Vec<String
         if !node_ids.contains(&pb.node.as_str()) {
             errors.push(alloc::format!(
                 "peripheral binding for block {} references unknown node '{}'",
-                pb.block_id, pb.node
+                pb.block_id,
+                pb.node
             ));
         }
     }
 
     // Every block should appear in exactly one task
-    let mut all_blocks: Vec<u32> = manifest.tasks.iter()
+    let mut all_blocks: Vec<u32> = manifest
+        .tasks
+        .iter()
         .flat_map(|t| t.blocks.iter().copied())
         .collect();
     all_blocks.sort();
@@ -407,18 +419,24 @@ pub fn validate_manifest(manifest: &DeploymentManifest) -> Result<(), Vec<String
         if !node_ids.contains(&link.from_node.as_str()) {
             errors.push(alloc::format!(
                 "link '{}' references unknown source node '{}'",
-                link.id, link.from_node
+                link.id,
+                link.from_node
             ));
         }
         if !node_ids.contains(&link.to_node.as_str()) {
             errors.push(alloc::format!(
                 "link '{}' references unknown dest node '{}'",
-                link.id, link.to_node
+                link.id,
+                link.to_node
             ));
         }
     }
 
-    if errors.is_empty() { Ok(()) } else { Err(errors) }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -447,16 +465,14 @@ mod tests {
                         rust_target: Some(s("riscv32imc-unknown-none-elf")),
                     },
                 ],
-                links: alloc::vec![
-                    PhysicalLink {
-                        id: s("can_bus_1"),
-                        from_node: s("flight_ctrl"),
-                        from_peripheral: s("FDCAN1"),
-                        to_node: s("sensor_hub"),
-                        to_peripheral: s("TWAI0"),
-                        transport: Transport::Can,
-                    },
-                ],
+                links: alloc::vec![PhysicalLink {
+                    id: s("can_bus_1"),
+                    from_node: s("flight_ctrl"),
+                    from_peripheral: s("FDCAN1"),
+                    to_node: s("sensor_hub"),
+                    to_peripheral: s("TWAI0"),
+                    transport: Transport::Can,
+                },],
             },
             tasks: alloc::vec![
                 TaskBinding {
@@ -498,28 +514,28 @@ mod tests {
                     },
                 },
             ],
-            peripheral_bindings: alloc::vec![
-                PeripheralBinding {
-                    block_id: 2,
-                    port_name: s("PWM_Out"),
-                    node: s("flight_ctrl"),
-                    peripheral: s("TIM1"),
-                    pins: alloc::vec![PinBinding {
-                        signal: s("CH1"),
-                        pin: s("PA8"),
-                        af: Some(1),
-                    }],
-                    dma: None,
-                    config: PeripheralConfig::Pwm {
-                        frequency_hz: 20_000,
-                        dead_time_ns: None,
-                    },
+            peripheral_bindings: alloc::vec![PeripheralBinding {
+                block_id: 2,
+                port_name: s("PWM_Out"),
+                node: s("flight_ctrl"),
+                peripheral: s("TIM1"),
+                pins: alloc::vec![PinBinding {
+                    signal: s("CH1"),
+                    pin: s("PA8"),
+                    af: Some(1),
+                }],
+                dma: None,
+                config: PeripheralConfig::Pwm {
+                    frequency_hz: 20_000,
+                    dead_time_ns: None,
                 },
-            ],
+            },],
         }
     }
 
-    fn s(v: &str) -> String { String::from(v) }
+    fn s(v: &str) -> String {
+        String::from(v)
+    }
 
     #[test]
     fn validate_valid_manifest() {
@@ -587,7 +603,9 @@ mod tests {
         let triggers = alloc::vec![
             TaskTrigger::Periodic { hz: 1000.0 },
             TaskTrigger::Interrupt { irq: s("USART1") },
-            TaskTrigger::Event { channel: s("Motor_Cmd") },
+            TaskTrigger::Event {
+                channel: s("Motor_Cmd")
+            },
             TaskTrigger::Init,
         ];
         for t in triggers {
@@ -599,15 +617,41 @@ mod tests {
     #[test]
     fn serde_peripheral_config_variants() {
         let configs = alloc::vec![
-            PeripheralConfig::Adc { channel: 0, resolution_bits: 12, sample_time: 3 },
-            PeripheralConfig::Pwm { frequency_hz: 20_000, dead_time_ns: Some(100) },
-            PeripheralConfig::Uart { baud: 115200, word_bits: 8, parity: Parity::None, stop_bits: 1 },
-            PeripheralConfig::Spi { frequency_hz: 1_000_000, mode: 0, bit_order: BitOrder::MsbFirst },
-            PeripheralConfig::I2c { speed: I2cSpeed::Fast, address: 0x3C },
+            PeripheralConfig::Adc {
+                channel: 0,
+                resolution_bits: 12,
+                sample_time: 3
+            },
+            PeripheralConfig::Pwm {
+                frequency_hz: 20_000,
+                dead_time_ns: Some(100)
+            },
+            PeripheralConfig::Uart {
+                baud: 115200,
+                word_bits: 8,
+                parity: Parity::None,
+                stop_bits: 1
+            },
+            PeripheralConfig::Spi {
+                frequency_hz: 1_000_000,
+                mode: 0,
+                bit_order: BitOrder::MsbFirst
+            },
+            PeripheralConfig::I2c {
+                speed: I2cSpeed::Fast,
+                address: 0x3C
+            },
             PeripheralConfig::Gpio { pull: GpioPull::Up },
-            PeripheralConfig::Encoder { counts_per_rev: 4096 },
-            PeripheralConfig::Can { bitrate: 500_000, fd_bitrate: Some(2_000_000) },
-            PeripheralConfig::Timer { frequency_hz: 10_000 },
+            PeripheralConfig::Encoder {
+                counts_per_rev: 4096
+            },
+            PeripheralConfig::Can {
+                bitrate: 500_000,
+                fd_bitrate: Some(2_000_000)
+            },
+            PeripheralConfig::Timer {
+                frequency_hz: 10_000
+            },
             PeripheralConfig::None,
         ];
         for c in configs {

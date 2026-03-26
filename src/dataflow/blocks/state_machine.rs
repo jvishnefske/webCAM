@@ -16,7 +16,7 @@
 //! Input ports: one per guard (Float, >0.5 = true)
 //! Output ports: `state` (Float, enum index), plus `active_<name>` per state (0.0 or 1.0)
 
-use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,12 +118,14 @@ impl Tick for StateMachineBlock {
                 continue;
             }
             let guard_active = match t.guard_port {
-                Some(port) => inputs
-                    .get(port)
-                    .and_then(|v| v.as_ref())
-                    .and_then(|v| v.as_float())
-                    .unwrap_or(0.0)
-                    > 0.5,
+                Some(port) => {
+                    inputs
+                        .get(port)
+                        .and_then(|v| v.as_ref())
+                        .and_then(|v| v.as_float())
+                        .unwrap_or(0.0)
+                        > 0.5
+                }
                 None => true, // unconditional
             };
             if guard_active {

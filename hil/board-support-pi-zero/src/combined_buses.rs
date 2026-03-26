@@ -7,8 +7,8 @@
 //! indices `linux_count..total` route to simulated buses.
 
 use embedded_hal::i2c::I2c;
-use i2c_hil_sim::{Address, RuntimeBus};
 use hil_firmware_support::ws_dispatch::I2cBusSet;
+use i2c_hil_sim::{Address, RuntimeBus};
 
 use crate::linux_i2c::LinuxI2cBus;
 

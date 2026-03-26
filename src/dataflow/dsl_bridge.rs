@@ -182,28 +182,49 @@ fn inject_defaults(block_type: &str, map: &mut serde_json::Map<String, serde_jso
 fn positional_to_json(block_type: &str, args: &[parser::ast::Value]) -> String {
     match block_type {
         "constant" => {
-            let v = args.first().map(dsl_value_to_json).unwrap_or(serde_json::json!(0.0));
+            let v = args
+                .first()
+                .map(dsl_value_to_json)
+                .unwrap_or(serde_json::json!(0.0));
             serde_json::json!({ "value": v }).to_string()
         }
         "gain" => {
-            let v = args.first().map(dsl_value_to_json).unwrap_or(serde_json::json!(1.0));
+            let v = args
+                .first()
+                .map(dsl_value_to_json)
+                .unwrap_or(serde_json::json!(1.0));
             serde_json::json!({ "op": "Gain", "param1": v, "param2": 0.0 }).to_string()
         }
         "clamp" => {
-            let min = args.first().map(dsl_value_to_json).unwrap_or(serde_json::json!(0.0));
-            let max = args.get(1).map(dsl_value_to_json).unwrap_or(serde_json::json!(1.0));
+            let min = args
+                .first()
+                .map(dsl_value_to_json)
+                .unwrap_or(serde_json::json!(0.0));
+            let max = args
+                .get(1)
+                .map(dsl_value_to_json)
+                .unwrap_or(serde_json::json!(1.0));
             serde_json::json!({ "op": "Clamp", "param1": min, "param2": max }).to_string()
         }
         "plot" => {
-            let ms = args.first().map(dsl_value_to_json).unwrap_or(serde_json::json!(1000));
+            let ms = args
+                .first()
+                .map(dsl_value_to_json)
+                .unwrap_or(serde_json::json!(1000));
             serde_json::json!({ "max_samples": ms }).to_string()
         }
         "adc_source" => {
-            let ch = args.first().map(dsl_value_to_json).unwrap_or(serde_json::json!(0));
+            let ch = args
+                .first()
+                .map(dsl_value_to_json)
+                .unwrap_or(serde_json::json!(0));
             serde_json::json!({ "channel": ch, "resolution_bits": 12 }).to_string()
         }
         "pwm_sink" => {
-            let ch = args.first().map(dsl_value_to_json).unwrap_or(serde_json::json!(0));
+            let ch = args
+                .first()
+                .map(dsl_value_to_json)
+                .unwrap_or(serde_json::json!(0));
             serde_json::json!({ "channel": ch, "frequency_hz": 1000 }).to_string()
         }
         _ => {
@@ -245,8 +266,7 @@ mod tests {
     #[test]
     fn bridge_simple_graph() {
         let graph =
-            parser::parse("block c: constant(42.0)\nblock g: gain(2.5)\nc.out -> g.in\n")
-                .unwrap();
+            parser::parse("block c: constant(42.0)\nblock g: gain(2.5)\nc.out -> g.in\n").unwrap();
         let snapshot = ast_to_snapshot(&graph).unwrap();
         assert_eq!(snapshot.blocks.len(), 2);
         assert_eq!(snapshot.channels.len(), 1);
@@ -257,8 +277,7 @@ mod tests {
     #[test]
     fn bridge_resolves_port_names() {
         let graph =
-            parser::parse("block c: constant(1.0)\nblock g: gain(2.0)\nc.out -> g.in\n")
-                .unwrap();
+            parser::parse("block c: constant(1.0)\nblock g: gain(2.0)\nc.out -> g.in\n").unwrap();
         let snapshot = ast_to_snapshot(&graph).unwrap();
         let ch = &snapshot.channels[0];
         assert_eq!(ch.from_port, 0);
@@ -341,22 +360,28 @@ mod tests {
     #[test]
     fn test_positional_to_json_constant() {
         let args = vec![parser::ast::Value::Float(99.0)];
-        let json: serde_json::Value = serde_json::from_str(&positional_to_json("constant", &args)).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("constant", &args)).unwrap();
         assert_eq!(json["value"], 99.0);
     }
 
     #[test]
     fn test_positional_to_json_gain() {
         let args = vec![parser::ast::Value::Float(2.5)];
-        let json: serde_json::Value = serde_json::from_str(&positional_to_json("gain", &args)).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("gain", &args)).unwrap();
         assert_eq!(json["param1"], 2.5);
         assert_eq!(json["op"], "Gain");
     }
 
     #[test]
     fn test_positional_to_json_clamp() {
-        let args = vec![parser::ast::Value::Float(0.0), parser::ast::Value::Float(10.0)];
-        let json: serde_json::Value = serde_json::from_str(&positional_to_json("clamp", &args)).unwrap();
+        let args = vec![
+            parser::ast::Value::Float(0.0),
+            parser::ast::Value::Float(10.0),
+        ];
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("clamp", &args)).unwrap();
         assert_eq!(json["param1"], 0.0);
         assert_eq!(json["param2"], 10.0);
     }
@@ -364,7 +389,8 @@ mod tests {
     #[test]
     fn test_positional_to_json_generic_fallback() {
         let args = vec![parser::ast::Value::Int(7)];
-        let json: serde_json::Value = serde_json::from_str(&positional_to_json("unknown_type", &args)).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("unknown_type", &args)).unwrap();
         assert_eq!(json["arg0"], 7);
     }
 

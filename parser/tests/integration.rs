@@ -27,7 +27,10 @@ amp.out -> display.input
     let output = parser::serialize(&graph);
     let graph2 = parser::parse(&output).unwrap();
     let output2 = parser::serialize(&graph2);
-    assert_eq!(output, output2, "serialized form should be stable after one round-trip");
+    assert_eq!(
+        output, output2,
+        "serialized form should be stable after one round-trip"
+    );
 }
 
 #[test]
@@ -62,10 +65,19 @@ block d: state_machine {
 }
 ";
     let graph = parser::parse(input).unwrap();
-    assert!(matches!(graph.blocks[0].config, parser::ast::Config::Positional(_)));
-    assert!(matches!(graph.blocks[1].config, parser::ast::Config::Named(_)));
+    assert!(matches!(
+        graph.blocks[0].config,
+        parser::ast::Config::Positional(_)
+    ));
+    assert!(matches!(
+        graph.blocks[1].config,
+        parser::ast::Config::Named(_)
+    ));
     assert!(matches!(graph.blocks[2].config, parser::ast::Config::Empty));
-    assert!(matches!(graph.blocks[3].config, parser::ast::Config::Structured(_)));
+    assert!(matches!(
+        graph.blocks[3].config,
+        parser::ast::Config::Structured(_)
+    ));
 }
 
 #[test]

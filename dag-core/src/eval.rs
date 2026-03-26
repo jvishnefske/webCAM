@@ -77,7 +77,11 @@ impl Dag {
                 Op::Neg(a) => -values[*a as usize],
                 Op::Relu(a) => {
                     let v = values[*a as usize];
-                    if v > 0.0 { v } else { 0.0 }
+                    if v > 0.0 {
+                        v
+                    } else {
+                        0.0
+                    }
                 }
                 Op::Subscribe(topic) => pubsub.read(topic),
                 Op::Publish(topic, src) => {
@@ -95,8 +99,8 @@ impl Dag {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::collections::BTreeMap;
     use crate::op::Dag;
+    use alloc::collections::BTreeMap;
 
     struct MockChannels {
         values: BTreeMap<String, f64>,

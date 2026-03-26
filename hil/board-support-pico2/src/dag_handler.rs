@@ -67,12 +67,7 @@ impl DagApiHandler {
 }
 
 impl ApiHandler for DagApiHandler {
-    fn handle(
-        &mut self,
-        method: &str,
-        path: &str,
-        body: &[u8],
-    ) -> Option<heapless::Vec<u8, 512>> {
+    fn handle(&mut self, method: &str, path: &str, body: &[u8]) -> Option<heapless::Vec<u8, 512>> {
         match (method, path) {
             ("POST", "/api/dag") => {
                 let mut resp = heapless::Vec::new();
@@ -115,7 +110,9 @@ impl ApiHandler for DagApiHandler {
                 let mut json_buf = [0u8; 128];
                 let json_len = write_json_status(&mut json_buf, loaded, nodes, ticks);
 
-                let _ = resp.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ");
+                let _ = resp.extend_from_slice(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ",
+                );
                 write_usize_to_vec(&mut resp, json_len);
                 let _ = resp.extend_from_slice(b"\r\nConnection: close\r\n\r\n");
                 let _ = resp.extend_from_slice(&json_buf[..json_len]);
@@ -129,11 +126,7 @@ impl ApiHandler for DagApiHandler {
                         let pubsub = MapPubSub {
                             map: &self.pubsub_topics,
                         };
-                        let result = dag.evaluate(
-                            &NullChannels,
-                            &pubsub,
-                            &mut self.values[..len],
-                        );
+                        let result = dag.evaluate(&NullChannels, &pubsub, &mut self.values[..len]);
                         // Store published topics
                         for (topic, value) in &result.publishes {
                             if let Ok(key) = heapless::String::<32>::try_from(topic.as_str()) {
@@ -152,7 +145,9 @@ impl ApiHandler for DagApiHandler {
                         self.tick_count += 1;
                     }
                     let body_str = b"{\"ok\":true}";
-                    let _ = resp.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ");
+                    let _ = resp.extend_from_slice(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ",
+                    );
                     write_usize_to_vec(&mut resp, body_str.len());
                     let _ = resp.extend_from_slice(b"\r\nConnection: close\r\n\r\n");
                     let _ = resp.extend_from_slice(body_str);
@@ -173,7 +168,9 @@ impl ApiHandler for DagApiHandler {
                 } else {
                     b"{\"debug\":false}" as &[u8]
                 };
-                let _ = resp.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ");
+                let _ = resp.extend_from_slice(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ",
+                );
                 write_usize_to_vec(&mut resp, body_str.len());
                 let _ = resp.extend_from_slice(b"\r\nConnection: close\r\n\r\n");
                 let _ = resp.extend_from_slice(body_str);
@@ -184,7 +181,9 @@ impl ApiHandler for DagApiHandler {
                 let mut json_buf = [0u8; 400];
                 let json_len = write_pubsub_json(&mut json_buf, &self.pubsub_topics);
 
-                let _ = resp.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ");
+                let _ = resp.extend_from_slice(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ",
+                );
                 write_usize_to_vec(&mut resp, json_len);
                 let _ = resp.extend_from_slice(b"\r\nConnection: close\r\n\r\n");
                 let _ = resp.extend_from_slice(&json_buf[..json_len]);
@@ -193,13 +192,12 @@ impl ApiHandler for DagApiHandler {
             ("GET", "/api/channels") => {
                 let mut resp = heapless::Vec::new();
                 let mut json_buf = [0u8; 256];
-                let json_len = write_channels_json(
-                    &mut json_buf,
-                    &self.known_inputs,
-                    &self.known_outputs,
-                );
+                let json_len =
+                    write_channels_json(&mut json_buf, &self.known_inputs, &self.known_outputs);
 
-                let _ = resp.extend_from_slice(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ");
+                let _ = resp.extend_from_slice(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: ",
+                );
                 write_usize_to_vec(&mut resp, json_len);
                 let _ = resp.extend_from_slice(b"\r\nConnection: close\r\n\r\n");
                 let _ = resp.extend_from_slice(&json_buf[..json_len]);
@@ -351,10 +349,7 @@ fn write_usize_to_heapless_string(s: &mut heapless::String<32>, mut n: usize) {
 }
 
 /// Write pubsub topics as JSON: `{"key":value,...}`
-fn write_pubsub_json(
-    buf: &mut [u8],
-    topics: &FnvIndexMap<heapless::String<32>, f64, 64>,
-) -> usize {
+fn write_pubsub_json(buf: &mut [u8], topics: &FnvIndexMap<heapless::String<32>, f64, 64>) -> usize {
     let mut pos = 0;
     buf[pos] = b'{';
     pos += 1;
@@ -404,10 +399,7 @@ fn write_channels_json(
 }
 
 /// Write a heapless Vec of strings as a JSON array: `["a","b","c"]`
-fn write_string_array(
-    buf: &mut [u8],
-    items: &heapless::Vec<heapless::String<32>, 16>,
-) -> usize {
+fn write_string_array(buf: &mut [u8], items: &heapless::Vec<heapless::String<32>, 16>) -> usize {
     let mut pos = 0;
     buf[pos] = b'[';
     pos += 1;

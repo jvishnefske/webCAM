@@ -381,13 +381,21 @@ mod tests {
 
     #[test]
     fn create_block_tmc2209_stepper() {
-        let block = create_block("tmc2209_stepper", r#"{"uart_port":0,"uart_addr":0,"steps_per_rev":200,"microsteps":16}"#).unwrap();
+        let block = create_block(
+            "tmc2209_stepper",
+            r#"{"uart_port":0,"uart_addr":0,"steps_per_rev":200,"microsteps":16}"#,
+        )
+        .unwrap();
         assert_eq!(block.block_type(), "tmc2209_stepper");
     }
 
     #[test]
     fn create_block_tmc2209_stallguard() {
-        let block = create_block("tmc2209_stallguard", r#"{"uart_port":0,"uart_addr":0,"threshold":50}"#).unwrap();
+        let block = create_block(
+            "tmc2209_stallguard",
+            r#"{"uart_port":0,"uart_addr":0,"threshold":50}"#,
+        )
+        .unwrap();
         assert_eq!(block.block_type(), "tmc2209_stallguard");
     }
 

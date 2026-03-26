@@ -44,8 +44,7 @@ use embassy_rp::peripherals::USB;
 use embassy_rp::usb::Driver;
 use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
 use hil_firmware_support::{
-    add_cdc_ncm, allocate_vendor_interface, create_net_stack, create_usb_builder,
-    usb_device_config,
+    add_cdc_ncm, allocate_vendor_interface, create_net_stack, create_usb_builder, usb_device_config,
 };
 use shared_buses::{SharedBusMutex, SharedState, UsbI2cHandler};
 use static_cell::StaticCell;
