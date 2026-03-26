@@ -62,15 +62,14 @@ pub fn init() -> (UsbDriver, Output<'static>) {
 
     static EP_OUT_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
     let ep_out_buffer = EP_OUT_BUFFER.init([0; 256]);
-    let driver =
-        embassy_stm32::usb::Driver::new_fs(
-            p.USB_OTG_FS,
-            Irqs,
-            p.PA12,
-            p.PA11,
-            ep_out_buffer,
-            embassy_stm32::usb::Config::default(),
-        );
+    let driver = embassy_stm32::usb::Driver::new_fs(
+        p.USB_OTG_FS,
+        Irqs,
+        p.PA12,
+        p.PA11,
+        ep_out_buffer,
+        embassy_stm32::usb::Config::default(),
+    );
     let led = Output::new(p.PC13, Level::Low, Speed::Low);
 
     (driver, led)
@@ -110,15 +109,14 @@ pub fn init() -> (UsbDriver, Output<'static>) {
 
     static EP_OUT_BUFFER: StaticCell<[u8; 256]> = StaticCell::new();
     let ep_out_buffer = EP_OUT_BUFFER.init([0; 256]);
-    let driver =
-        embassy_stm32::usb::Driver::new_fs(
-            p.USB_OTG_FS,
-            Irqs,
-            p.PA12,
-            p.PA11,
-            ep_out_buffer,
-            embassy_stm32::usb::Config::default(),
-        );
+    let driver = embassy_stm32::usb::Driver::new_fs(
+        p.USB_OTG_FS,
+        Irqs,
+        p.PA12,
+        p.PA11,
+        ep_out_buffer,
+        embassy_stm32::usb::Config::default(),
+    );
     let led = Output::new(p.PC13, Level::Low, Speed::Low);
 
     (driver, led)

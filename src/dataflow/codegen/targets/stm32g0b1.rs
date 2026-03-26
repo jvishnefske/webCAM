@@ -99,21 +99,9 @@ fn generate_main_rs(dt: f64) -> String {
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "impl Peripherals for HwPeripherals {{").unwrap();
-    writeln!(
-        out,
-        "    fn adc_read(&mut self, _ch: u8) -> f32 {{ 0.0 }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    fn pwm_write(&mut self, _ch: u8, _duty: f32) {{}}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    fn gpio_read(&self, _pin: u8) -> bool {{ false }}"
-    )
-    .unwrap();
+    writeln!(out, "    fn adc_read(&mut self, _ch: u8) -> f32 {{ 0.0 }}").unwrap();
+    writeln!(out, "    fn pwm_write(&mut self, _ch: u8, _duty: f32) {{}}").unwrap();
+    writeln!(out, "    fn gpio_read(&self, _pin: u8) -> bool {{ false }}").unwrap();
     writeln!(
         out,
         "    fn gpio_write(&mut self, _pin: u8, _high: bool) {{}}"
@@ -130,16 +118,8 @@ fn generate_main_rs(dt: f64) -> String {
     )
     .unwrap();
     writeln!(out).unwrap();
-    writeln!(
-        out,
-        "    fn encoder_read(&mut self, _ch: u8) -> i64 {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        // TODO: Read TIM1 counter in encoder mode"
-    )
-    .unwrap();
+    writeln!(out, "    fn encoder_read(&mut self, _ch: u8) -> i64 {{").unwrap();
+    writeln!(out, "        // TODO: Read TIM1 counter in encoder mode").unwrap();
     writeln!(out, "        0").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
@@ -148,11 +128,7 @@ fn generate_main_rs(dt: f64) -> String {
         "    fn display_write(&mut self, _bus: u8, _addr: u8, _line1: &str, _line2: &str) {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        // TODO: Write to SSD1306 via I2C1"
-    )
-    .unwrap();
+    writeln!(out, "        // TODO: Write to SSD1306 via I2C1").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
     writeln!(
@@ -160,23 +136,11 @@ fn generate_main_rs(dt: f64) -> String {
         "    fn stepper_move(&mut self, _port: u8, _target: i64) {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        // TODO: Generate step pulses toward target"
-    )
-    .unwrap();
+    writeln!(out, "        // TODO: Generate step pulses toward target").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
-    writeln!(
-        out,
-        "    fn stepper_position(&self, _port: u8) -> i64 {{"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "        // TODO: Return current step count"
-    )
-    .unwrap();
+    writeln!(out, "    fn stepper_position(&self, _port: u8) -> i64 {{").unwrap();
+    writeln!(out, "        // TODO: Return current step count").unwrap();
     writeln!(out, "        0").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
@@ -185,11 +149,7 @@ fn generate_main_rs(dt: f64) -> String {
         "    fn stepper_enable(&mut self, _port: u8, _enabled: bool) {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        // TODO: Set enable pin (active low)"
-    )
-    .unwrap();
+    writeln!(out, "        // TODO: Set enable pin (active low)").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out).unwrap();
     writeln!(
@@ -197,22 +157,14 @@ fn generate_main_rs(dt: f64) -> String {
         "    fn stallguard_read(&mut self, _port: u8, _addr: u8) -> u16 {{"
     )
     .unwrap();
-    writeln!(
-        out,
-        "        // TODO: Read StallGuard via TMC2209 UART"
-    )
-    .unwrap();
+    writeln!(out, "        // TODO: Read StallGuard via TMC2209 UART").unwrap();
     writeln!(out, "        0").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "#[embassy_executor::main]").unwrap();
     writeln!(out, "async fn main(_spawner: Spawner) {{").unwrap();
-    writeln!(
-        out,
-        "    let _p = embassy_stm32::init(Default::default());"
-    )
-    .unwrap();
+    writeln!(out, "    let _p = embassy_stm32::init(Default::default());").unwrap();
     writeln!(out, "    let mut hw = HwPeripherals {{ _marker: () }};").unwrap();
     writeln!(out, "    let mut state = logic::State::default();").unwrap();
     writeln!(
@@ -228,7 +180,11 @@ fn generate_main_rs(dt: f64) -> String {
 
     // Append C-FFI hw_* stubs for MLIR backend
     writeln!(out).unwrap();
-    writeln!(out, "static mut HW: HwPeripherals = HwPeripherals {{ _marker: () }};").unwrap();
+    writeln!(
+        out,
+        "static mut HW: HwPeripherals = HwPeripherals {{ _marker: () }};"
+    )
+    .unwrap();
     out.push_str(&super::generate_hw_ffi_stubs("HW"));
 
     out

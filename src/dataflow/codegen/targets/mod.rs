@@ -46,52 +46,92 @@ pub fn generator_for(family: TargetFamily) -> Box<dyn TargetGenerator> {
 pub fn generate_hw_ffi_stubs(hw_var: &str) -> String {
     let mut out = String::new();
     writeln!(out).unwrap();
-    writeln!(out, "// ---------------------------------------------------------------------------").unwrap();
+    writeln!(
+        out,
+        "// ---------------------------------------------------------------------------"
+    )
+    .unwrap();
     writeln!(out, "// C-FFI peripheral stubs for MLIR EmitC backend").unwrap();
-    writeln!(out, "// ---------------------------------------------------------------------------").unwrap();
+    writeln!(
+        out,
+        "// ---------------------------------------------------------------------------"
+    )
+    .unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[no_mangle]").unwrap();
-    writeln!(out, "pub unsafe extern \"C\" fn hw_adc_read(channel: u8) -> f32 {{").unwrap();
+    writeln!(
+        out,
+        "pub unsafe extern \"C\" fn hw_adc_read(channel: u8) -> f32 {{"
+    )
+    .unwrap();
     writeln!(out, "    // SAFETY: single-threaded embedded context").unwrap();
     writeln!(out, "    unsafe {{ {hw_var}.adc_read(channel) }}").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[no_mangle]").unwrap();
-    writeln!(out, "pub unsafe extern \"C\" fn hw_pwm_write(channel: u8, duty: f32) {{").unwrap();
+    writeln!(
+        out,
+        "pub unsafe extern \"C\" fn hw_pwm_write(channel: u8, duty: f32) {{"
+    )
+    .unwrap();
     writeln!(out, "    unsafe {{ {hw_var}.pwm_write(channel, duty) }}").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[no_mangle]").unwrap();
-    writeln!(out, "pub unsafe extern \"C\" fn hw_gpio_read(pin: u8) -> bool {{").unwrap();
+    writeln!(
+        out,
+        "pub unsafe extern \"C\" fn hw_gpio_read(pin: u8) -> bool {{"
+    )
+    .unwrap();
     writeln!(out, "    unsafe {{ {hw_var}.gpio_read(pin) }}").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[no_mangle]").unwrap();
-    writeln!(out, "pub unsafe extern \"C\" fn hw_gpio_write(pin: u8, high: bool) {{").unwrap();
+    writeln!(
+        out,
+        "pub unsafe extern \"C\" fn hw_gpio_write(pin: u8, high: bool) {{"
+    )
+    .unwrap();
     writeln!(out, "    unsafe {{ {hw_var}.gpio_write(pin, high) }}").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[no_mangle]").unwrap();
-    writeln!(out, "pub unsafe extern \"C\" fn hw_uart_write(port: u8, data: *const u8, len: usize) {{").unwrap();
-    writeln!(out, "    let slice = unsafe {{ core::slice::from_raw_parts(data, len) }};").unwrap();
+    writeln!(
+        out,
+        "pub unsafe extern \"C\" fn hw_uart_write(port: u8, data: *const u8, len: usize) {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    let slice = unsafe {{ core::slice::from_raw_parts(data, len) }};"
+    )
+    .unwrap();
     writeln!(out, "    unsafe {{ {hw_var}.uart_write(port, slice) }}").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[no_mangle]").unwrap();
     writeln!(out, "pub unsafe extern \"C\" fn hw_uart_read(port: u8, buf: *mut u8, buf_len: usize) -> usize {{").unwrap();
-    writeln!(out, "    let slice = unsafe {{ core::slice::from_raw_parts_mut(buf, buf_len) }};").unwrap();
+    writeln!(
+        out,
+        "    let slice = unsafe {{ core::slice::from_raw_parts_mut(buf, buf_len) }};"
+    )
+    .unwrap();
     writeln!(out, "    unsafe {{ {hw_var}.uart_read(port, slice) }}").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[no_mangle]").unwrap();
-    writeln!(out, "pub unsafe extern \"C\" fn hw_encoder_read(channel: u8) -> i64 {{").unwrap();
+    writeln!(
+        out,
+        "pub unsafe extern \"C\" fn hw_encoder_read(channel: u8) -> i64 {{"
+    )
+    .unwrap();
     writeln!(out, "    unsafe {{ {hw_var}.encoder_read(channel) }}").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
@@ -100,30 +140,54 @@ pub fn generate_hw_ffi_stubs(hw_var: &str) -> String {
     writeln!(out, "pub unsafe extern \"C\" fn hw_display_write(bus: u8, addr: u8, l1: *const core::ffi::c_char, l2: *const core::ffi::c_char) {{").unwrap();
     writeln!(out, "    let s1 = if l1.is_null() {{ \"\" }} else {{ unsafe {{ core::ffi::CStr::from_ptr(l1) }}.to_str().unwrap_or(\"\") }};").unwrap();
     writeln!(out, "    let s2 = if l2.is_null() {{ \"\" }} else {{ unsafe {{ core::ffi::CStr::from_ptr(l2) }}.to_str().unwrap_or(\"\") }};").unwrap();
-    writeln!(out, "    unsafe {{ {hw_var}.display_write(bus, addr, s1, s2) }}").unwrap();
+    writeln!(
+        out,
+        "    unsafe {{ {hw_var}.display_write(bus, addr, s1, s2) }}"
+    )
+    .unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[no_mangle]").unwrap();
-    writeln!(out, "pub unsafe extern \"C\" fn hw_stepper_move(port: u8, target: i64) {{").unwrap();
+    writeln!(
+        out,
+        "pub unsafe extern \"C\" fn hw_stepper_move(port: u8, target: i64) {{"
+    )
+    .unwrap();
     writeln!(out, "    unsafe {{ {hw_var}.stepper_move(port, target) }}").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[no_mangle]").unwrap();
-    writeln!(out, "pub unsafe extern \"C\" fn hw_stepper_position(port: u8) -> i64 {{").unwrap();
+    writeln!(
+        out,
+        "pub unsafe extern \"C\" fn hw_stepper_position(port: u8) -> i64 {{"
+    )
+    .unwrap();
     writeln!(out, "    unsafe {{ {hw_var}.stepper_position(port) }}").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[no_mangle]").unwrap();
-    writeln!(out, "pub unsafe extern \"C\" fn hw_stepper_enable(port: u8, enabled: bool) {{").unwrap();
-    writeln!(out, "    unsafe {{ {hw_var}.stepper_enable(port, enabled) }}").unwrap();
+    writeln!(
+        out,
+        "pub unsafe extern \"C\" fn hw_stepper_enable(port: u8, enabled: bool) {{"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    unsafe {{ {hw_var}.stepper_enable(port, enabled) }}"
+    )
+    .unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "#[no_mangle]").unwrap();
-    writeln!(out, "pub unsafe extern \"C\" fn hw_stallguard_read(port: u8, addr: u8) -> u16 {{").unwrap();
+    writeln!(
+        out,
+        "pub unsafe extern \"C\" fn hw_stallguard_read(port: u8, addr: u8) -> u16 {{"
+    )
+    .unwrap();
     writeln!(out, "    unsafe {{ {hw_var}.stallguard_read(port, addr) }}").unwrap();
     writeln!(out, "}}").unwrap();
 

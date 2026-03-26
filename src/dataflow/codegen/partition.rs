@@ -83,13 +83,7 @@ pub fn partition_graph(snap: &GraphSnapshot) -> Result<PartitionResult, Partitio
     let mut next_bridge_id = max_id + 1000;
 
     let mut target_channels: HashMap<TargetFamily, Vec<Channel>> = HashMap::new();
-    let mut next_channel_id = snap
-        .channels
-        .iter()
-        .map(|c| c.id.0)
-        .max()
-        .unwrap_or(0)
-        + 1;
+    let mut next_channel_id = snap.channels.iter().map(|c| c.id.0).max().unwrap_or(0) + 1;
     let mut bridges: Vec<BridgeInfo> = Vec::new();
 
     for ch in &snap.channels {
@@ -107,7 +101,11 @@ pub fn partition_graph(snap: &GraphSnapshot) -> Result<PartitionResult, Partitio
             let topic = format!("bridge_{}_{}", ch.from_block.0, ch.from_port);
 
             // Determine port kind from the source block's output port.
-            let source_block = snap.blocks.iter().find(|b| b.id == ch.from_block.0).unwrap();
+            let source_block = snap
+                .blocks
+                .iter()
+                .find(|b| b.id == ch.from_block.0)
+                .unwrap();
             let port_kind = if ch.from_port < source_block.outputs.len() {
                 source_block.outputs[ch.from_port].kind.clone()
             } else {
@@ -232,7 +230,7 @@ mod tests {
             config: serde_json::json!({}),
             output_values: vec![None],
             target: Some(target),
-        custom_codegen: None,
+            custom_codegen: None,
         }
     }
 
@@ -246,7 +244,7 @@ mod tests {
             config: serde_json::json!({"value": 1.0}),
             output_values: vec![None],
             target: Some(target),
-        custom_codegen: None,
+            custom_codegen: None,
         }
     }
 
@@ -260,11 +258,17 @@ mod tests {
             config: serde_json::json!({}),
             output_values: vec![],
             target: Some(target),
-        custom_codegen: None,
+            custom_codegen: None,
         }
     }
 
-    fn make_channel(id: u32, from_block: u32, from_port: usize, to_block: u32, to_port: usize) -> Channel {
+    fn make_channel(
+        id: u32,
+        from_block: u32,
+        from_port: usize,
+        to_block: u32,
+        to_port: usize,
+    ) -> Channel {
         Channel {
             id: ChannelId(id),
             from_block: BlockId(from_block),
@@ -509,10 +513,7 @@ mod tests {
                 make_block(2, TargetFamily::Stm32f4),
                 make_sink_block(3, TargetFamily::Esp32c3),
             ],
-            vec![
-                make_channel(1, 1, 0, 2, 0),
-                make_channel(2, 2, 0, 3, 0),
-            ],
+            vec![make_channel(1, 1, 0, 2, 0), make_channel(2, 2, 0, 3, 0)],
         );
 
         let result = partition_graph(&snap).unwrap();
@@ -532,10 +533,7 @@ mod tests {
                 make_sink_block(2, TargetFamily::Stm32f4),
                 make_sink_block(3, TargetFamily::Esp32c3),
             ],
-            vec![
-                make_channel(1, 1, 0, 2, 0),
-                make_channel(2, 1, 0, 3, 0),
-            ],
+            vec![make_channel(1, 1, 0, 2, 0), make_channel(2, 1, 0, 3, 0)],
         );
 
         let result = partition_graph(&snap).unwrap();
@@ -564,10 +562,7 @@ mod tests {
                 make_block(2, TargetFamily::Rp2040),
                 make_sink_block(3, TargetFamily::Rp2040),
             ],
-            vec![
-                make_channel(1, 1, 0, 2, 0),
-                make_channel(2, 2, 0, 3, 0),
-            ],
+            vec![make_channel(1, 1, 0, 2, 0), make_channel(2, 2, 0, 3, 0)],
         );
 
         let result = partition_graph(&snap).unwrap();

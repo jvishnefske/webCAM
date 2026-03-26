@@ -78,7 +78,6 @@ fn channel(id: u32, from_block: u32, from_port: usize, to_block: u32, to_port: u
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // E2E Test 1: Full pipeline — two MCUs with a cross-partition edge
 // ---------------------------------------------------------------------------
@@ -126,7 +125,10 @@ fn e2e_two_mcu_cross_partition_compiles() {
 
     // Verify partitioner created bridges
     let partition_result = partition_graph(&snap).unwrap();
-    assert!(!partition_result.bridges.is_empty(), "should have bridge(s)");
+    assert!(
+        !partition_result.bridges.is_empty(),
+        "should have bridge(s)"
+    );
 
     // Check that each workspace has the right files
     for (target, ws) in &result.workspaces {
@@ -134,7 +136,10 @@ fn e2e_two_mcu_cross_partition_compiles() {
         assert!(has_logic, "{target:?} workspace missing logic/src/lib.rs");
 
         let has_rt = ws.files.iter().any(|(p, _)| p == "dataflow-rt/src/lib.rs");
-        assert!(has_rt, "{target:?} workspace missing dataflow-rt/src/lib.rs");
+        assert!(
+            has_rt,
+            "{target:?} workspace missing dataflow-rt/src/lib.rs"
+        );
     }
 
     // Verify bridge block appears in generated code
@@ -287,7 +292,10 @@ fn e2e_three_targets_fan_out() {
         .iter()
         .filter(|b| b.block_type == "pubsub_source")
         .count();
-    assert_eq!(source_count, 2, "Esp32c3 should have 2 pubsub_source blocks");
+    assert_eq!(
+        source_count, 2,
+        "Esp32c3 should have 2 pubsub_source blocks"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +318,11 @@ fn e2e_partition_preserves_block_config() {
 
     // Rp2040 partition should have the constant block with config value 42.0
     let rp = &result.partitions[&TargetFamily::Rp2040];
-    let const_block = rp.blocks.iter().find(|b| b.block_type == "constant").unwrap();
+    let const_block = rp
+        .blocks
+        .iter()
+        .find(|b| b.block_type == "constant")
+        .unwrap();
     assert_eq!(const_block.config["value"], 42.0);
 
     // Stm32f4 partition should have the gain block with config gain 7.5
@@ -372,8 +384,8 @@ fn e2e_bridge_topics_match_across_partitions() {
 
 #[test]
 fn e2e_pubsub_blocks_in_dataflow_graph() {
-    use rustcam::dataflow::{Tick, Value};
     use rustcam::dataflow::blocks::pubsub::{PubSubSinkBlock, PubSubSourceBlock};
+    use rustcam::dataflow::{Tick, Value};
 
     // Simulate the bridge: source publishes, sink receives
     let mut source = PubSubSourceBlock::new("bridge_1_0".to_string(), PortKind::Float);
@@ -418,14 +430,8 @@ fn e2e_graph_snapshot_serde_with_targets() {
     let deserialized: GraphSnapshot = serde_json::from_str(&json).unwrap();
 
     assert_eq!(deserialized.blocks.len(), 2);
-    assert_eq!(
-        deserialized.blocks[0].target,
-        Some(TargetFamily::Rp2040)
-    );
-    assert_eq!(
-        deserialized.blocks[1].target,
-        Some(TargetFamily::Stm32f4)
-    );
+    assert_eq!(deserialized.blocks[0].target, Some(TargetFamily::Rp2040));
+    assert_eq!(deserialized.blocks[1].target, Some(TargetFamily::Stm32f4));
     assert_eq!(deserialized.channels.len(), 1);
     assert_eq!(deserialized.tick_count, 10);
 }

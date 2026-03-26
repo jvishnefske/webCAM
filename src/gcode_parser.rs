@@ -763,20 +763,47 @@ mod tests {
 
     #[test]
     fn parse_error_display() {
-        assert_eq!(format!("{}", ParseError::InvalidNumber("abc".into())), "Invalid number: abc");
-        assert_eq!(format!("{}", ParseError::UnknownGCode(99)), "Unknown G-code: G99");
-        assert_eq!(format!("{}", ParseError::UnknownMCode(99)), "Unknown M-code: M99");
-        assert_eq!(format!("{}", ParseError::MissingParameter('Z')), "Missing parameter: Z");
+        assert_eq!(
+            format!("{}", ParseError::InvalidNumber("abc".into())),
+            "Invalid number: abc"
+        );
+        assert_eq!(
+            format!("{}", ParseError::UnknownGCode(99)),
+            "Unknown G-code: G99"
+        );
+        assert_eq!(
+            format!("{}", ParseError::UnknownMCode(99)),
+            "Unknown M-code: M99"
+        );
+        assert_eq!(
+            format!("{}", ParseError::MissingParameter('Z')),
+            "Missing parameter: Z"
+        );
         assert_eq!(format!("{}", ParseError::EmptyLine), "Empty line");
     }
 
     #[test]
     fn validation_error_display() {
-        assert_eq!(format!("{}", ValidationError::InvalidFeedRate(-1.0)), "Invalid feed rate: -1");
-        assert_eq!(format!("{}", ValidationError::InvalidDwellTime(-2.0)), "Invalid dwell time: -2");
-        assert_eq!(format!("{}", ValidationError::InvalidArcRadius), "Invalid arc radius");
-        assert_eq!(format!("{}", ValidationError::NoAxisSpecified), "No axis specified");
-        assert_eq!(format!("{}", ValidationError::SpindleSpeedOutOfRange(99999)), "Spindle speed out of range: 99999");
+        assert_eq!(
+            format!("{}", ValidationError::InvalidFeedRate(-1.0)),
+            "Invalid feed rate: -1"
+        );
+        assert_eq!(
+            format!("{}", ValidationError::InvalidDwellTime(-2.0)),
+            "Invalid dwell time: -2"
+        );
+        assert_eq!(
+            format!("{}", ValidationError::InvalidArcRadius),
+            "Invalid arc radius"
+        );
+        assert_eq!(
+            format!("{}", ValidationError::NoAxisSpecified),
+            "No axis specified"
+        );
+        assert_eq!(
+            format!("{}", ValidationError::SpindleSpeedOutOfRange(99999)),
+            "Spindle speed out of range: 99999"
+        );
     }
 
     #[test]

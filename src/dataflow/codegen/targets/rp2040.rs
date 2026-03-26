@@ -23,10 +23,7 @@ impl TargetGenerator for Rp2040Generator {
 
         Ok(vec![
             ("target-rp2040/Cargo.toml".to_string(), cargo_toml),
-            (
-                "target-rp2040/.cargo/config.toml".to_string(),
-                cargo_config,
-            ),
+            ("target-rp2040/.cargo/config.toml".to_string(), cargo_config),
             ("target-rp2040/memory.x".to_string(), memory_x),
             ("target-rp2040/build.rs".to_string(), build_rs),
             ("target-rp2040/src/main.rs".to_string(), main_rs),
@@ -131,21 +128,9 @@ fn generate_main_rs(binding: &Binding, dt: f64) -> String {
     writeln!(out).unwrap();
 
     writeln!(out, "impl Peripherals for HwPeripherals {{").unwrap();
-    writeln!(
-        out,
-        "    fn adc_read(&mut self, _ch: u8) -> f32 {{ 0.0 }}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    fn pwm_write(&mut self, _ch: u8, _duty: f32) {{}}"
-    )
-    .unwrap();
-    writeln!(
-        out,
-        "    fn gpio_read(&self, _pin: u8) -> bool {{ false }}"
-    )
-    .unwrap();
+    writeln!(out, "    fn adc_read(&mut self, _ch: u8) -> f32 {{ 0.0 }}").unwrap();
+    writeln!(out, "    fn pwm_write(&mut self, _ch: u8, _duty: f32) {{}}").unwrap();
+    writeln!(out, "    fn gpio_read(&self, _pin: u8) -> bool {{ false }}").unwrap();
     writeln!(
         out,
         "    fn gpio_write(&mut self, _pin: u8, _high: bool) {{}}"
@@ -212,10 +197,14 @@ fn generate_main_rs(binding: &Binding, dt: f64) -> String {
     writeln!(out, "static mut HW: HwPeripherals = HwPeripherals {{").unwrap();
     for pin in &binding.pins {
         match pin {
-            PinBinding::Adc { logical_channel, .. } => {
+            PinBinding::Adc {
+                logical_channel, ..
+            } => {
                 writeln!(out, "    adc_{logical_channel}: 0.0,").unwrap();
             }
-            PinBinding::Pwm { logical_channel, .. } => {
+            PinBinding::Pwm {
+                logical_channel, ..
+            } => {
                 writeln!(out, "    pwm_{logical_channel}: 0.0,").unwrap();
             }
             PinBinding::Gpio { logical_pin, .. } => {

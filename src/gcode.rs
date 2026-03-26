@@ -427,8 +427,14 @@ mod tests {
             air_assist: true,
         };
         let code = emit_gcode_with_profile(&[tp], &GcodeParams::default(), &profile, Some(&laser));
-        assert!(code.contains("M8 (air assist on)"), "Should enable air assist");
-        assert!(code.contains("M9 (air assist off)"), "Should disable air assist");
+        assert!(
+            code.contains("M8 (air assist on)"),
+            "Should enable air assist"
+        );
+        assert!(
+            code.contains("M9 (air assist off)"),
+            "Should disable air assist"
+        );
     }
 
     #[test]
@@ -438,7 +444,10 @@ mod tests {
         tp.cut(10.0, 0.0, 0.0);
         let laser = LaserParams::default();
         let code = emit_gcode_with_profile(&[tp], &GcodeParams::default(), &profile, Some(&laser));
-        assert!(!code.contains("M8"), "Should not have air assist by default");
+        assert!(
+            !code.contains("M8"),
+            "Should not have air assist by default"
+        );
         assert!(!code.contains("M9"), "Should not have M9 by default");
     }
 }

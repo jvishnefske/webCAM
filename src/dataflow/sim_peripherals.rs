@@ -61,7 +61,10 @@ impl WasmSimPeripherals {
 
     /// Push data into a simulated UART receive buffer.
     pub fn push_uart_data(&mut self, port: u8, data: &[u8]) {
-        self.uart_buffers.entry(port).or_default().extend_from_slice(data);
+        self.uart_buffers
+            .entry(port)
+            .or_default()
+            .extend_from_slice(data);
     }
 
     /// Get the display lines for a given bus/address.
@@ -99,7 +102,10 @@ impl SimPeripherals for WasmSimPeripherals {
     }
 
     fn uart_write(&mut self, port: u8, data: &[u8]) {
-        self.uart_buffers.entry(port).or_default().extend_from_slice(data);
+        self.uart_buffers
+            .entry(port)
+            .or_default()
+            .extend_from_slice(data);
     }
 
     fn uart_read(&mut self, port: u8, buf: &mut [u8]) -> usize {
@@ -118,7 +124,8 @@ impl SimPeripherals for WasmSimPeripherals {
     }
 
     fn display_write(&mut self, bus: u8, addr: u8, line1: &str, line2: &str) {
-        self.display_lines.insert((bus, addr), (line1.to_string(), line2.to_string()));
+        self.display_lines
+            .insert((bus, addr), (line1.to_string(), line2.to_string()));
     }
 
     fn stepper_move(&mut self, port: u8, target: i64) {

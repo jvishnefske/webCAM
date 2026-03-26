@@ -124,7 +124,10 @@ mod tests {
     fn parse_ident() {
         assert_eq!(flow_parser::ident("hello"), Ok("hello".to_string()));
         assert_eq!(flow_parser::ident("rp2040"), Ok("rp2040".to_string()));
-        assert_eq!(flow_parser::ident("adc_source"), Ok("adc_source".to_string()));
+        assert_eq!(
+            flow_parser::ident("adc_source"),
+            Ok("adc_source".to_string())
+        );
         assert!(flow_parser::ident("123").is_err());
     }
 
@@ -147,7 +150,10 @@ mod tests {
     #[test]
     fn parse_string() {
         assert_eq!(flow_parser::string("\"hello\""), Ok("hello".to_string()));
-        assert_eq!(flow_parser::string("\"Sensor Output\""), Ok("Sensor Output".to_string()));
+        assert_eq!(
+            flow_parser::string("\"Sensor Output\""),
+            Ok("Sensor Output".to_string())
+        );
         assert_eq!(flow_parser::string("\"a\\\"b\""), Ok("a\"b".to_string()));
         assert_eq!(flow_parser::string("\"a\\\\b\""), Ok("a\\b".to_string()));
         assert_eq!(flow_parser::string("\"a\\nb\""), Ok("a\nb".to_string()));
@@ -166,19 +172,29 @@ mod tests {
 
     #[test]
     fn parse_value_string() {
-        assert_eq!(flow_parser::value("\"hi\""), Ok(Value::Text("hi".to_string())));
+        assert_eq!(
+            flow_parser::value("\"hi\""),
+            Ok(Value::Text("hi".to_string()))
+        );
     }
 
     #[test]
     fn parse_value_ident() {
-        assert_eq!(flow_parser::value("idle"), Ok(Value::Ident("idle".to_string())));
+        assert_eq!(
+            flow_parser::value("idle"),
+            Ok(Value::Ident("idle".to_string()))
+        );
     }
 
     #[test]
     fn parse_value_list() {
         assert_eq!(
             flow_parser::value("[1, 2, 3]"),
-            Ok(Value::List(vec![Value::Int(1), Value::Int(2), Value::Int(3)]))
+            Ok(Value::List(vec![
+                Value::Int(1),
+                Value::Int(2),
+                Value::Int(3)
+            ]))
         );
     }
 
@@ -197,12 +213,13 @@ mod tests {
     fn parse_value_nested_list_in_map() {
         assert_eq!(
             flow_parser::value("{ states: [idle, running] }"),
-            Ok(Value::Map(vec![
-                ("states".into(), Value::List(vec![
+            Ok(Value::Map(vec![(
+                "states".into(),
+                Value::List(vec![
                     Value::Ident("idle".into()),
                     Value::Ident("running".into()),
-                ])),
-            ]))
+                ])
+            ),]))
         );
     }
 
@@ -215,7 +232,10 @@ mod tests {
         );
         assert_eq!(
             flow_parser::config("(42.0, \"hello\")"),
-            Ok(Config::Positional(vec![Value::Float(42.0), Value::Text("hello".into())]))
+            Ok(Config::Positional(vec![
+                Value::Float(42.0),
+                Value::Text("hello".into())
+            ]))
         );
     }
 
@@ -238,10 +258,13 @@ mod tests {
             result,
             Ok(Config::Structured(vec![
                 ("initial".into(), Value::Ident("idle".into())),
-                ("states".into(), Value::List(vec![
-                    Value::Ident("idle".into()),
-                    Value::Ident("running".into()),
-                ])),
+                (
+                    "states".into(),
+                    Value::List(vec![
+                        Value::Ident("idle".into()),
+                        Value::Ident("running".into()),
+                    ])
+                ),
             ]))
         );
     }
@@ -251,8 +274,10 @@ mod tests {
         assert_eq!(
             flow_parser::connection("sensor.out -> amp.input"),
             Ok(Connection {
-                from_block: "sensor".into(), from_port: "out".into(),
-                to_block: "amp".into(), to_port: "input".into(),
+                from_block: "sensor".into(),
+                from_port: "out".into(),
+                to_block: "amp".into(),
+                to_port: "input".into(),
             })
         );
     }
@@ -261,7 +286,10 @@ mod tests {
     fn parse_annotation() {
         assert_eq!(
             flow_parser::annotation("@target(rp2040)"),
-            Ok(Annotation { name: "target".into(), args: vec![Value::Ident("rp2040".into())] })
+            Ok(Annotation {
+                name: "target".into(),
+                args: vec![Value::Ident("rp2040".into())]
+            })
         );
     }
 
@@ -270,7 +298,8 @@ mod tests {
         assert_eq!(
             flow_parser::block_decl("block sensor: constant(42.0)"),
             Ok(BlockDecl {
-                id: "sensor".into(), block_type: "constant".into(),
+                id: "sensor".into(),
+                block_type: "constant".into(),
                 config: Config::Positional(vec![Value::Float(42.0)]),
                 annotations: vec![],
             })
@@ -282,8 +311,10 @@ mod tests {
         assert_eq!(
             flow_parser::block_decl("block sum: add"),
             Ok(BlockDecl {
-                id: "sum".into(), block_type: "add".into(),
-                config: Config::Empty, annotations: vec![],
+                id: "sum".into(),
+                block_type: "add".into(),
+                config: Config::Empty,
+                annotations: vec![],
             })
         );
     }
@@ -294,9 +325,13 @@ mod tests {
         assert_eq!(
             flow_parser::block_decl(input),
             Ok(BlockDecl {
-                id: "sensor".into(), block_type: "adc_source".into(),
+                id: "sensor".into(),
+                block_type: "adc_source".into(),
                 config: Config::Named(vec![("channel".into(), Value::Int(0))]),
-                annotations: vec![Annotation { name: "target".into(), args: vec![Value::Ident("rp2040".into())] }],
+                annotations: vec![Annotation {
+                    name: "target".into(),
+                    args: vec![Value::Ident("rp2040".into())]
+                }],
             })
         );
     }

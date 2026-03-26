@@ -17,7 +17,11 @@ pub fn emit_state_machine_type(out: &mut String, block: &BlockSnapshot) -> Resul
     let states = extract_states(block)?;
     let initial = extract_initial(block, &states);
 
-    writeln!(out, "    // State machine block {id}: states = {states:?}, initial = \"{initial}\"").unwrap();
+    writeln!(
+        out,
+        "    // State machine block {id}: states = {states:?}, initial = \"{initial}\""
+    )
+    .unwrap();
     Ok(())
 }
 
@@ -45,23 +49,27 @@ pub fn emit_state_machine_tick(
     };
 
     // Emit the state_machine op with regions
-    writeln!(out, "    // FSM: {n_outputs} outputs (index + {} active flags)", states.len()).unwrap();
+    writeln!(
+        out,
+        "    // FSM: {n_outputs} outputs (index + {} active flags)",
+        states.len()
+    )
+    .unwrap();
 
     // Emit state machine as region-based op
     let result_types: Vec<&str> = (0..n_outputs).map(|_| "f64").collect();
     let result_type_str = result_types.join(", ");
 
     // Use individual SSA names for multi-output
-    let result_names: Vec<String> = (0..n_outputs)
-        .map(|p| dialect::ssa_name(id, p))
-        .collect();
+    let result_names: Vec<String> = (0..n_outputs).map(|p| dialect::ssa_name(id, p)).collect();
     let result_name_str = result_names.join(", ");
 
     writeln!(
         out,
         "    {result_name_str} = {op}{guard_operands} {{",
         op = dialect::OP_STATE_MACHINE,
-    ).unwrap();
+    )
+    .unwrap();
 
     // Emit one region block per state
     for (state_idx, state_name) in states.iter().enumerate() {
@@ -86,27 +94,29 @@ pub fn emit_state_machine_tick(
                 let guard_port = t.get("guard_port").and_then(|v| v.as_u64());
 
                 if let Some(port) = guard_port {
-                    let guard_ssa = inputs.get(port as usize).map(|s| s.as_str()).unwrap_or("%zero");
+                    let guard_ssa = inputs
+                        .get(port as usize)
+                        .map(|s| s.as_str())
+                        .unwrap_or("%zero");
                     let to_label = to_snake_case(to_state);
-                    writeln!(
-                        out,
-                        "        // if guard_{port} > 0.5 → {to_state}"
-                    ).unwrap();
+                    writeln!(out, "        // if guard_{port} > 0.5 → {to_state}").unwrap();
                     let cmp_ssa = format!("%sm{id}_cmp_{state_idx}_{port}");
                     let thresh_ssa = format!("%sm{id}_thresh_{state_idx}");
                     writeln!(out, "        {thresh_ssa} = arith.constant 0.5 : f64").unwrap();
                     writeln!(
                         out,
                         "        {cmp_ssa} = arith.cmpf \"ogt\", {guard_ssa}, {thresh_ssa} : f64"
-                    ).unwrap();
-                    writeln!(
-                        out,
-                        "        cf.cond_br {cmp_ssa}, ^{to_label}, ^{label}"
-                    ).unwrap();
+                    )
+                    .unwrap();
+                    writeln!(out, "        cf.cond_br {cmp_ssa}, ^{to_label}, ^{label}").unwrap();
                 } else {
                     // Unconditional transition
                     let to_label = to_snake_case(to_state);
-                    writeln!(out, "        cf.br ^{to_label}  // unconditional → {to_state}").unwrap();
+                    writeln!(
+                        out,
+                        "        cf.br ^{to_label}  // unconditional → {to_state}"
+                    )
+                    .unwrap();
                 }
             }
         }
@@ -172,13 +182,28 @@ mod tests {
             block_type: "state_machine".to_string(),
             name: "my_fsm".to_string(),
             inputs: vec![
-                PortDef { name: "guard_0".to_string(), kind: PortKind::Float },
-                PortDef { name: "guard_1".to_string(), kind: PortKind::Float },
+                PortDef {
+                    name: "guard_0".to_string(),
+                    kind: PortKind::Float,
+                },
+                PortDef {
+                    name: "guard_1".to_string(),
+                    kind: PortKind::Float,
+                },
             ],
             outputs: vec![
-                PortDef { name: "state_idx".to_string(), kind: PortKind::Float },
-                PortDef { name: "active_idle".to_string(), kind: PortKind::Float },
-                PortDef { name: "active_running".to_string(), kind: PortKind::Float },
+                PortDef {
+                    name: "state_idx".to_string(),
+                    kind: PortKind::Float,
+                },
+                PortDef {
+                    name: "active_idle".to_string(),
+                    kind: PortKind::Float,
+                },
+                PortDef {
+                    name: "active_running".to_string(),
+                    kind: PortKind::Float,
+                },
             ],
             config: serde_json::json!({
                 "states": ["idle", "running"],

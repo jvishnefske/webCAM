@@ -4,7 +4,7 @@
 //! The blocks still participate in the graph so the topology can be
 //! designed in the browser and later run natively.
 
-use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]

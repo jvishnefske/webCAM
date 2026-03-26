@@ -38,12 +38,8 @@ pub fn find_parallel_groups(
 
     for ch in channels {
         if adj.contains_key(&ch.from_block) && adj.contains_key(&ch.to_block) {
-            adj.entry(ch.from_block)
-                .or_default()
-                .insert(ch.to_block);
-            adj.entry(ch.to_block)
-                .or_default()
-                .insert(ch.from_block);
+            adj.entry(ch.from_block).or_default().insert(ch.to_block);
+            adj.entry(ch.to_block).or_default().insert(ch.from_block);
         }
     }
 
@@ -67,8 +63,10 @@ pub fn find_parallel_groups(
 
         while let Some(node) = queue.pop_front() {
             component.insert(node);
-            let mut neighbors: Vec<BlockId> =
-                adj.get(&node).map(|s| s.iter().copied().collect()).unwrap_or_default();
+            let mut neighbors: Vec<BlockId> = adj
+                .get(&node)
+                .map(|s| s.iter().copied().collect())
+                .unwrap_or_default();
             neighbors.sort_by_key(|id| id.0);
             for neighbor in neighbors {
                 if visited.insert(neighbor) {
@@ -187,11 +185,7 @@ mod tests {
         // Two chains: (1 -> 3 -> 5) and (2 -> 4).
         // Within each group, blocks must be in topological order.
         let ids = vec![BlockId(1), BlockId(2), BlockId(3), BlockId(4), BlockId(5)];
-        let channels = vec![
-            ch(1, 1, 0, 3, 0),
-            ch(2, 3, 0, 5, 0),
-            ch(3, 2, 0, 4, 0),
-        ];
+        let channels = vec![ch(1, 1, 0, 3, 0), ch(2, 3, 0, 5, 0), ch(3, 2, 0, 4, 0)];
         let groups = find_parallel_groups(&ids, &channels).unwrap();
         assert_eq!(groups.len(), 2);
 

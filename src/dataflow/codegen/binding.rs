@@ -10,7 +10,7 @@ use super::target::TargetFamily;
 // Re-export the canonical types from module-traits for frontend/runtime use.
 pub use module_traits::hardware::{
     capabilities_for, extract_requirements, validate_config, ConfigError, ConfigSeverity,
-    GpioDirection, HardwareConfig, PinAssignment, PeripheralRequirement, RequirementEntry,
+    GpioDirection, HardwareConfig, PeripheralRequirement, PinAssignment, RequirementEntry,
     RequirementSet, TargetCapabilities,
 };
 
@@ -242,7 +242,19 @@ mod tests {
         let binding = Binding::from_hardware_config(&hw_config, TargetFamily::Rp2040);
         assert_eq!(binding.target, TargetFamily::Rp2040);
         assert_eq!(binding.pins.len(), 2);
-        assert!(matches!(binding.pins[0], PinBinding::Adc { logical_channel: 0, .. }));
-        assert!(matches!(binding.pins[1], PinBinding::Gpio { logical_pin: 13, .. }));
+        assert!(matches!(
+            binding.pins[0],
+            PinBinding::Adc {
+                logical_channel: 0,
+                ..
+            }
+        ));
+        assert!(matches!(
+            binding.pins[1],
+            PinBinding::Gpio {
+                logical_pin: 13,
+                ..
+            }
+        ));
     }
 }

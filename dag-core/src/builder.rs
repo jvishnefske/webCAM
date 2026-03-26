@@ -128,7 +128,10 @@ mod tests {
     fn test_subscribe_publish() {
         let mut dag = Dag::new();
         let sub = dag.subscribe("sensor/temp").unwrap();
-        assert_eq!(dag.nodes()[sub as usize], Op::Subscribe("sensor/temp".into()));
+        assert_eq!(
+            dag.nodes()[sub as usize],
+            Op::Subscribe("sensor/temp".into())
+        );
 
         let pub_id = dag.publish("actuator/fan", sub).unwrap();
         assert_eq!(

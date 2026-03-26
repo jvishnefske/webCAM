@@ -256,7 +256,11 @@ impl SimModel for GpioInBlock {
         _dt: f64,
         peripherals: &mut dyn SimPeripherals,
     ) -> Vec<Option<Value>> {
-        let state = if peripherals.gpio_read(self.config.pin) { 1.0 } else { 0.0 };
+        let state = if peripherals.gpio_read(self.config.pin) {
+            1.0
+        } else {
+            0.0
+        };
         vec![Some(Value::Float(state))]
     }
 }
@@ -519,8 +523,14 @@ impl SimModel for Ssd1306DisplayBlock {
         _dt: f64,
         peripherals: &mut dyn SimPeripherals,
     ) -> Vec<Option<Value>> {
-        let line1 = inputs.first().and_then(|i| i.and_then(|v| v.as_text())).unwrap_or("");
-        let line2 = inputs.get(1).and_then(|i| i.and_then(|v| v.as_text())).unwrap_or("");
+        let line1 = inputs
+            .first()
+            .and_then(|i| i.and_then(|v| v.as_text()))
+            .unwrap_or("");
+        let line2 = inputs
+            .get(1)
+            .and_then(|i| i.and_then(|v| v.as_text()))
+            .unwrap_or("");
         peripherals.display_write(self.config.i2c_bus, self.config.address, line1, line2);
         vec![]
     }
@@ -592,7 +602,11 @@ impl SimModel for Tmc2209StepperBlock {
         _dt: f64,
         peripherals: &mut dyn SimPeripherals,
     ) -> Vec<Option<Value>> {
-        let enabled = inputs.get(1).and_then(|i| i.and_then(|v| v.as_float())).unwrap_or(0.0) > 0.5;
+        let enabled = inputs
+            .get(1)
+            .and_then(|i| i.and_then(|v| v.as_float()))
+            .unwrap_or(0.0)
+            > 0.5;
         if enabled {
             if let Some(target) = inputs.first().and_then(|i| i.and_then(|v| v.as_float())) {
                 peripherals.stepper_move(self.config.uart_port, target as i64);
@@ -724,7 +738,10 @@ mod tests {
 
     #[test]
     fn ssd1306_display_config_roundtrip() {
-        let config = Ssd1306DisplayConfig { i2c_bus: 1, address: 0x3C };
+        let config = Ssd1306DisplayConfig {
+            i2c_bus: 1,
+            address: 0x3C,
+        };
         let block = Ssd1306DisplayBlock::from_config(config);
         let json = block.config_json();
         let parsed: Ssd1306DisplayConfig = serde_json::from_str(&json).unwrap();
@@ -734,7 +751,12 @@ mod tests {
 
     #[test]
     fn tmc2209_stepper_config_roundtrip() {
-        let config = Tmc2209StepperConfig { uart_port: 1, uart_addr: 2, steps_per_rev: 400, microsteps: 32 };
+        let config = Tmc2209StepperConfig {
+            uart_port: 1,
+            uart_addr: 2,
+            steps_per_rev: 400,
+            microsteps: 32,
+        };
         let block = Tmc2209StepperBlock::from_config(config);
         let json = block.config_json();
         let parsed: Tmc2209StepperConfig = serde_json::from_str(&json).unwrap();
@@ -755,7 +777,10 @@ mod tests {
     fn adc_sim_reads_configured_voltage() {
         use crate::dataflow::sim_peripherals::WasmSimPeripherals;
 
-        let mut block = AdcBlock::from_config(AdcConfig { channel: 2, resolution_bits: 12 });
+        let mut block = AdcBlock::from_config(AdcConfig {
+            channel: 2,
+            resolution_bits: 12,
+        });
         let mut peripherals = WasmSimPeripherals::new();
         peripherals.set_adc_voltage(2, 3.3);
 
@@ -768,7 +793,10 @@ mod tests {
     fn pwm_sim_writes_duty() {
         use crate::dataflow::sim_peripherals::WasmSimPeripherals;
 
-        let mut block = PwmBlock::from_config(PwmConfig { channel: 1, frequency_hz: 1000 });
+        let mut block = PwmBlock::from_config(PwmConfig {
+            channel: 1,
+            frequency_hz: 1000,
+        });
         let mut peripherals = WasmSimPeripherals::new();
         let duty = Value::Float(0.75);
 
@@ -1012,11 +1040,10 @@ mod tests {
         assert_eq!(out[1], Some(Value::Float(0.0)));
     }
 
-
     #[test]
     fn sim_mode_graph_adc_to_gain_to_pwm() {
-        use crate::dataflow::graph::DataflowGraph;
         use crate::dataflow::blocks::function::FunctionBlock;
+        use crate::dataflow::graph::DataflowGraph;
         use crate::dataflow::sim_peripherals::WasmSimPeripherals;
 
         let mut g = DataflowGraph::new();

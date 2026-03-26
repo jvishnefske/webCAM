@@ -2,8 +2,8 @@
 
 extern crate alloc;
 
-pub mod op;
 pub mod builder;
-pub mod eval;
 pub mod cbor;
+pub mod eval;
+pub mod op;
 pub mod templates;

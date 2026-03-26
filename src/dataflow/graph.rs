@@ -84,7 +84,10 @@ impl DataflowGraph {
     }
 
     /// Set the SimPeripherals implementation.
-    pub fn set_sim_peripherals(&mut self, peripherals: crate::dataflow::sim_peripherals::WasmSimPeripherals) {
+    pub fn set_sim_peripherals(
+        &mut self,
+        peripherals: crate::dataflow::sim_peripherals::WasmSimPeripherals,
+    ) {
         self.sim_peripherals = Some(peripherals);
     }
 
@@ -123,8 +126,7 @@ impl DataflowGraph {
         let n_in = self.blocks[&id].input_ports().len();
         let n_out = self.blocks[&id].output_ports().len();
         self.channels.retain(|c| {
-            !(c.to_block == id && c.to_port >= n_in
-                || c.from_block == id && c.from_port >= n_out)
+            !(c.to_block == id && c.to_port >= n_in || c.from_block == id && c.from_port >= n_out)
         });
         Ok(())
     }
@@ -279,11 +281,9 @@ impl DataflowGraph {
                 let output_values = (0..n_outputs)
                     .map(|i| self.outputs.get(&(BlockId(id), i)).cloned())
                     .collect();
-                let config = serde_json::from_str(&block.config_json())
-                    .unwrap_or(serde_json::Value::Null);
-                let custom_codegen = block.as_codegen().and_then(|cg| {
-                    cg.emit_rust("host").ok()
-                });
+                let config =
+                    serde_json::from_str(&block.config_json()).unwrap_or(serde_json::Value::Null);
+                let custom_codegen = block.as_codegen().and_then(|cg| cg.emit_rust("host").ok());
                 BlockSnapshot {
                     id,
                     block_type: block.block_type().to_string(),
@@ -377,7 +377,8 @@ mod tests {
         g.connect(c, 0, gain, 0).unwrap();
 
         // Replace the constant with a different value
-        g.replace_block(c, Box::new(ConstantBlock::new(10.0))).unwrap();
+        g.replace_block(c, Box::new(ConstantBlock::new(10.0)))
+            .unwrap();
 
         let snap = g.snapshot();
         // Channel should still exist
@@ -415,8 +416,8 @@ mod tests {
 
     #[test]
     fn block_snapshot_serde_roundtrip_with_target() {
-        use crate::dataflow::codegen::target::TargetFamily;
         use crate::dataflow::block::PortKind;
+        use crate::dataflow::codegen::target::TargetFamily;
 
         let snap = BlockSnapshot {
             id: 1,

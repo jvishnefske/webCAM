@@ -18,10 +18,8 @@ pub async fn ws_server_task(
     let mut buses = WsBusAccess::new(shared);
     let assets = crate::http_static::assets();
     let mut fw_writer = NullDfuWriter;
-    hil_firmware_support::ws_server::run_with_api(
-        stack, &mut buses, &assets, &mut fw_writer, dag,
-    )
-    .await
+    hil_firmware_support::ws_server::run_with_api(stack, &mut buses, &assets, &mut fw_writer, dag)
+        .await
 }
 
 /// Stub DFU writer — Pico 2 is flashed via probe-rs, not OTA.

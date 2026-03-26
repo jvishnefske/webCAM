@@ -1,6 +1,6 @@
 //! Function blocks: math operations on float inputs.
 
-use crate::dataflow::block::{Module, Tick, PortDef, PortKind, Value};
+use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

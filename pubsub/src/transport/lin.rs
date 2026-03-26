@@ -18,7 +18,7 @@
 //! The first data byte of each LIN frame carries a fragmentation header:
 //! `[more:1][seq:7]`. The remaining 7 data bytes carry payload.
 
-use crate::frame::{Frame, MAX_FRAME_PAYLOAD, FRAME_HEADER_SIZE};
+use crate::frame::{Frame, FRAME_HEADER_SIZE, MAX_FRAME_PAYLOAD};
 use crate::transport::{Transport, TransportError};
 use heapless::Vec;
 
@@ -124,16 +124,23 @@ impl<U: LinUart> LinTransport<U> {
         }
         wire[2 + LIN_DATA_MAX] = enhanced_checksum(pid, &wire[2..2 + LIN_DATA_MAX]);
 
-        self.uart.write(&wire[..3 + LIN_DATA_MAX]).map_err(|_| TransportError::SendFailed)
+        self.uart
+            .write(&wire[..3 + LIN_DATA_MAX])
+            .map_err(|_| TransportError::SendFailed)
     }
 
     /// Try to receive a single LIN wire frame.
     ///
     /// Returns `Ok(Some((pid, data_buf, data_len)))` or `Ok(None)` if nothing
     /// available.
-    fn recv_lin_frame(&mut self) -> Result<Option<(u8, [u8; LIN_DATA_MAX], usize)>, TransportError> {
+    fn recv_lin_frame(
+        &mut self,
+    ) -> Result<Option<(u8, [u8; LIN_DATA_MAX], usize)>, TransportError> {
         let mut wire = [0u8; LIN_WIRE_SIZE];
-        let n = self.uart.read(&mut wire).map_err(|_| TransportError::RecvFailed)?;
+        let n = self
+            .uart
+            .read(&mut wire)
+            .map_err(|_| TransportError::RecvFailed)?;
         if n == 0 {
             return Ok(None);
         }
@@ -191,7 +198,11 @@ impl<U: LinUart> Transport for LinTransport<U> {
         while offset < total {
             let remaining = total - offset;
             let chunk = remaining.min(LIN_FRAGMENT_PAYLOAD);
-            let more = if offset + chunk < total { 0x80u8 } else { 0x00u8 };
+            let more = if offset + chunk < total {
+                0x80u8
+            } else {
+                0x00u8
+            };
 
             let mut data = [0xFFu8; LIN_DATA_MAX];
             data[0] = more | (seq & 0x7F);
@@ -432,7 +443,11 @@ mod tests {
         let rx_ref: &MockUart = &rx_mock;
         let mut receiver = LinTransport::new(rx_ref);
 
-        let mut out = Frame::new(NodeAddr::new(0, 0, 0), NodeAddr::new(0, 0, 0), TopicId::from_raw(0));
+        let mut out = Frame::new(
+            NodeAddr::new(0, 0, 0),
+            NodeAddr::new(0, 0, 0),
+            TopicId::from_raw(0),
+        );
 
         // Pump recv until we get a complete frame.
         // Each call reads one LIN wire frame (11 bytes).
@@ -461,7 +476,11 @@ mod tests {
         let uart_ref: &MockUart = &mock;
         let mut transport = LinTransport::new(uart_ref);
 
-        let mut out = Frame::new(NodeAddr::new(0, 0, 0), NodeAddr::new(0, 0, 0), TopicId::from_raw(0));
+        let mut out = Frame::new(
+            NodeAddr::new(0, 0, 0),
+            NodeAddr::new(0, 0, 0),
+            TopicId::from_raw(0),
+        );
         let result = transport.recv(&mut out);
         assert_eq!(result, Ok(false));
     }

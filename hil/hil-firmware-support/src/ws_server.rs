@@ -33,7 +33,12 @@ pub trait ApiHandler {
 pub struct NullApiHandler;
 
 impl ApiHandler for NullApiHandler {
-    fn handle(&mut self, _method: &str, _path: &str, _body: &[u8]) -> Option<heapless::Vec<u8, 512>> {
+    fn handle(
+        &mut self,
+        _method: &str,
+        _path: &str,
+        _body: &[u8],
+    ) -> Option<heapless::Vec<u8, 512>> {
         None
     }
 }
@@ -155,7 +160,12 @@ pub async fn run_with_api<B: I2cBusSet>(
                     };
                     let body = &http_buf[header_end..http_len];
 
-                    defmt::info!("HTTP: {=str} {=str} body={=usize}B", method, path, body.len());
+                    defmt::info!(
+                        "HTTP: {=str} {=str} body={=usize}B",
+                        method,
+                        path,
+                        body.len()
+                    );
 
                     if let Some(resp) = api.handle(method, path, body) {
                         if crate::ws_framing::write_all_to_socket(&mut socket, &resp)
@@ -166,7 +176,8 @@ pub async fn run_with_api<B: I2cBusSet>(
                         }
                     } else {
                         let not_found = b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
-                        let _ = crate::ws_framing::write_all_to_socket(&mut socket, not_found).await;
+                        let _ =
+                            crate::ws_framing::write_all_to_socket(&mut socket, not_found).await;
                     }
                 } else {
                     defmt::info!("HTTP: GET {=str}", path);

@@ -2,9 +2,9 @@
 
 extern crate alloc;
 
-pub mod executor;
 pub mod channels;
-pub mod pubsub;
-pub mod http;
+pub mod executor;
 pub mod generated;
+pub mod http;
+pub mod pubsub;
 pub mod serve;

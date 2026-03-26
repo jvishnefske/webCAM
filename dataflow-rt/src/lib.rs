@@ -22,17 +22,23 @@ pub trait Peripherals {
     /// Receive bytes from a UART port. Returns number of bytes read.
     fn uart_read(&mut self, port: u8, buf: &mut [u8]) -> usize;
     /// Read quadrature encoder accumulated count.
-    fn encoder_read(&mut self, _channel: u8) -> i64 { 0 }
+    fn encoder_read(&mut self, _channel: u8) -> i64 {
+        0
+    }
     /// Write two lines to an SSD1306 OLED display.
     fn display_write(&mut self, _bus: u8, _addr: u8, _line1: &str, _line2: &str) {}
     /// Command stepper to move to target position.
     fn stepper_move(&mut self, _port: u8, _target: i64) {}
     /// Read current stepper position.
-    fn stepper_position(&self, _port: u8) -> i64 { 0 }
+    fn stepper_position(&self, _port: u8) -> i64 {
+        0
+    }
     /// Enable or disable stepper driver.
     fn stepper_enable(&mut self, _port: u8, _enabled: bool) {}
     /// Read TMC2209 StallGuard value.
-    fn stallguard_read(&mut self, _port: u8, _addr: u8) -> u16 { 0 }
+    fn stallguard_read(&mut self, _port: u8, _addr: u8) -> u16 {
+        0
+    }
 }
 
 /// A processing node in a dataflow graph.

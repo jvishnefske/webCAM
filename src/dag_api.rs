@@ -126,8 +126,7 @@ impl DagHandle {
 
     /// Decode from CBOR bytes.
     pub fn from_cbor(bytes: &[u8]) -> Result<DagHandle, JsValue> {
-        let dag =
-            cbor::decode_dag(bytes).map_err(|e| JsValue::from_str(&format!("{}", e)))?;
+        let dag = cbor::decode_dag(bytes).map_err(|e| JsValue::from_str(&format!("{}", e)))?;
         Ok(DagHandle { dag })
     }
 
@@ -170,10 +169,7 @@ impl DagHandle {
                     format!(r#"{{"id":{},"op":"relu","a":{}}}"#, i, a)
                 }
                 Op::Subscribe(topic) => {
-                    format!(
-                        r#"{{"id":{},"op":"subscribe","topic":"{}"}}"#,
-                        i, topic
-                    )
+                    format!(r#"{{"id":{},"op":"subscribe","topic":"{}"}}"#, i, topic)
                 }
                 Op::Publish(topic, src) => {
                     format!(

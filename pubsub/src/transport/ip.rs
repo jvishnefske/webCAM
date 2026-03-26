@@ -83,7 +83,9 @@ impl IpTransport {
 impl Transport for IpTransport {
     fn send(&mut self, frame: &Frame) -> Result<(), TransportError> {
         let mut wire = [0u8; MAX_WIRE_SIZE];
-        let n = frame.to_bytes(&mut wire).map_err(|_| TransportError::FrameTooLarge)?;
+        let n = frame
+            .to_bytes(&mut wire)
+            .map_err(|_| TransportError::FrameTooLarge)?;
         self.socket
             .send_to(&wire[..n], self.peer)
             .map_err(|_| TransportError::SendFailed)?;
@@ -148,7 +150,11 @@ mod tests {
         tx.send(&frame).expect("send");
 
         // Spin briefly until the datagram arrives (non-blocking).
-        let mut received = Frame::new(NodeAddr::BROADCAST, NodeAddr::BROADCAST, TopicId::from_raw(0));
+        let mut received = Frame::new(
+            NodeAddr::BROADCAST,
+            NodeAddr::BROADCAST,
+            TopicId::from_raw(0),
+        );
         let mut got = false;
         for _ in 0..1000 {
             if rx.recv(&mut received).expect("recv") {
@@ -171,7 +177,11 @@ mod tests {
         let (addr, _) = ephemeral_addr();
         let mut t = IpTransport::unicast(&addr, "127.0.0.1:1").expect("bind");
 
-        let mut frame = Frame::new(NodeAddr::BROADCAST, NodeAddr::BROADCAST, TopicId::from_raw(0));
+        let mut frame = Frame::new(
+            NodeAddr::BROADCAST,
+            NodeAddr::BROADCAST,
+            TopicId::from_raw(0),
+        );
         let got = t.recv(&mut frame).expect("recv on empty socket");
         assert!(!got);
     }
@@ -199,7 +209,11 @@ mod tests {
 
         tx.send(&frame).expect("send empty");
 
-        let mut received = Frame::new(NodeAddr::BROADCAST, NodeAddr::BROADCAST, TopicId::from_raw(0));
+        let mut received = Frame::new(
+            NodeAddr::BROADCAST,
+            NodeAddr::BROADCAST,
+            TopicId::from_raw(0),
+        );
         let mut got = false;
         for _ in 0..1000 {
             if rx.recv(&mut received).expect("recv") {
@@ -232,7 +246,11 @@ mod tests {
 
         tx.send(&frame).expect("send max");
 
-        let mut received = Frame::new(NodeAddr::BROADCAST, NodeAddr::BROADCAST, TopicId::from_raw(0));
+        let mut received = Frame::new(
+            NodeAddr::BROADCAST,
+            NodeAddr::BROADCAST,
+            TopicId::from_raw(0),
+        );
         let mut got = false;
         for _ in 0..1000 {
             if rx.recv(&mut received).expect("recv") {

@@ -124,9 +124,9 @@ pub fn pubsub_sink_template(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::collections::BTreeMap;
     use crate::eval::{ChannelReader, NullChannels, NullPubSub, PubSubReader};
     use crate::op::Dag;
+    use alloc::collections::BTreeMap;
 
     struct MockChannels {
         values: BTreeMap<String, f64>,
@@ -257,7 +257,10 @@ mod tests {
 
         // Verify the node is an Input with the correct channel name
         use crate::op::Op;
-        assert_eq!(dag.nodes()[ports.outputs[0].1 as usize], Op::Input("adc0".into()));
+        assert_eq!(
+            dag.nodes()[ports.outputs[0].1 as usize],
+            Op::Input("adc0".into())
+        );
 
         // Evaluate with mock channels
         let mut channels = MockChannels {

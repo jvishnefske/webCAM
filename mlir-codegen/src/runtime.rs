@@ -25,20 +25,34 @@ use crate::lower::{BlockId, BlockSnapshot, Channel, GraphSnapshot};
 /// needs to override the methods it cares about.
 #[allow(unused_variables)]
 pub trait HardwareBridge {
-    fn adc_read(&self, channel: u8) -> f64 { 0.0 }
+    fn adc_read(&self, channel: u8) -> f64 {
+        0.0
+    }
     fn pwm_write(&mut self, channel: u8, duty: f64) {}
-    fn gpio_read(&self, pin: u8) -> f64 { 0.0 }
+    fn gpio_read(&self, pin: u8) -> f64 {
+        0.0
+    }
     fn gpio_write(&mut self, pin: u8, value: f64) {}
-    fn uart_read(&self, port: u8) -> f64 { 0.0 }
+    fn uart_read(&self, port: u8) -> f64 {
+        0.0
+    }
     fn uart_write(&mut self, port: u8, value: f64) {}
-    fn encoder_read(&self, channel: u8) -> f64 { 0.0 }
+    fn encoder_read(&self, channel: u8) -> f64 {
+        0.0
+    }
     fn display_write(&mut self, bus: u8, addr: u8, line1: f64, line2: f64) {}
     fn stepper_move(&mut self, port: u8, target: f64) {}
-    fn stepper_position(&self, port: u8) -> f64 { 0.0 }
+    fn stepper_position(&self, port: u8) -> f64 {
+        0.0
+    }
     fn stepper_enable(&mut self, port: u8, enabled: bool) {}
-    fn stallguard_read(&self, port: u8, addr: u8) -> f64 { 0.0 }
+    fn stallguard_read(&self, port: u8, addr: u8) -> f64 {
+        0.0
+    }
     fn publish(&mut self, topic: &str, value: f64) {}
-    fn subscribe(&self, topic: &str) -> f64 { 0.0 }
+    fn subscribe(&self, topic: &str) -> f64 {
+        0.0
+    }
 }
 
 /// No-op hardware bridge for pure-logic testing.
@@ -119,17 +133,17 @@ impl BlockFn {
     pub fn from_snapshot(block: &BlockSnapshot) -> Result<Self, String> {
         let cfg = &block.config;
         Ok(match block.block_type.as_str() {
-            "constant" => Self::Constant(
-                cfg.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0),
-            ),
-            "gain" => Self::Gain(
-                cfg.get("param1").and_then(|v| v.as_f64()).unwrap_or(1.0),
-            ),
+            "constant" => Self::Constant(cfg.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0)),
+            "gain" => Self::Gain(cfg.get("param1").and_then(|v| v.as_f64()).unwrap_or(1.0)),
             "add" => Self::Add,
             "multiply" => Self::Multiply,
             "clamp" => Self::Clamp(
-                cfg.get("param1").and_then(|v| v.as_f64()).unwrap_or(f64::MIN),
-                cfg.get("param2").and_then(|v| v.as_f64()).unwrap_or(f64::MAX),
+                cfg.get("param1")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(f64::MIN),
+                cfg.get("param2")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(f64::MAX),
             ),
             "adc_source" => Self::AdcRead(cfg_u8(cfg, "channel")),
             "pwm_sink" => Self::PwmWrite(cfg_u8(cfg, "channel")),
@@ -159,13 +173,24 @@ impl BlockFn {
     /// Number of output slots this curried function produces.
     pub fn n_outputs(&self) -> usize {
         match self {
-            Self::Constant(_) | Self::Gain(_) | Self::Add | Self::Multiply
-            | Self::Clamp(_, _) | Self::AdcRead(_) | Self::GpioRead(_)
-            | Self::UartRx(_) | Self::Subscribe(_) | Self::Stepper(_) => 1,
+            Self::Constant(_)
+            | Self::Gain(_)
+            | Self::Add
+            | Self::Multiply
+            | Self::Clamp(_, _)
+            | Self::AdcRead(_)
+            | Self::GpioRead(_)
+            | Self::UartRx(_)
+            | Self::Subscribe(_)
+            | Self::Stepper(_) => 1,
             Self::EncoderRead(_) | Self::StallGuard { .. } => 2,
             Self::StateMachine { n_states, .. } => 1 + *n_states as usize,
-            Self::PwmWrite(_) | Self::GpioWrite(_) | Self::UartTx(_)
-            | Self::DisplayWrite(_, _) | Self::Publish(_) | Self::Nop => 0,
+            Self::PwmWrite(_)
+            | Self::GpioWrite(_)
+            | Self::UartTx(_)
+            | Self::DisplayWrite(_, _)
+            | Self::Publish(_)
+            | Self::Nop => 0,
         }
     }
 
@@ -220,7 +245,11 @@ impl BlockFn {
                 hw.stepper_move(*port, inp(inputs, 0));
                 set(outputs, 0, hw.stepper_position(*port));
             }
-            Self::StallGuard { port, addr, threshold } => {
+            Self::StallGuard {
+                port,
+                addr,
+                threshold,
+            } => {
                 let val = hw.stallguard_read(*port, *addr);
                 set(outputs, 0, val);
                 set(outputs, 1, if val < *threshold { 1.0 } else { 0.0 });
@@ -232,10 +261,18 @@ impl BlockFn {
             Self::Publish(topic) => {
                 hw.publish(topic, inp(inputs, 0));
             }
-            Self::StateMachine { n_states, initial, transitions } => {
+            Self::StateMachine {
+                n_states,
+                initial,
+                transitions,
+            } => {
                 // Current state persists in outputs[0] across ticks
                 let current = outputs.first().copied().unwrap_or(*initial as f64) as u8;
-                let current = if current >= *n_states { *initial } else { current };
+                let current = if current >= *n_states {
+                    *initial
+                } else {
+                    current
+                };
 
                 // Evaluate guards — first matching transition wins
                 let mut next = current;
@@ -354,7 +391,12 @@ impl DagRuntime {
                 }
             }
 
-            nodes.push(Node { block_id: id, func, input_slots, output_slots });
+            nodes.push(Node {
+                block_id: id,
+                func,
+                input_slots,
+                output_slots,
+            });
         }
 
         Ok(DagRuntime {
@@ -482,13 +524,21 @@ fn parse_state_machine(cfg: &serde_json::Value) -> Result<BlockFn, String> {
                     let from = state_names.iter().position(|&s| s == from_name)?;
                     let to = state_names.iter().position(|&s| s == to_name)?;
                     let guard = t.get("guard_port")?.as_u64()? as u8;
-                    Some(SmTransition { from: from as u8, guard, to: to as u8 })
+                    Some(SmTransition {
+                        from: from as u8,
+                        guard,
+                        to: to as u8,
+                    })
                 })
                 .collect()
         })
         .unwrap_or_default();
 
-    Ok(BlockFn::StateMachine { n_states, initial, transitions })
+    Ok(BlockFn::StateMachine {
+        n_states,
+        initial,
+        transitions,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -497,7 +547,8 @@ fn parse_state_machine(cfg: &serde_json::Value) -> Result<BlockFn, String> {
 
 fn topo_sort(block_ids: &[BlockId], channels: &[Channel]) -> Result<Vec<BlockId>, String> {
     let mut in_degree: HashMap<BlockId, usize> = block_ids.iter().map(|&id| (id, 0)).collect();
-    let mut adj: HashMap<BlockId, Vec<BlockId>> = block_ids.iter().map(|&id| (id, Vec::new())).collect();
+    let mut adj: HashMap<BlockId, Vec<BlockId>> =
+        block_ids.iter().map(|&id| (id, Vec::new())).collect();
 
     for ch in channels {
         if in_degree.contains_key(&ch.from_block) && in_degree.contains_key(&ch.to_block) {
@@ -527,7 +578,9 @@ fn topo_sort(block_ids: &[BlockId], channels: &[Channel]) -> Result<Vec<BlockId>
                 .get(&node)
                 .map(|v| v.iter().filter(|&&n| n == neighbor).count())
                 .unwrap_or(0);
-            let deg = in_degree.get_mut(&neighbor).expect("block in adj but not in_degree");
+            let deg = in_degree
+                .get_mut(&neighbor)
+                .expect("block in adj but not in_degree");
             *deg = deg.saturating_sub(edge_count);
             if *deg == 0 {
                 queue.push_back(neighbor);
@@ -560,7 +613,10 @@ mod tests {
             block_type: bt.to_string(),
             name: format!("{bt}_{id}"),
             inputs: vec![],
-            outputs: vec![PortDef { name: "out".into(), kind: PortKind::Float }],
+            outputs: vec![PortDef {
+                name: "out".into(),
+                kind: PortKind::Float,
+            }],
             config: cfg,
             output_values: vec![],
             custom_codegen: None,
@@ -576,7 +632,10 @@ mod tests {
         let mut b = block(id, bt, cfg);
         b.inputs = inputs
             .into_iter()
-            .map(|(n, k)| PortDef { name: n.into(), kind: k })
+            .map(|(n, k)| PortDef {
+                name: n.into(),
+                kind: k,
+            })
             .collect();
         b
     }
@@ -592,7 +651,12 @@ mod tests {
     }
 
     fn snap(blocks: Vec<BlockSnapshot>, channels: Vec<Channel>) -> GraphSnapshot {
-        GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 }
+        GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        }
     }
 
     // -- BlockFn unit tests -------------------------------------------------
@@ -647,8 +711,12 @@ mod tests {
         let s = snap(
             vec![
                 block(1, "constant", serde_json::json!({"value": 10.0})),
-                block_with_inputs(2, "gain", serde_json::json!({"param1": 5.0}),
-                    vec![("in", PortKind::Float)]),
+                block_with_inputs(
+                    2,
+                    "gain",
+                    serde_json::json!({"param1": 5.0}),
+                    vec![("in", PortKind::Float)],
+                ),
             ],
             vec![chan(1, 1, 0, 2, 0)],
         );
@@ -664,10 +732,18 @@ mod tests {
         let s = snap(
             vec![
                 block(1, "constant", serde_json::json!({"value": 3.0})),
-                block_with_inputs(2, "gain", serde_json::json!({"param1": 2.0}),
-                    vec![("in", PortKind::Float)]),
-                block_with_inputs(3, "gain", serde_json::json!({"param1": 4.0}),
-                    vec![("in", PortKind::Float)]),
+                block_with_inputs(
+                    2,
+                    "gain",
+                    serde_json::json!({"param1": 2.0}),
+                    vec![("in", PortKind::Float)],
+                ),
+                block_with_inputs(
+                    3,
+                    "gain",
+                    serde_json::json!({"param1": 4.0}),
+                    vec![("in", PortKind::Float)],
+                ),
             ],
             vec![chan(1, 1, 0, 2, 0), chan(2, 2, 0, 3, 0)],
         );
@@ -682,8 +758,12 @@ mod tests {
             vec![
                 block(1, "constant", serde_json::json!({"value": 7.0})),
                 block(2, "constant", serde_json::json!({"value": 8.0})),
-                block_with_inputs(3, "add", serde_json::json!({}),
-                    vec![("a", PortKind::Float), ("b", PortKind::Float)]),
+                block_with_inputs(
+                    3,
+                    "add",
+                    serde_json::json!({}),
+                    vec![("a", PortKind::Float), ("b", PortKind::Float)],
+                ),
             ],
             vec![chan(1, 1, 0, 3, 0), chan(2, 2, 0, 3, 1)],
         );
@@ -696,9 +776,17 @@ mod tests {
     fn pubsub_receive_injects_value() {
         let s = snap(
             vec![
-                block(1, "pubsub_source", serde_json::json!({"topic": "sensor/temp"})),
-                block_with_inputs(2, "gain", serde_json::json!({"param1": 2.0}),
-                    vec![("in", PortKind::Float)]),
+                block(
+                    1,
+                    "pubsub_source",
+                    serde_json::json!({"topic": "sensor/temp"}),
+                ),
+                block_with_inputs(
+                    2,
+                    "gain",
+                    serde_json::json!({"param1": 2.0}),
+                    vec![("in", PortKind::Float)],
+                ),
             ],
             vec![chan(1, 1, 0, 2, 0)],
         );
@@ -741,15 +829,33 @@ mod tests {
         });
         let mut b = block(1, "state_machine", cfg);
         b.inputs = vec![
-            PortDef { name: "start".into(), kind: PortKind::Float },
-            PortDef { name: "finish".into(), kind: PortKind::Float },
+            PortDef {
+                name: "start".into(),
+                kind: PortKind::Float,
+            },
+            PortDef {
+                name: "finish".into(),
+                kind: PortKind::Float,
+            },
         ];
         // state_idx + 3 active flags
         b.outputs = vec![
-            PortDef { name: "state".into(), kind: PortKind::Float },
-            PortDef { name: "idle".into(), kind: PortKind::Float },
-            PortDef { name: "running".into(), kind: PortKind::Float },
-            PortDef { name: "done".into(), kind: PortKind::Float },
+            PortDef {
+                name: "state".into(),
+                kind: PortKind::Float,
+            },
+            PortDef {
+                name: "idle".into(),
+                kind: PortKind::Float,
+            },
+            PortDef {
+                name: "running".into(),
+                kind: PortKind::Float,
+            },
+            PortDef {
+                name: "done".into(),
+                kind: PortKind::Float,
+            },
         ];
 
         let s = snap(vec![b], vec![]);
@@ -776,19 +882,28 @@ mod tests {
             ]
         });
         let mut b = block(1, "state_machine", cfg);
-        b.inputs = vec![PortDef { name: "trigger".into(), kind: PortKind::Float }];
+        b.inputs = vec![PortDef {
+            name: "trigger".into(),
+            kind: PortKind::Float,
+        }];
         b.outputs = vec![
-            PortDef { name: "state".into(), kind: PortKind::Float },
-            PortDef { name: "off".into(), kind: PortKind::Float },
-            PortDef { name: "on".into(), kind: PortKind::Float },
+            PortDef {
+                name: "state".into(),
+                kind: PortKind::Float,
+            },
+            PortDef {
+                name: "off".into(),
+                kind: PortKind::Float,
+            },
+            PortDef {
+                name: "on".into(),
+                kind: PortKind::Float,
+            },
         ];
 
         // const(1.0) → guard input
         let s = snap(
-            vec![
-                block(0, "constant", serde_json::json!({"value": 1.0})),
-                b,
-            ],
+            vec![block(0, "constant", serde_json::json!({"value": 1.0})), b],
             vec![chan(1, 0, 0, 1, 0)],
         );
         let mut rt = DagRuntime::from_snapshot(&s).unwrap();
@@ -818,10 +933,18 @@ mod tests {
     fn cycle_detection() {
         let s = snap(
             vec![
-                block_with_inputs(1, "gain", serde_json::json!({"param1": 1.0}),
-                    vec![("in", PortKind::Float)]),
-                block_with_inputs(2, "gain", serde_json::json!({"param1": 1.0}),
-                    vec![("in", PortKind::Float)]),
+                block_with_inputs(
+                    1,
+                    "gain",
+                    serde_json::json!({"param1": 1.0}),
+                    vec![("in", PortKind::Float)],
+                ),
+                block_with_inputs(
+                    2,
+                    "gain",
+                    serde_json::json!({"param1": 1.0}),
+                    vec![("in", PortKind::Float)],
+                ),
             ],
             vec![chan(1, 1, 0, 2, 0), chan(2, 2, 0, 1, 0)],
         );
@@ -867,8 +990,12 @@ mod tests {
     fn unconnected_inputs_default_zero() {
         // gain with no input connection → input is 0.0 → output is 0.0
         let s = snap(
-            vec![block_with_inputs(1, "gain", serde_json::json!({"param1": 5.0}),
-                vec![("in", PortKind::Float)])],
+            vec![block_with_inputs(
+                1,
+                "gain",
+                serde_json::json!({"param1": 5.0}),
+                vec![("in", PortKind::Float)],
+            )],
             vec![],
         );
         let mut rt = DagRuntime::from_snapshot(&s).unwrap();
@@ -883,21 +1010,31 @@ mod tests {
             last_pwm: Option<(u8, f64)>,
         }
         impl HardwareBridge for TestHw {
-            fn adc_read(&self, _ch: u8) -> f64 { self.adc_val }
-            fn pwm_write(&mut self, ch: u8, duty: f64) { self.last_pwm = Some((ch, duty)); }
+            fn adc_read(&self, _ch: u8) -> f64 {
+                self.adc_val
+            }
+            fn pwm_write(&mut self, ch: u8, duty: f64) {
+                self.last_pwm = Some((ch, duty));
+            }
         }
 
         let mut adc = block(1, "adc_source", serde_json::json!({"channel": 0}));
         adc.inputs = vec![];
 
         let mut pwm = block(2, "pwm_sink", serde_json::json!({"channel": 3}));
-        pwm.inputs = vec![PortDef { name: "duty".into(), kind: PortKind::Float }];
+        pwm.inputs = vec![PortDef {
+            name: "duty".into(),
+            kind: PortKind::Float,
+        }];
         pwm.outputs = vec![];
 
         let s = snap(vec![adc, pwm], vec![chan(1, 1, 0, 2, 0)]);
         let mut rt = DagRuntime::from_snapshot(&s).unwrap();
 
-        let mut hw = TestHw { adc_val: 0.75, last_pwm: None };
+        let mut hw = TestHw {
+            adc_val: 0.75,
+            last_pwm: None,
+        };
         rt.tick(&mut hw);
 
         assert_eq!(rt.read_output(1, 0), Some(0.75));
@@ -910,8 +1047,12 @@ mod tests {
             vec![
                 block(1, "constant", serde_json::json!({"value": 6.0})),
                 block(2, "constant", serde_json::json!({"value": 7.0})),
-                block_with_inputs(3, "multiply", serde_json::json!({}),
-                    vec![("a", PortKind::Float), ("b", PortKind::Float)]),
+                block_with_inputs(
+                    3,
+                    "multiply",
+                    serde_json::json!({}),
+                    vec![("a", PortKind::Float), ("b", PortKind::Float)],
+                ),
             ],
             vec![chan(1, 1, 0, 3, 0), chan(2, 2, 0, 3, 1)],
         );
@@ -922,7 +1063,10 @@ mod tests {
 
     #[test]
     fn unsupported_block_type_errors() {
-        let s = snap(vec![block(1, "quantum_flux", serde_json::json!({}))], vec![]);
+        let s = snap(
+            vec![block(1, "quantum_flux", serde_json::json!({}))],
+            vec![],
+        );
         let err = DagRuntime::from_snapshot(&s).unwrap_err();
         assert!(err.contains("unsupported"));
     }

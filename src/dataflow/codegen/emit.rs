@@ -142,10 +142,7 @@ pub fn generate_workspace(
         "dataflow-rt/Cargo.toml".to_string(),
         generate_rt_cargo_toml(),
     ));
-    files.push((
-        "dataflow-rt/src/lib.rs".to_string(),
-        generate_rt_lib_rs(),
-    ));
+    files.push(("dataflow-rt/src/lib.rs".to_string(), generate_rt_lib_rs()));
 
     // Generate target crates
     for twb in targets {
@@ -185,8 +182,8 @@ pub fn generate_workspace_mlir(
     ));
 
     // Serialize the snapshot to JSON for the mlir-codegen crate
-    let snap_json = serde_json::to_string(snap)
-        .map_err(|e| format!("failed to serialize snapshot: {e}"))?;
+    let snap_json =
+        serde_json::to_string(snap).map_err(|e| format!("failed to serialize snapshot: {e}"))?;
 
     // Deserialize into mlir-codegen's own types
     let mlir_snap: mlir_codegen::lower::GraphSnapshot = serde_json::from_str(&snap_json)
@@ -201,10 +198,7 @@ pub fn generate_workspace_mlir(
         "dataflow-rt/Cargo.toml".to_string(),
         generate_rt_cargo_toml(),
     ));
-    files.push((
-        "dataflow-rt/src/lib.rs".to_string(),
-        generate_rt_lib_rs(),
-    ));
+    files.push(("dataflow-rt/src/lib.rs".to_string(), generate_rt_lib_rs()));
 
     // Generate target crates (with C-FFI hw_* functions)
     for twb in targets {
@@ -358,8 +352,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
         if is_skipped(&block.block_type) || is_peripheral(&block.block_type) {
             if is_peripheral_source(&block.block_type) {
                 for (port_idx, port) in block.outputs.iter().enumerate() {
-                    let default =
-                        crate::dataflow::codegen::types::rust_default_no_std(&port.kind);
+                    let default = crate::dataflow::codegen::types::rust_default_no_std(&port.kind);
                     writeln!(out, "            out_{id}_p{port_idx}: {default},").unwrap();
                 }
             }
@@ -393,12 +386,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
             continue;
         }
 
-        writeln!(
-            out,
-            "    // Block {id}: {} ({bt})",
-            block.name
-        )
-        .unwrap();
+        writeln!(out, "    // Block {id}: {} ({bt})", block.name).unwrap();
 
         // Build the argument list from connected channels
         let args = build_call_args(id, block, &snap.channels);
@@ -428,11 +416,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 } else {
                     state_ref(&args[0])
                 };
-                writeln!(
-                    out,
-                    "    hw.pwm_write({channel}, {arg} as f32);"
-                )
-                .unwrap();
+                writeln!(out, "    hw.pwm_write({channel}, {arg} as f32);").unwrap();
             }
             "gpio_out" => {
                 let pin = block
@@ -445,11 +429,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 } else {
                     state_ref(&args[0])
                 };
-                writeln!(
-                    out,
-                    "    hw.gpio_write({pin}, {arg} > 0.5);"
-                )
-                .unwrap();
+                writeln!(out, "    hw.gpio_write({pin}, {arg} > 0.5);").unwrap();
             }
             "gpio_in" => {
                 let pin = block
@@ -529,11 +509,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
                     let r = state_ref(&args[1]);
                     format!("&{r}")
                 };
-                writeln!(
-                    out,
-                    "    hw.display_write({bus}, {addr}, {arg0}, {arg1});"
-                )
-                .unwrap();
+                writeln!(out, "    hw.display_write({bus}, {addr}, {arg0}, {arg1});").unwrap();
             }
             "tmc2209_stepper" => {
                 let port = block
@@ -551,16 +527,8 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 } else {
                     state_ref(&args[1])
                 };
-                writeln!(
-                    out,
-                    "    hw.stepper_enable({port}, {arg_enable} > 0.5);"
-                )
-                .unwrap();
-                writeln!(
-                    out,
-                    "    hw.stepper_move({port}, {arg_target} as i64);"
-                )
-                .unwrap();
+                writeln!(out, "    hw.stepper_enable({port}, {arg_enable} > 0.5);").unwrap();
+                writeln!(out, "    hw.stepper_move({port}, {arg_target} as i64);").unwrap();
                 writeln!(
                     out,
                     "    state.out_{id}_p0 = hw.stepper_position({port}) as f64;"
@@ -612,11 +580,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
                         .map(|p| format!("state.out_{id}_p{p}"))
                         .collect();
                     let var_str = vars.join(", ");
-                    writeln!(
-                        out,
-                        "    ({var_str}) = state.sm_{id}.tick({arg_str});"
-                    )
-                    .unwrap();
+                    writeln!(out, "    ({var_str}) = state.sm_{id}.tick({arg_str});").unwrap();
                 }
             }
             // Pure computation blocks → function calls
@@ -640,11 +604,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
                         .map(|p| format!("state.out_{id}_p{p}"))
                         .collect();
                     let var_str = vars.join(", ");
-                    writeln!(
-                        out,
-                        "    ({var_str}) = blocks::block_{id}({arg_str});"
-                    )
-                    .unwrap();
+                    writeln!(out, "    ({var_str}) = blocks::block_{id}({arg_str});").unwrap();
                 }
             }
         }
@@ -727,14 +687,22 @@ fn generate_logic_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 writeln!(out, "}}").unwrap();
             }
             "pubsub_sink" => {
-                let topic = block.config.get("topic").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let topic = block
+                    .config
+                    .get("topic")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
                 writeln!(out, "// pubsub_sink: topic=\"{topic}\"").unwrap();
                 writeln!(out, "pub fn block_{id}(_value: f64) {{").unwrap();
                 writeln!(out, "    // TODO: pubsub::encode + transport.send").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "pubsub_source" => {
-                let topic = block.config.get("topic").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let topic = block
+                    .config
+                    .get("topic")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
                 writeln!(out, "// pubsub_source: topic=\"{topic}\"").unwrap();
                 writeln!(out, "pub fn block_{id}() -> f64 {{").unwrap();
                 writeln!(out, "    // TODO: transport.recv + pubsub::decode").unwrap();
@@ -850,10 +818,7 @@ fn emit_state_machine_block(out: &mut String, block: &BlockSnapshot) -> Result<(
         } else {
             let mut first = true;
             for t in &from_transitions {
-                let to_state = t
-                    .get("to")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or(state);
+                let to_state = t.get("to").and_then(|v| v.as_str()).unwrap_or(state);
                 let to_variant = to_pascal_case(to_state);
                 let guard_port = t.get("guard_port").and_then(|v| v.as_u64());
 
@@ -877,11 +842,8 @@ fn emit_state_machine_block(out: &mut String, block: &BlockSnapshot) -> Result<(
                     if first {
                         writeln!(out, "Block{id}State::{to_variant},").unwrap();
                     } else {
-                        writeln!(
-                            out,
-                            "            else {{ Block{id}State::{to_variant} }},"
-                        )
-                        .unwrap();
+                        writeln!(out, "            else {{ Block{id}State::{to_variant} }},")
+                            .unwrap();
                     }
                     first = false;
                 }
@@ -891,11 +853,7 @@ fn emit_state_machine_block(out: &mut String, block: &BlockSnapshot) -> Result<(
                 .iter()
                 .all(|t| t.get("guard_port").and_then(|v| v.as_u64()).is_some())
             {
-                writeln!(
-                    out,
-                    "            else {{ Block{id}State::{variant} }},"
-                )
-                .unwrap();
+                writeln!(out, "            else {{ Block{id}State::{variant} }},").unwrap();
             }
         }
     }
@@ -949,7 +907,10 @@ fn is_peripheral(block_type: &str) -> bool {
 }
 
 fn is_peripheral_source(block_type: &str) -> bool {
-    matches!(block_type, "adc_source" | "gpio_in" | "uart_rx" | "encoder" | "tmc2209_stallguard" | "tmc2209_stepper")
+    matches!(
+        block_type,
+        "adc_source" | "gpio_in" | "uart_rx" | "encoder" | "tmc2209_stallguard" | "tmc2209_stepper"
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -1058,85 +1019,165 @@ fn generate_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 writeln!(out, "}}").unwrap();
             }
             "adc_source" => {
-                let channel = block.config.get("channel").and_then(|v| v.as_u64()).unwrap_or(0);
-                let bits = block.config.get("resolution_bits").and_then(|v| v.as_u64()).unwrap_or(12);
-                writeln!(out, "// TODO: Read ADC channel {channel} ({bits}-bit resolution)").unwrap();
+                let channel = block
+                    .config
+                    .get("channel")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let bits = block
+                    .config
+                    .get("resolution_bits")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(12);
+                writeln!(
+                    out,
+                    "// TODO: Read ADC channel {channel} ({bits}-bit resolution)"
+                )
+                .unwrap();
                 writeln!(out, "pub fn block_{id}() -> f64 {{").unwrap();
                 writeln!(out, "    0.0 // stub: ADC read").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "pwm_sink" => {
-                let channel = block.config.get("channel").and_then(|v| v.as_u64()).unwrap_or(0);
-                let freq = block.config.get("frequency_hz").and_then(|v| v.as_u64()).unwrap_or(1000);
+                let channel = block
+                    .config
+                    .get("channel")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let freq = block
+                    .config
+                    .get("frequency_hz")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(1000);
                 writeln!(out, "// TODO: Set PWM channel {channel} at {freq}Hz").unwrap();
                 writeln!(out, "pub fn block_{id}(_duty: f64) {{").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "gpio_out" => {
-                let pin = block.config.get("pin").and_then(|v| v.as_u64()).unwrap_or(13);
+                let pin = block
+                    .config
+                    .get("pin")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(13);
                 writeln!(out, "// TODO: Set GPIO pin {pin} output").unwrap();
                 writeln!(out, "pub fn block_{id}(_state: f64) {{").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "gpio_in" => {
-                let pin = block.config.get("pin").and_then(|v| v.as_u64()).unwrap_or(2);
+                let pin = block
+                    .config
+                    .get("pin")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(2);
                 writeln!(out, "// TODO: Read GPIO pin {pin} input").unwrap();
                 writeln!(out, "pub fn block_{id}() -> f64 {{").unwrap();
                 writeln!(out, "    0.0 // stub: GPIO read").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "uart_tx" => {
-                let port = block.config.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
-                let baud = block.config.get("baud").and_then(|v| v.as_u64()).unwrap_or(115200);
+                let port = block
+                    .config
+                    .get("port")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let baud = block
+                    .config
+                    .get("baud")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(115200);
                 writeln!(out, "// TODO: Transmit on UART{port} at {baud} baud").unwrap();
                 writeln!(out, "pub fn block_{id}(_data: &[u8]) {{").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "uart_rx" => {
-                let port = block.config.get("port").and_then(|v| v.as_u64()).unwrap_or(0);
-                let baud = block.config.get("baud").and_then(|v| v.as_u64()).unwrap_or(115200);
+                let port = block
+                    .config
+                    .get("port")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let baud = block
+                    .config
+                    .get("baud")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(115200);
                 writeln!(out, "// TODO: Receive from UART{port} at {baud} baud").unwrap();
                 writeln!(out, "pub fn block_{id}() -> Vec<u8> {{").unwrap();
                 writeln!(out, "    Vec::new()").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "encoder" => {
-                let channel = block.config.get("channel").and_then(|v| v.as_u64()).unwrap_or(0);
+                let channel = block
+                    .config
+                    .get("channel")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 writeln!(out, "// TODO: Read quadrature encoder channel {channel}").unwrap();
                 writeln!(out, "pub fn block_{id}() -> (f64, f64) {{").unwrap();
                 writeln!(out, "    (0.0, 0.0) // stub: (position, velocity)").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "ssd1306_display" => {
-                let bus = block.config.get("i2c_bus").and_then(|v| v.as_u64()).unwrap_or(0);
-                let addr = block.config.get("address").and_then(|v| v.as_u64()).unwrap_or(0x3C);
-                writeln!(out, "// TODO: Write to SSD1306 display on I2C bus {bus}, addr 0x{addr:02X}").unwrap();
+                let bus = block
+                    .config
+                    .get("i2c_bus")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let addr = block
+                    .config
+                    .get("address")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0x3C);
+                writeln!(
+                    out,
+                    "// TODO: Write to SSD1306 display on I2C bus {bus}, addr 0x{addr:02X}"
+                )
+                .unwrap();
                 writeln!(out, "pub fn block_{id}(_line1: &str, _line2: &str) {{").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "tmc2209_stepper" => {
-                let port = block.config.get("uart_port").and_then(|v| v.as_u64()).unwrap_or(0);
+                let port = block
+                    .config
+                    .get("uart_port")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 writeln!(out, "// TODO: TMC2209 stepper on UART port {port}").unwrap();
-                writeln!(out, "pub fn block_{id}(_target: f64, _enable: f64) -> f64 {{").unwrap();
+                writeln!(
+                    out,
+                    "pub fn block_{id}(_target: f64, _enable: f64) -> f64 {{"
+                )
+                .unwrap();
                 writeln!(out, "    0.0 // stub: actual position").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "tmc2209_stallguard" => {
-                let port = block.config.get("uart_port").and_then(|v| v.as_u64()).unwrap_or(0);
+                let port = block
+                    .config
+                    .get("uart_port")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 writeln!(out, "// TODO: TMC2209 StallGuard on UART port {port}").unwrap();
                 writeln!(out, "pub fn block_{id}() -> (f64, f64) {{").unwrap();
                 writeln!(out, "    (0.0, 0.0) // stub: (sg_value, stall_detected)").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "pubsub_sink" => {
-                let topic = block.config.get("topic").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let topic = block
+                    .config
+                    .get("topic")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
                 writeln!(out, "// pubsub_sink: topic=\"{topic}\"").unwrap();
                 writeln!(out, "pub fn block_{id}(_value: f64) {{").unwrap();
                 writeln!(out, "    // TODO: pubsub::encode + transport.send").unwrap();
                 writeln!(out, "}}").unwrap();
             }
             "pubsub_source" => {
-                let topic = block.config.get("topic").and_then(|v| v.as_str()).unwrap_or("unknown");
+                let topic = block
+                    .config
+                    .get("topic")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
                 writeln!(out, "// pubsub_source: topic=\"{topic}\"").unwrap();
                 writeln!(out, "pub fn block_{id}() -> f64 {{").unwrap();
                 writeln!(out, "    // TODO: transport.recv + pubsub::decode").unwrap();
@@ -1181,11 +1222,7 @@ fn generate_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, String> {
         for (port_idx, port) in block.outputs.iter().enumerate() {
             let default = crate::dataflow::codegen::types::rust_default(&port.kind);
             let ty = crate::dataflow::codegen::types::rust_type(&port.kind);
-            writeln!(
-                out,
-                "    let mut out_{id}_p{port_idx}: {ty} = {default};"
-            )
-            .unwrap();
+            writeln!(out, "    let mut out_{id}_p{port_idx}: {ty} = {default};").unwrap();
         }
     }
     writeln!(out).unwrap();
@@ -1207,12 +1244,7 @@ fn generate_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, String> {
             continue;
         }
 
-        writeln!(
-            out,
-            "        // Block {id}: {} ({bt})",
-            block.name
-        )
-        .unwrap();
+        writeln!(out, "        // Block {id}: {} ({bt})", block.name).unwrap();
 
         // Build the argument list from connected channels.
         let args = build_call_args(id, block, &snap.channels);
@@ -1235,11 +1267,7 @@ fn generate_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, String> {
             writeln!(out, "        blocks::block_{id}({arg_str});").unwrap();
         } else if block.outputs.len() == 1 {
             let arg_str = args.join(", ");
-            writeln!(
-                out,
-                "        out_{id}_p0 = blocks::block_{id}({arg_str});"
-            )
-            .unwrap();
+            writeln!(out, "        out_{id}_p0 = blocks::block_{id}({arg_str});").unwrap();
         } else {
             // Multiple outputs: use tuple destructuring.
             let arg_str = args.join(", ");
@@ -1247,20 +1275,12 @@ fn generate_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, String> {
                 .map(|p| format!("out_{id}_p{p}"))
                 .collect();
             let var_str = vars.join(", ");
-            writeln!(
-                out,
-                "        ({var_str}) = blocks::block_{id}({arg_str});"
-            )
-            .unwrap();
+            writeln!(out, "        ({var_str}) = blocks::block_{id}({arg_str});").unwrap();
         }
     }
 
     writeln!(out).unwrap();
-    writeln!(
-        out,
-        "        // Fixed timestep delay."
-    )
-    .unwrap();
+    writeln!(out, "        // Fixed timestep delay.").unwrap();
     writeln!(
         out,
         "        std::thread::sleep(std::time::Duration::from_secs_f64(dt));"
@@ -1299,11 +1319,7 @@ fn generate_parallel_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, St
         for (port_idx, port) in block.outputs.iter().enumerate() {
             let default = crate::dataflow::codegen::types::rust_default(&port.kind);
             let ty = crate::dataflow::codegen::types::rust_type(&port.kind);
-            writeln!(
-                out,
-                "    let mut out_{id}_p{port_idx}: {ty} = {default};"
-            )
-            .unwrap();
+            writeln!(out, "    let mut out_{id}_p{port_idx}: {ty} = {default};").unwrap();
         }
     }
     writeln!(out).unwrap();
@@ -1336,12 +1352,7 @@ fn generate_parallel_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, St
                 continue;
             }
 
-            writeln!(
-                out,
-                "                // Block {id}: {} ({bt})",
-                block.name
-            )
-            .unwrap();
+            writeln!(out, "                // Block {id}: {} ({bt})", block.name).unwrap();
 
             let args = build_call_args(id, block, &snap.channels);
             emit_block_call(&mut out, id, block, bt, &args, "                ");
@@ -1352,11 +1363,7 @@ fn generate_parallel_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, St
 
     writeln!(out, "        }});").unwrap();
     writeln!(out).unwrap();
-    writeln!(
-        out,
-        "        // Fixed timestep delay."
-    )
-    .unwrap();
+    writeln!(out, "        // Fixed timestep delay.").unwrap();
     writeln!(
         out,
         "        std::thread::sleep(std::time::Duration::from_secs_f64(dt));"
@@ -1393,22 +1400,14 @@ fn emit_block_call(
         writeln!(out, "{indent}blocks::block_{id}({arg_str});").unwrap();
     } else if block.outputs.len() == 1 {
         let arg_str = args.join(", ");
-        writeln!(
-            out,
-            "{indent}out_{id}_p0 = blocks::block_{id}({arg_str});"
-        )
-        .unwrap();
+        writeln!(out, "{indent}out_{id}_p0 = blocks::block_{id}({arg_str});").unwrap();
     } else {
         let arg_str = args.join(", ");
         let vars: Vec<String> = (0..block.outputs.len())
             .map(|p| format!("out_{id}_p{p}"))
             .collect();
         let var_str = vars.join(", ");
-        writeln!(
-            out,
-            "{indent}({var_str}) = blocks::block_{id}({arg_str});"
-        )
-        .unwrap();
+        writeln!(out, "{indent}({var_str}) = blocks::block_{id}({arg_str});").unwrap();
     }
 }
 
@@ -1487,8 +1486,8 @@ pub fn generate_distributed_workspace(
     config: &DistributedConfig,
 ) -> Result<DistributedWorkspace, String> {
     // 1. Partition the graph by target assignment.
-    let partition_result = partition::partition_graph(snap)
-        .map_err(|e| format!("partition error: {e:?}"))?;
+    let partition_result =
+        partition::partition_graph(snap).map_err(|e| format!("partition error: {e:?}"))?;
 
     let has_bridges = !partition_result.bridges.is_empty();
 
@@ -1508,7 +1507,8 @@ pub fn generate_distributed_workspace(
         if has_bridges {
             for file in &mut ws.files {
                 if file.0 == "logic/Cargo.toml" {
-                    file.1.push_str("\n[dependencies.pubsub]\npath = \"../pubsub\"\n");
+                    file.1
+                        .push_str("\n[dependencies.pubsub]\npath = \"../pubsub\"\n");
                 }
             }
         }
@@ -1560,7 +1560,7 @@ mod tests {
             config: serde_json::json!({ "value": value }),
             output_values: vec![Some(Value::Float(value))],
             target: None,
-        custom_codegen: None,
+            custom_codegen: None,
         }
     }
 
@@ -1574,7 +1574,7 @@ mod tests {
             config: serde_json::json!({ "op": "Gain", "param1": factor, "param2": 0.0 }),
             output_values: vec![Some(Value::Float(0.0))],
             target: None,
-        custom_codegen: None,
+            custom_codegen: None,
         }
     }
 
@@ -1591,7 +1591,7 @@ mod tests {
             config: serde_json::json!({ "op": "Add", "param1": 0.0, "param2": 0.0 }),
             output_values: vec![Some(Value::Float(0.0))],
             target: None,
-        custom_codegen: None,
+            custom_codegen: None,
         }
     }
 
@@ -1605,7 +1605,7 @@ mod tests {
             config: serde_json::json!({ "max_samples": 1000 }),
             output_values: vec![],
             target: None,
-        custom_codegen: None,
+            custom_codegen: None,
         }
     }
 
@@ -1744,7 +1744,7 @@ mod tests {
                 config: serde_json::json!({ "op": "Clamp", "param1": -1.0, "param2": 1.0 }),
                 output_values: vec![],
                 target: None,
-            custom_codegen: None,
+                custom_codegen: None,
             }],
             channels: vec![],
             tick_count: 0,
@@ -1768,7 +1768,7 @@ mod tests {
                 config: serde_json::json!({ "address": "127.0.0.1:9000" }),
                 output_values: vec![],
                 target: None,
-            custom_codegen: None,
+                custom_codegen: None,
             }],
             channels: vec![],
             tick_count: 0,
@@ -1847,7 +1847,7 @@ mod tests {
                     config: serde_json::json!({ "channel": 2, "resolution_bits": 10 }),
                     output_values: vec![],
                     target: None,
-                custom_codegen: None,
+                    custom_codegen: None,
                 },
                 BlockSnapshot {
                     id: 2,
@@ -1858,7 +1858,7 @@ mod tests {
                     config: serde_json::json!({ "channel": 1, "frequency_hz": 2000 }),
                     output_values: vec![],
                     target: None,
-                custom_codegen: None,
+                    custom_codegen: None,
                 },
             ],
             channels: vec![ch(1, 1, 0, 2, 0)],
@@ -1946,7 +1946,7 @@ mod tests {
                     config: serde_json::json!({ "channel": 0 }),
                     output_values: vec![],
                     target: None,
-                custom_codegen: None,
+                    custom_codegen: None,
                 },
                 make_gain_snapshot(2, 2.5),
                 BlockSnapshot {
@@ -1958,7 +1958,7 @@ mod tests {
                     config: serde_json::json!({ "channel": 0 }),
                     output_values: vec![],
                     target: None,
-                custom_codegen: None,
+                    custom_codegen: None,
                 },
             ],
             channels: vec![ch(1, 1, 0, 2, 0), ch(2, 2, 0, 3, 0)],
@@ -2070,7 +2070,7 @@ mod tests {
                     }),
                     output_values: vec![],
                     target: None,
-                custom_codegen: None,
+                    custom_codegen: None,
                 },
             ],
             channels: vec![ch(1, 1, 0, 5, 0)],
@@ -2170,7 +2170,7 @@ mod tests {
                     }),
                     output_values: vec![],
                     target: None,
-                custom_codegen: None,
+                    custom_codegen: None,
                 },
             ],
             channels: vec![ch(1, 1, 0, 5, 0)],
@@ -2192,7 +2192,10 @@ mod tests {
             .as_str();
 
         // State struct must have the state machine instance field
-        assert!(lib_rs.contains("sm_5: blocks::Block5"), "Missing sm_5 field");
+        assert!(
+            lib_rs.contains("sm_5: blocks::Block5"),
+            "Missing sm_5 field"
+        );
         // AND the output fields for tick() to write to
         assert!(lib_rs.contains("out_5_p0: f64"), "Missing out_5_p0 field");
         assert!(lib_rs.contains("out_5_p1: f64"), "Missing out_5_p1 field");
@@ -2378,7 +2381,11 @@ mod tests {
         };
 
         let result = generate_distributed_workspace(&snap, &config).unwrap();
-        assert_eq!(result.workspaces.len(), 1, "Expected 1 workspace for single target");
+        assert_eq!(
+            result.workspaces.len(),
+            1,
+            "Expected 1 workspace for single target"
+        );
 
         let rp_ws = &result.workspaces[&TargetFamily::Rp2040];
         let lib_rs = ws_file(rp_ws, "logic/src/lib.rs").expect("missing logic/src/lib.rs");
@@ -2530,8 +2537,7 @@ mod tests {
 
         let result = generate_distributed_workspace(&snap, &config).unwrap();
         let rp_ws = &result.workspaces[&TargetFamily::Rp2040];
-        let cargo = ws_file(rp_ws, "logic/Cargo.toml")
-            .expect("missing logic/Cargo.toml");
+        let cargo = ws_file(rp_ws, "logic/Cargo.toml").expect("missing logic/Cargo.toml");
         assert!(
             !cargo.contains("pubsub"),
             "Single-target workspace should not have pubsub dependency, got:\n{cargo}"
