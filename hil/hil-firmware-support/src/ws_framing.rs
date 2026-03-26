@@ -289,6 +289,14 @@ pub async fn read_frame<'a>(
     })
 }
 
+/// Parses the HTTP method from a request line.
+///
+/// Extracts "GET", "POST", etc. from `GET /path HTTP/1.1\r\n...`.
+pub fn parse_request_method(buf: &[u8]) -> Option<&str> {
+    let end = buf.iter().position(|&b| b == b' ')?;
+    core::str::from_utf8(&buf[..end]).ok()
+}
+
 /// Parses the URL path from an HTTP request line.
 ///
 /// Extracts the path from `GET /path HTTP/1.1\r\n...` format.

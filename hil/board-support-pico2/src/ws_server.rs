@@ -5,20 +5,23 @@
 
 use crate::shared_buses::{SharedBusMutex, WsBusAccess};
 
-/// Embassy task that runs the HTTP and WebSocket server.
+/// Embassy task that runs the HTTP and WebSocket server with DAG API.
 ///
-/// Devices added via WebSocket `AddDevice` are visible on USB /dev/i2c-*
-/// because the USB handler reads from the same shared RuntimeBus instances.
+/// Serves the DAG editor frontend, handles POST /api/dag for CBOR uploads,
+/// and runs the existing I2C WebSocket dispatch.
 #[embassy_executor::task]
 pub async fn ws_server_task(
     stack: embassy_net::Stack<'static>,
     shared: &'static SharedBusMutex,
+    dag: &'static mut crate::dag_handler::DagApiHandler,
 ) -> ! {
     let mut buses = WsBusAccess::new(shared);
     let assets = crate::http_static::assets();
-    // No DFU flash writer for Pico 2 (flash directly via probe-rs)
     let mut fw_writer = NullDfuWriter;
-    hil_firmware_support::ws_server::run(stack, &mut buses, &assets, &mut fw_writer).await
+    hil_firmware_support::ws_server::run_with_api(
+        stack, &mut buses, &assets, &mut fw_writer, dag,
+    )
+    .await
 }
 
 /// Stub DFU writer — Pico 2 is flashed via probe-rs, not OTA.

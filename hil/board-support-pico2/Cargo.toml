@@ -31,6 +31,8 @@ i2c-hil-sim = { workspace = true }
 hil-firmware-support = { workspace = true, features = ["tcp"] }
 usb-composite-dispatchers = { workspace = true }
 dap-dispatch = { workspace = true, features = ["embassy-usb", "defmt"] }
+dag-core = { workspace = true }
+embedded-alloc = "0.6"
 static_cell = "2"
 portable-atomic = { version = "1.5.1", features = ["critical-section"] }
 
