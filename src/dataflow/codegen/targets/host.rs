@@ -83,6 +83,15 @@ fn generate_main_rs(dt: f64) -> String {
     .unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
+
+    // Global peripherals instance for C-FFI path
+    writeln!(out, "static mut HW: SimPeripherals = SimPeripherals {{").unwrap();
+    writeln!(out, "    adc: [0.0; 16],").unwrap();
+    writeln!(out, "    pwm: [0.0; 16],").unwrap();
+    writeln!(out, "    gpio: [false; 32],").unwrap();
+    writeln!(out, "}};").unwrap();
+    writeln!(out).unwrap();
+
     writeln!(out, "fn main() {{").unwrap();
     writeln!(out, "    let mut hw = SimPeripherals::default();").unwrap();
     writeln!(out, "    let mut state = logic::State::default();").unwrap();
@@ -95,5 +104,9 @@ fn generate_main_rs(dt: f64) -> String {
     .unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
+
+    // Append C-FFI hw_* stubs
+    out.push_str(&super::generate_hw_ffi_stubs("HW"));
+
     out
 }

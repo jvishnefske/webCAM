@@ -96,7 +96,7 @@ pub fn peek_tag(request: &[u8]) -> Option<u32> {
     let mut dec = minicbor::Decoder::new(request);
     let _map_len = dec.map().ok()?;
     let _key0 = dec.u32().ok()?;
-    Some(dec.u32().ok()?)
+    dec.u32().ok()
 }
 
 /// Checks whether a CBOR tag is a firmware update message (20-23).

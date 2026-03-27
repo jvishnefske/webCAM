@@ -263,10 +263,10 @@ mod tests {
         let mut channels = MockChannels {
             values: BTreeMap::new(),
         };
-        channels.values.insert("adc0".into(), 3.14);
+        channels.values.insert("adc0".into(), 3.25);
         let mut values = alloc::vec![0.0; dag.len()];
         dag.evaluate(&channels, &NullPubSub, &mut values);
-        assert_eq!(values[ports.outputs[0].1 as usize], 3.14);
+        assert_eq!(values[ports.outputs[0].1 as usize], 3.25);
     }
 
     #[test]

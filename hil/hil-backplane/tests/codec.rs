@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used)]
 //! Tests for fixed-buffer encode/decode helpers.
 
 use hil_backplane::codec::{decode_envelope, encode_to_slice};

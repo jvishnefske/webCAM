@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used)]
 //! NodeAnnounce CBOR encode/decode round-trip tests.
 
 use hil_backplane::discovery::NodeAnnounce;

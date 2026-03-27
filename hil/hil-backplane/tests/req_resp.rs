@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used)]
 //! Request/response correlation over loopback UDP.
 
 use std::net::Ipv4Addr;

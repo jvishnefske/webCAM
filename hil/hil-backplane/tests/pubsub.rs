@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used)]
 //! Two-node pub/sub over loopback UDP.
 
 use std::net::Ipv4Addr;

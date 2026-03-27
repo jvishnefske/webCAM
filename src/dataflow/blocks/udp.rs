@@ -101,3 +101,51 @@ impl Tick for UdpSinkBlock {
         vec![]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn udp_source_module_trait() {
+        let mut b = UdpSourceBlock::new("127.0.0.1:9000");
+        assert_eq!(b.name(), "UDP Source");
+        assert_eq!(b.block_type(), "udp_source");
+        assert!(b.input_ports().is_empty());
+        assert_eq!(b.output_ports().len(), 1);
+        assert!(b.config_json().contains("127.0.0.1:9000"));
+        assert!(b.as_analysis().is_none());
+        assert!(b.as_codegen().is_none());
+        assert!(b.as_sim_model().is_none());
+        assert!(b.as_tick().is_some());
+    }
+
+    #[test]
+    fn udp_source_tick() {
+        let mut b = UdpSourceBlock::new("127.0.0.1:9000");
+        let out = b.tick(&[], 0.01);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].is_none());
+    }
+
+    #[test]
+    fn udp_sink_module_trait() {
+        let mut b = UdpSinkBlock::new("127.0.0.1:9001");
+        assert_eq!(b.name(), "UDP Sink");
+        assert_eq!(b.block_type(), "udp_sink");
+        assert_eq!(b.input_ports().len(), 1);
+        assert!(b.output_ports().is_empty());
+        assert!(b.config_json().contains("127.0.0.1:9001"));
+        assert!(b.as_analysis().is_none());
+        assert!(b.as_codegen().is_none());
+        assert!(b.as_sim_model().is_none());
+        assert!(b.as_tick().is_some());
+    }
+
+    #[test]
+    fn udp_sink_tick() {
+        let mut b = UdpSinkBlock::new("127.0.0.1:9001");
+        let out = b.tick(&[], 0.01);
+        assert!(out.is_empty());
+    }
+}

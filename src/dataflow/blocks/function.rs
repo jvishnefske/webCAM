@@ -182,4 +182,22 @@ mod tests {
         let out = b.tick(&[Some(&input)], 0.01);
         assert_eq!(out[0].as_ref().unwrap().as_float(), Some(10.0));
     }
+
+    #[test]
+    fn multiply_block() {
+        let mut b = FunctionBlock::multiply();
+        let a = Value::Float(3.0);
+        let bv = Value::Float(4.0);
+        let out = b.tick(&[Some(&a), Some(&bv)], 0.01);
+        assert_eq!(out[0].as_ref().unwrap().as_float(), Some(12.0));
+        // Missing input returns None
+        let out2 = b.tick(&[Some(&a), None], 0.01);
+        assert_eq!(out2[0], None);
+    }
+
+    #[test]
+    fn as_analysis_returns_none() {
+        let b = FunctionBlock::gain(1.0);
+        assert!(b.as_analysis().is_none());
+    }
 }

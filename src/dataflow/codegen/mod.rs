@@ -14,6 +14,8 @@ pub mod topo;
 pub mod types;
 
 pub use emit::{
-    generate_distributed_workspace, generate_rust, generate_workspace, DistributedConfig,
-    DistributedWorkspace, GeneratedCrate, GeneratedWorkspace, TransportConfig,
+    generate_distributed_workspace, generate_rust, generate_workspace, CodegenBackend,
+    DistributedConfig, DistributedWorkspace, GeneratedCrate, GeneratedWorkspace, TransportConfig,
 };
+#[cfg(feature = "mlir")]
+pub use emit::generate_workspace_mlir;

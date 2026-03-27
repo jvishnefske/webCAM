@@ -223,4 +223,17 @@ mod tests {
         assert_eq!(sm.input_ports().len(), 2); // guard_0, guard_1
         assert_eq!(sm.output_ports().len(), 4); // state + 3 active flags
     }
+
+    #[test]
+    fn module_trait_methods() {
+        let mut sm = make_sm();
+        assert_eq!(sm.name(), "State Machine");
+        assert_eq!(sm.block_type(), "state_machine");
+        let config: serde_json::Value = serde_json::from_str(&sm.config_json()).unwrap();
+        assert_eq!(config["initial"], "idle");
+        assert!(sm.as_tick().is_some());
+        assert!(sm.as_analysis().is_none());
+        assert!(sm.as_codegen().is_none());
+        assert!(sm.as_sim_model().is_none());
+    }
 }

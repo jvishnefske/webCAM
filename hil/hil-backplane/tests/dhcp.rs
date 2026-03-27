@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used)]
 use hil_backplane::dhcp::{
     build_response, parse_request, DhcpConfig, DhcpMessageType, DHCP_RESPONSE_MAX,
 };

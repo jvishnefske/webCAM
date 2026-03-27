@@ -26,6 +26,19 @@ pub struct GeneratedWorkspace {
     pub files: Vec<(String, String)>,
 }
 
+/// Code generation backend selector.
+///
+/// `RustEmit` is the existing string-interpolation backend (default).
+/// `MlirEmitC` lowers through MLIR to C, compiled via the `cc` crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CodegenBackend {
+    /// Existing Rust string-interpolation backend.
+    #[default]
+    RustEmit,
+    /// MLIR → EmitC → C backend (compiled via `cc` crate).
+    MlirEmitC,
+}
+
 /// Block types that are skipped during code generation (visualization-only or
 /// require external dependencies not suitable for embedded targets).
 const SKIPPED_BLOCK_TYPES: &[&str] = &["plot", "json_encode", "json_decode"];
@@ -135,6 +148,65 @@ pub fn generate_workspace(
     ));
 
     // Generate target crates
+    for twb in targets {
+        let gen = generator_for(twb.target);
+        let target_files = gen.generate(snap, &twb.binding, dt)?;
+        files.extend(target_files);
+    }
+
+    Ok(GeneratedWorkspace { files })
+}
+
+/// Generate a multi-target workspace using the MLIR → C backend.
+///
+/// Instead of generating `logic/src/blocks.rs` + `logic/src/lib.rs` with Rust
+/// code, this generates:
+/// - `logic/csrc/graph.mlir` — MLIR text
+/// - `logic/csrc/peripherals.h` — C header for hw_* externs
+/// - `logic/csrc/logic.c` — C source (from mlir-translate or fallback)
+/// - `logic/build.rs` — cc crate build script
+/// - `logic/src/ffi.rs` — `#[repr(C)] State` struct + FFI bridge
+/// - `logic/src/lib.rs` — re-exports ffi module
+///
+/// Target crates are generated with `extern "C"` hw_* function implementations.
+#[cfg(feature = "mlir")]
+pub fn generate_workspace_mlir(
+    snap: &GraphSnapshot,
+    dt: f64,
+    targets: &[TargetWithBinding],
+) -> Result<GeneratedWorkspace, String> {
+    let mut files: Vec<(String, String)> = Vec::new();
+
+    // Workspace root Cargo.toml
+    let workspace_members = build_workspace_members(targets);
+    files.push((
+        "Cargo.toml".to_string(),
+        generate_workspace_cargo_toml(&workspace_members),
+    ));
+
+    // Serialize the snapshot to JSON for the mlir-codegen crate
+    let snap_json = serde_json::to_string(snap)
+        .map_err(|e| format!("failed to serialize snapshot: {e}"))?;
+
+    // Deserialize into mlir-codegen's own types
+    let mlir_snap: mlir_codegen::lower::GraphSnapshot = serde_json::from_str(&snap_json)
+        .map_err(|e| format!("failed to deserialize for MLIR lowering: {e}"))?;
+
+    // Generate MLIR-backed logic crate files
+    let logic_files = mlir_codegen::generate_logic_files(&mlir_snap)?;
+    files.extend(logic_files);
+
+    // Vendor dataflow-rt (still needed for the Peripherals trait in target crates)
+    files.push((
+        "dataflow-rt/Cargo.toml".to_string(),
+        generate_rt_cargo_toml(),
+    ));
+    files.push((
+        "dataflow-rt/src/lib.rs".to_string(),
+        generate_rt_lib_rs(),
+    ));
+
+    // Generate target crates (with C-FFI hw_* functions)
     for twb in targets {
         let gen = generator_for(twb.target);
         let target_files = gen.generate(snap, &twb.binding, dt)?;
@@ -2489,5 +2561,138 @@ mod tests {
             found,
             "Expected bridge topic 'bridge_1_0' to appear in at least one workspace's logic/src/lib.rs"
         );
+    }
+
+    // --- Direct function coverage tests ----------------------------------------
+
+    #[test]
+    fn emit_block_call_single_output() {
+        let block = make_gain_snapshot(7, 2.0);
+        let mut out = String::new();
+        emit_block_call(&mut out, 7, &block, "gain", &["x".into()], "    ");
+        assert!(out.contains("out_7_p0 = blocks::block_7(x);"));
+    }
+
+    #[test]
+    fn emit_block_call_no_outputs() {
+        let block = BlockSnapshot {
+            id: 8,
+            block_type: "pwm_sink".to_string(),
+            name: "PWM".to_string(),
+            inputs: vec![PortDef::new("duty", PortKind::Float)],
+            outputs: vec![],
+            config: serde_json::json!({}),
+            output_values: vec![],
+            target: None,
+            custom_codegen: None,
+        };
+        let mut out = String::new();
+        emit_block_call(&mut out, 8, &block, "pwm_sink", &["d".into()], "    ");
+        // pwm_sink is a stub but not udp_sink/uart_tx, so it takes the no-outputs branch
+        assert!(out.contains("blocks::block_8(d);"));
+    }
+
+    #[test]
+    fn emit_block_call_stub_sink() {
+        let block = BlockSnapshot {
+            id: 9,
+            block_type: "udp_sink".to_string(),
+            name: "UDP Sink".to_string(),
+            inputs: vec![PortDef::new("data", PortKind::Bytes)],
+            outputs: vec![],
+            config: serde_json::json!({}),
+            output_values: vec![],
+            target: None,
+            custom_codegen: None,
+        };
+        let mut out = String::new();
+        emit_block_call(&mut out, 9, &block, "udp_sink", &["buf".into()], "    ");
+        assert!(out.contains("blocks::block_9(&buf);"));
+    }
+
+    #[test]
+    fn emit_block_call_multi_output() {
+        let block = BlockSnapshot {
+            id: 10,
+            block_type: "state_machine".to_string(),
+            name: "SM".to_string(),
+            inputs: vec![PortDef::new("guard_0", PortKind::Float)],
+            outputs: vec![
+                PortDef::new("state", PortKind::Float),
+                PortDef::new("active", PortKind::Float),
+            ],
+            config: serde_json::json!({}),
+            output_values: vec![],
+            target: None,
+            custom_codegen: None,
+        };
+        let mut out = String::new();
+        emit_block_call(&mut out, 10, &block, "state_machine", &["g".into()], "    ");
+        assert!(out.contains("(out_10_p0, out_10_p1) = blocks::block_10(g);"));
+    }
+
+    #[test]
+    fn generate_blocks_rs_direct() {
+        let snap = GraphSnapshot {
+            blocks: vec![make_constant_snapshot(1, 7.0)],
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let result = generate_blocks_rs(&snap).unwrap();
+        assert!(result.contains("pub fn block_1() -> f64"));
+        assert!(result.contains("7"));
+    }
+
+    #[test]
+    fn generate_logic_blocks_rs_direct() {
+        let snap = GraphSnapshot {
+            blocks: vec![make_constant_snapshot(1, 9.0), make_gain_snapshot(2, 4.0)],
+            channels: vec![ch(1, 1, 0, 2, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let result = generate_logic_blocks_rs(&snap).unwrap();
+        assert!(result.contains("pub fn block_1() -> f64"));
+        assert!(result.contains("pub fn block_2(input: f64) -> f64"));
+    }
+
+    #[test]
+    fn generate_logic_lib_rs_direct() {
+        let snap = GraphSnapshot {
+            blocks: vec![make_constant_snapshot(1, 3.0)],
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let result = generate_logic_lib_rs(&snap).unwrap();
+        assert!(result.contains("pub struct State"));
+        assert!(result.contains("pub fn tick(hw: &mut impl Peripherals, state: &mut State)"));
+        assert!(result.contains("blocks::block_1()"));
+    }
+
+    #[test]
+    fn generate_main_rs_direct() {
+        let snap = GraphSnapshot {
+            blocks: vec![make_constant_snapshot(1, 1.0)],
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let result = generate_main_rs(&snap, 0.05).unwrap();
+        assert!(result.contains("mod blocks;"));
+        assert!(result.contains("fn main()"));
+        assert!(result.contains("0.05"));
+        assert!(result.contains("std::thread::sleep"));
+    }
+
+    #[test]
+    fn generate_distributed_workspace_direct() {
+        let snap = make_distributed_graph();
+        let config = make_two_target_config();
+        let result = generate_distributed_workspace(&snap, &config).unwrap();
+        assert_eq!(result.workspaces.len(), 2);
+        assert!(result.workspaces.contains_key(&TargetFamily::Rp2040));
+        assert!(result.workspaces.contains_key(&TargetFamily::Stm32f4));
     }
 }

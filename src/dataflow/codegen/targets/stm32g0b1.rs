@@ -225,5 +225,84 @@ fn generate_main_rs(dt: f64) -> String {
     writeln!(out, "        ticker.next().await;").unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
+
+    // Append C-FFI hw_* stubs for MLIR backend
+    writeln!(out).unwrap();
+    writeln!(out, "static mut HW: HwPeripherals = HwPeripherals {{ _marker: () }};").unwrap();
+    out.push_str(&super::generate_hw_ffi_stubs("HW"));
+
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dataflow::codegen::binding::Binding;
+    use crate::dataflow::codegen::target::TargetFamily;
+    use crate::dataflow::codegen::targets::TargetGenerator;
+
+    fn empty_snap() -> GraphSnapshot {
+        GraphSnapshot {
+            blocks: vec![],
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        }
+    }
+
+    #[test]
+    fn generate_produces_four_files() {
+        let snap = empty_snap();
+        let binding = Binding {
+            target: TargetFamily::Stm32g0b1,
+            pins: vec![],
+        };
+        let files = Stm32g0b1Generator.generate(&snap, &binding, 0.01).unwrap();
+        assert_eq!(files.len(), 4);
+
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(paths.contains(&"target-stm32g0b1/Cargo.toml"));
+        assert!(paths.contains(&"target-stm32g0b1/.cargo/config.toml"));
+        assert!(paths.contains(&"target-stm32g0b1/build.rs"));
+        assert!(paths.contains(&"target-stm32g0b1/src/main.rs"));
+    }
+
+    #[test]
+    fn cargo_toml_has_required_fields() {
+        let toml = generate_cargo_toml();
+        assert!(toml.contains("[package]"));
+        assert!(toml.contains("name = \"target-stm32g0b1\""));
+        assert!(toml.contains("edition = \"2021\""));
+        assert!(toml.contains("embassy-stm32"));
+        assert!(toml.contains("stm32g0b1cb"));
+        assert!(toml.contains("logic = { path = \"../logic\" }"));
+        assert!(toml.contains("dataflow-rt"));
+    }
+
+    #[test]
+    fn cargo_config_targets_thumbv6m() {
+        let config = generate_cargo_config();
+        assert!(config.contains("thumbv6m-none-eabi"));
+        assert!(config.contains("STM32G0B1CBTx"));
+    }
+
+    #[test]
+    fn build_rs_has_link_args() {
+        let build = generate_build_rs();
+        assert!(build.contains("--nmagic"));
+        assert!(build.contains("-Tlink.x"));
+        assert!(build.contains("-Tdefmt.x"));
+    }
+
+    #[test]
+    fn main_rs_has_embassy_loop() {
+        let main = generate_main_rs(0.02);
+        assert!(main.contains("#![no_std]"));
+        assert!(main.contains("#![no_main]"));
+        assert!(main.contains("embassy_executor::main"));
+        assert!(main.contains("logic::tick(&mut hw, &mut state)"));
+        assert!(main.contains("Duration::from_millis(20)"));
+        assert!(main.contains("impl Peripherals for HwPeripherals"));
+        assert!(main.contains("hw_adc_read")); // C-FFI stubs
+    }
 }

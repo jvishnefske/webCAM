@@ -359,6 +359,40 @@ mod tests {
     }
 
     #[test]
+    fn sink_from_config() {
+        let cfg = PubSubConfig { topic: "t".into(), port_kind: PortKind::Float };
+        let block = PubSubSinkBlock::from_config(cfg);
+        assert_eq!(block.topic(), "t");
+        assert_eq!(block.block_type(), "pubsub_sink");
+    }
+
+    #[test]
+    fn sink_module_trait_defaults() {
+        let mut block = PubSubSinkBlock::new("x".into(), PortKind::Float);
+        assert!(block.as_tick().is_some());
+        assert!(block.as_analysis().is_none());
+        assert!(block.as_codegen().is_none());
+        assert!(block.as_sim_model().is_none());
+    }
+
+    #[test]
+    fn source_from_config() {
+        let cfg = PubSubConfig { topic: "s".into(), port_kind: PortKind::Text };
+        let block = PubSubSourceBlock::from_config(cfg);
+        assert_eq!(block.topic(), "s");
+        assert_eq!(block.block_type(), "pubsub_source");
+    }
+
+    #[test]
+    fn source_module_trait_defaults() {
+        let mut block = PubSubSourceBlock::new("x".into(), PortKind::Float);
+        assert!(block.as_tick().is_some());
+        assert!(block.as_analysis().is_none());
+        assert!(block.as_codegen().is_none());
+        assert!(block.as_sim_model().is_none());
+    }
+
+    #[test]
     fn source_various_port_kinds() {
         for kind in &[PortKind::Float, PortKind::Bytes, PortKind::Text, PortKind::Series] {
             let block = PubSubSourceBlock::new("t".into(), kind.clone());

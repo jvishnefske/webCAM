@@ -33,11 +33,14 @@ impl UdpTransport {
             Some(socket2::Protocol::UDP),
         )?;
         sock.set_reuse_address(true)?;
+        #[cfg(unix)]
+        sock.set_reuse_port(true)?;
         sock.set_nonblocking(true)?;
+        sock.set_multicast_if_v4(&Ipv4Addr::LOCALHOST)?;
         sock.bind(&socket2::SockAddr::from(bind_addr))?;
 
         let socket: UdpSocket = sock.into();
-        socket.join_multicast_v4(&multicast_ip, &Ipv4Addr::UNSPECIFIED)?;
+        socket.join_multicast_v4(&multicast_ip, &Ipv4Addr::LOCALHOST)?;
         socket.set_multicast_loop_v4(true)?;
 
         let multicast_addr = SocketAddr::V4(SocketAddrV4::new(multicast_ip, port));

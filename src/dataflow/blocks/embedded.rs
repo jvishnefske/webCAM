@@ -796,6 +796,222 @@ mod tests {
         assert!(peripherals.get_gpio_state(7));
     }
 
+    // ---------------------------------------------------------------
+    // Full Module trait coverage tests
+    // ---------------------------------------------------------------
+
+    /// Helper: exercise every Module trait method on a block, including
+    /// the default-returning as_analysis, as_codegen, as_tick.
+    fn assert_module_basics(block: &mut dyn Module, name: &str, block_type: &str) {
+        assert_eq!(block.name(), name);
+        assert_eq!(block.block_type(), block_type);
+        // input_ports / output_ports just need to not panic
+        let _ = block.input_ports();
+        let _ = block.output_ports();
+        let _ = block.config_json();
+        // default trait impls return None for these
+        assert!(block.as_analysis().is_none());
+        assert!(block.as_codegen().is_none());
+        assert!(block.as_tick().is_none());
+    }
+
+    #[test]
+    fn adc_full_module_trait() {
+        let mut b = AdcBlock::from_config(AdcConfig::default());
+        assert_module_basics(&mut b, "ADC Source", "adc_source");
+        assert!(b.as_sim_model().is_some());
+    }
+
+    #[test]
+    fn pwm_full_module_trait() {
+        let mut b = PwmBlock::from_config(PwmConfig::default());
+        assert_module_basics(&mut b, "PWM Sink", "pwm_sink");
+        assert!(b.as_sim_model().is_some());
+    }
+
+    #[test]
+    fn gpio_out_full_module_trait() {
+        let mut b = GpioOutBlock::from_config(GpioOutConfig::default());
+        assert_module_basics(&mut b, "GPIO Out", "gpio_out");
+        assert!(b.as_sim_model().is_some());
+    }
+
+    #[test]
+    fn gpio_in_full_module_trait() {
+        let mut b = GpioInBlock::from_config(GpioInConfig::default());
+        assert_module_basics(&mut b, "GPIO In", "gpio_in");
+        assert!(b.as_sim_model().is_some());
+    }
+
+    #[test]
+    fn uart_tx_full_module_trait() {
+        let mut b = UartTxBlock::from_config(UartTxConfig::default());
+        assert_module_basics(&mut b, "UART TX", "uart_tx");
+        assert!(b.as_sim_model().is_some());
+    }
+
+    #[test]
+    fn uart_rx_full_module_trait() {
+        let mut b = UartRxBlock::from_config(UartRxConfig::default());
+        assert_module_basics(&mut b, "UART RX", "uart_rx");
+        assert!(b.as_sim_model().is_some());
+    }
+
+    #[test]
+    fn encoder_full_module_trait() {
+        let mut b = EncoderBlock::from_config(EncoderConfig::default());
+        assert_module_basics(&mut b, "Encoder", "encoder");
+        assert!(b.as_sim_model().is_some());
+    }
+
+    #[test]
+    fn ssd1306_full_module_trait() {
+        let mut b = Ssd1306DisplayBlock::from_config(Ssd1306DisplayConfig::default());
+        assert_module_basics(&mut b, "SSD1306 Display", "ssd1306_display");
+        assert!(b.as_sim_model().is_some());
+    }
+
+    #[test]
+    fn tmc2209_stepper_full_module_trait() {
+        let mut b = Tmc2209StepperBlock::from_config(Tmc2209StepperConfig::default());
+        assert_module_basics(&mut b, "TMC2209 Stepper", "tmc2209_stepper");
+        assert!(b.as_sim_model().is_some());
+    }
+
+    #[test]
+    fn tmc2209_stallguard_full_module_trait() {
+        let mut b = Tmc2209StallGuardBlock::from_config(Tmc2209StallGuardConfig::default());
+        assert_module_basics(&mut b, "TMC2209 StallGuard", "tmc2209_stallguard");
+        assert!(b.as_sim_model().is_some());
+    }
+
+    // ---------------------------------------------------------------
+    // SimModel::sim_tick coverage for blocks not yet tested
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn uart_tx_sim_tick() {
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut block = UartTxBlock::from_config(UartTxConfig::default());
+        let mut peripherals = WasmSimPeripherals::new();
+        let data = Value::Bytes(vec![0x41, 0x42]);
+
+        let sim = block.as_sim_model().unwrap();
+        let out = sim.sim_tick(&[Some(&data)], 0.01, &mut peripherals);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn uart_tx_sim_tick_no_input() {
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut block = UartTxBlock::from_config(UartTxConfig::default());
+        let mut peripherals = WasmSimPeripherals::new();
+
+        let sim = block.as_sim_model().unwrap();
+        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn uart_rx_sim_tick() {
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut block = UartRxBlock::from_config(UartRxConfig::default());
+        let mut peripherals = WasmSimPeripherals::new();
+
+        let sim = block.as_sim_model().unwrap();
+        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
+        // No data queued, so output should be None
+        assert_eq!(out.len(), 1);
+        assert!(out[0].is_none());
+    }
+
+    #[test]
+    fn encoder_sim_tick() {
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut block = EncoderBlock::from_config(EncoderConfig::default());
+        let mut peripherals = WasmSimPeripherals::new();
+
+        let sim = block.as_sim_model().unwrap();
+        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
+        assert_eq!(out.len(), 2);
+        // position and velocity both present
+        assert!(out[0].is_some());
+        assert!(out[1].is_some());
+    }
+
+    #[test]
+    fn ssd1306_sim_tick() {
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut block = Ssd1306DisplayBlock::from_config(Ssd1306DisplayConfig::default());
+        let mut peripherals = WasmSimPeripherals::new();
+
+        let line1 = Value::Text("hello".into());
+        let line2 = Value::Text("world".into());
+        let sim = block.as_sim_model().unwrap();
+        let out = sim.sim_tick(&[Some(&line1), Some(&line2)], 0.01, &mut peripherals);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn ssd1306_sim_tick_no_input() {
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut block = Ssd1306DisplayBlock::from_config(Ssd1306DisplayConfig::default());
+        let mut peripherals = WasmSimPeripherals::new();
+
+        let sim = block.as_sim_model().unwrap();
+        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn tmc2209_stepper_sim_tick() {
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut block = Tmc2209StepperBlock::from_config(Tmc2209StepperConfig::default());
+        let mut peripherals = WasmSimPeripherals::new();
+
+        let target = Value::Float(100.0);
+        let enable = Value::Float(1.0);
+        let sim = block.as_sim_model().unwrap();
+        let out = sim.sim_tick(&[Some(&target), Some(&enable)], 0.01, &mut peripherals);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].is_some());
+    }
+
+    #[test]
+    fn tmc2209_stepper_sim_tick_disabled() {
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut block = Tmc2209StepperBlock::from_config(Tmc2209StepperConfig::default());
+        let mut peripherals = WasmSimPeripherals::new();
+
+        let target = Value::Float(100.0);
+        let enable = Value::Float(0.0);
+        let sim = block.as_sim_model().unwrap();
+        let out = sim.sim_tick(&[Some(&target), Some(&enable)], 0.01, &mut peripherals);
+        assert_eq!(out.len(), 1);
+    }
+
+    #[test]
+    fn tmc2209_stallguard_sim_tick() {
+        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
+
+        let mut block = Tmc2209StallGuardBlock::from_config(Tmc2209StallGuardConfig::default());
+        let mut peripherals = WasmSimPeripherals::new();
+
+        let sim = block.as_sim_model().unwrap();
+        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0], Some(Value::Float(0.0)));
+        assert_eq!(out[1], Some(Value::Float(0.0)));
+    }
+
     #[test]
     fn sim_mode_graph_adc_to_gain_to_pwm() {
         use crate::dataflow::graph::DataflowGraph;

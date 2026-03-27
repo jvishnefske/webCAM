@@ -32,7 +32,7 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
       - run: wasm-pack build --target web --out-dir www/pkg --release
-      - run: cd www && npm ci && npm run typecheck && npm run build
+      - run: cd www && npm ci && npm run typecheck && npm run test && npm run build
       - name: Remove build-only files from www
         run: rm -rf www/node_modules www/src www/package.json www/package-lock.json www/tsconfig.json www/esbuild.config.mjs
       - run: cd www && zip -r ../rustcam.zip .

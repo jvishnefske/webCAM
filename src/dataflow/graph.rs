@@ -460,6 +460,53 @@ mod tests {
     }
 
     #[test]
+    fn remove_block_returns_false_for_missing() {
+        let mut g = DataflowGraph::new();
+        assert!(!g.remove_block(BlockId(999)));
+    }
+
+    #[test]
+    fn replace_block_error_for_missing() {
+        let mut g = DataflowGraph::new();
+        let res = g.replace_block(BlockId(999), Box::new(ConstantBlock::new(1.0)));
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn snapshot_returns_sorted_blocks_and_channels() {
+        let mut g = DataflowGraph::new();
+        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
+        let f = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+        g.connect(c, 0, f, 0).unwrap();
+        g.tick(0.01);
+        let snap = g.snapshot();
+        assert_eq!(snap.blocks.len(), 2);
+        assert_eq!(snap.channels.len(), 1);
+        assert_eq!(snap.tick_count, 1);
+        // Blocks should be sorted by id
+        assert!(snap.blocks[0].id < snap.blocks[1].id);
+    }
+
+    #[test]
+    fn with_sim_peripherals_calls_closure() {
+        let mut g = DataflowGraph::new();
+        g.set_sim_peripherals(crate::dataflow::sim_peripherals::WasmSimPeripherals::new());
+        g.with_sim_peripherals(|p| {
+            p.set_adc_voltage(0, 2.5);
+        });
+        assert!((g.get_sim_pwm(0) - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn with_sim_peripherals_noop_without_peripherals() {
+        let mut g = DataflowGraph::new();
+        // Should not panic when no peripherals set
+        g.with_sim_peripherals(|_p| {
+            panic!("should not be called");
+        });
+    }
+
+    #[test]
     fn embedded_block_outputs_none_without_simulation() {
         use crate::dataflow::blocks::embedded::{AdcBlock, AdcConfig};
 

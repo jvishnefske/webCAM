@@ -97,4 +97,32 @@ mod tests {
         let result = decoded[0].as_ref().unwrap();
         assert_eq!(result.as_float(), Some(1.234));
     }
+
+    #[test]
+    fn json_encode_module_trait() {
+        let mut b = JsonEncodeBlock::new();
+        assert_eq!(b.name(), "JSON Encode");
+        assert_eq!(b.block_type(), "json_encode");
+        assert_eq!(b.input_ports().len(), 1);
+        assert_eq!(b.output_ports().len(), 1);
+        assert_eq!(b.config_json(), "{}");
+        assert!(b.as_analysis().is_none());
+        assert!(b.as_codegen().is_none());
+        assert!(b.as_sim_model().is_none());
+        assert!(b.as_tick().is_some());
+    }
+
+    #[test]
+    fn json_decode_module_trait() {
+        let mut b = JsonDecodeBlock::new();
+        assert_eq!(b.name(), "JSON Decode");
+        assert_eq!(b.block_type(), "json_decode");
+        assert_eq!(b.input_ports().len(), 1);
+        assert_eq!(b.output_ports().len(), 1);
+        assert_eq!(b.config_json(), "{}");
+        assert!(b.as_analysis().is_none());
+        assert!(b.as_codegen().is_none());
+        assert!(b.as_sim_model().is_none());
+        assert!(b.as_tick().is_some());
+    }
 }
