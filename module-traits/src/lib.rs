@@ -16,6 +16,9 @@ extern crate alloc;
 
 pub mod analysis;
 pub mod codegen_trait;
+pub mod deployment;
+pub mod hardware;
+pub mod inventory;
 pub mod module;
 pub mod sim;
 pub mod tick;

@@ -244,3 +244,163 @@ pub struct BlockTypeInfo {
     pub name: &'static str,
     pub category: &'static str,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::dataflow::block::Module;
+
+    #[test]
+    fn create_block_constant() {
+        let block = create_block("constant", r#"{"value": 42.0}"#).unwrap();
+        assert_eq!(block.block_type(), "constant");
+    }
+
+    #[test]
+    fn create_block_add() {
+        let block = create_block("add", "{}").unwrap();
+        assert_eq!(block.block_type(), "add");
+    }
+
+    #[test]
+    fn create_block_multiply() {
+        let block = create_block("multiply", "{}").unwrap();
+        assert_eq!(block.block_type(), "multiply");
+    }
+
+    #[test]
+    fn create_block_unknown() {
+        let result = create_block("nonexistent", "{}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn create_block_pubsub() {
+        let block = create_block("pubsub_sink", r#"{"topic":"t","port_kind":"Float"}"#).unwrap();
+        assert_eq!(block.block_type(), "pubsub_sink");
+        let block = create_block("pubsub_source", r#"{"topic":"t","port_kind":"Float"}"#).unwrap();
+        assert_eq!(block.block_type(), "pubsub_source");
+    }
+
+    #[test]
+    fn create_block_state_machine() {
+        let cfg = r#"{"states":["a"],"initial":"a","transitions":[]}"#;
+        let block = create_block("state_machine", cfg).unwrap();
+        assert_eq!(block.block_type(), "state_machine");
+    }
+
+    #[test]
+    fn create_block_gain() {
+        let block = create_block("gain", r#"{"op":"Gain","param1":2.0}"#).unwrap();
+        assert_eq!(block.block_type(), "gain");
+    }
+
+    #[test]
+    fn create_block_clamp() {
+        let block = create_block("clamp", r#"{"op":"Clamp","param1":0.0,"param2":1.0}"#).unwrap();
+        assert_eq!(block.block_type(), "clamp");
+    }
+
+    #[test]
+    fn create_block_plot() {
+        let block = create_block("plot", r#"{}"#).unwrap();
+        assert_eq!(block.block_type(), "plot");
+    }
+
+    #[test]
+    fn create_block_json_encode() {
+        let block = create_block("json_encode", "{}").unwrap();
+        assert_eq!(block.block_type(), "json_encode");
+    }
+
+    #[test]
+    fn create_block_json_decode() {
+        let block = create_block("json_decode", "{}").unwrap();
+        assert_eq!(block.block_type(), "json_decode");
+    }
+
+    #[test]
+    fn create_block_udp_source() {
+        let block = create_block("udp_source", r#"{"address":"127.0.0.1:5000"}"#).unwrap();
+        assert_eq!(block.block_type(), "udp_source");
+    }
+
+    #[test]
+    fn create_block_udp_sink() {
+        let block = create_block("udp_sink", r#"{"address":"127.0.0.1:5001"}"#).unwrap();
+        assert_eq!(block.block_type(), "udp_sink");
+    }
+
+    #[test]
+    fn create_block_adc_source() {
+        let block = create_block("adc_source", r#"{"channel":0,"resolution_bits":12}"#).unwrap();
+        assert_eq!(block.block_type(), "adc_source");
+    }
+
+    #[test]
+    fn create_block_pwm_sink() {
+        let block = create_block("pwm_sink", r#"{"channel":0,"frequency_hz":1000}"#).unwrap();
+        assert_eq!(block.block_type(), "pwm_sink");
+    }
+
+    #[test]
+    fn create_block_gpio_out() {
+        let block = create_block("gpio_out", r#"{"pin":13}"#).unwrap();
+        assert_eq!(block.block_type(), "gpio_out");
+    }
+
+    #[test]
+    fn create_block_gpio_in() {
+        let block = create_block("gpio_in", r#"{"pin":2}"#).unwrap();
+        assert_eq!(block.block_type(), "gpio_in");
+    }
+
+    #[test]
+    fn create_block_uart_tx() {
+        let block = create_block("uart_tx", r#"{"port":0,"baud":115200}"#).unwrap();
+        assert_eq!(block.block_type(), "uart_tx");
+    }
+
+    #[test]
+    fn create_block_uart_rx() {
+        let block = create_block("uart_rx", r#"{"port":0,"baud":115200}"#).unwrap();
+        assert_eq!(block.block_type(), "uart_rx");
+    }
+
+    #[test]
+    fn create_block_encoder() {
+        let block = create_block("encoder", r#"{"channel":0}"#).unwrap();
+        assert_eq!(block.block_type(), "encoder");
+    }
+
+    #[test]
+    fn create_block_ssd1306_display() {
+        let block = create_block("ssd1306_display", r#"{"i2c_bus":0,"address":60}"#).unwrap();
+        assert_eq!(block.block_type(), "ssd1306_display");
+    }
+
+    #[test]
+    fn create_block_tmc2209_stepper() {
+        let block = create_block("tmc2209_stepper", r#"{"uart_port":0,"uart_addr":0,"steps_per_rev":200,"microsteps":16}"#).unwrap();
+        assert_eq!(block.block_type(), "tmc2209_stepper");
+    }
+
+    #[test]
+    fn create_block_tmc2209_stallguard() {
+        let block = create_block("tmc2209_stallguard", r#"{"uart_port":0,"uart_addr":0,"threshold":50}"#).unwrap();
+        assert_eq!(block.block_type(), "tmc2209_stallguard");
+    }
+
+    #[test]
+    fn constant_block_default_trait_methods() {
+        let b = constant::ConstantBlock::new(1.0);
+        assert!(b.as_analysis().is_none());
+        assert!(b.as_codegen().is_none());
+    }
+
+    #[test]
+    fn constant_block_as_sim_model_none() {
+        let mut b = constant::ConstantBlock::new(1.0);
+        assert!(b.as_sim_model().is_none());
+    }
+}
