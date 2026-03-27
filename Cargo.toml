@@ -33,12 +33,6 @@ default-members = [
     "dataflow-rt",
     "pubsub",
     "parser",
-    "hil/i2c-hil-sim",
-    "hil/i2c-hil-devices",
-    "hil/hil-backplane",
-    "hil/board-config-common",
-    "hil/board-support-pi-zero",
-    "hil/hil-frontend",
     "mlir-codegen",
 ]
 
