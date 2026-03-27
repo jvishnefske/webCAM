@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used)]
 //! Example: two-node sensor network over UDP multicast.
 //!
 //! Demonstrates adding an Ethernet message bus between embedded nodes

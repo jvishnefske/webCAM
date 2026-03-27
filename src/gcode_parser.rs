@@ -744,4 +744,78 @@ mod tests {
             assert_eq!(parsed, Some(offset));
         }
     }
+
+    #[test]
+    fn distance_mode_display_and_gcode_number() {
+        assert_eq!(DistanceMode::Absolute.gcode_number(), 90);
+        assert_eq!(DistanceMode::Incremental.gcode_number(), 91);
+        assert_eq!(format!("{}", DistanceMode::Absolute), "G90");
+        assert_eq!(format!("{}", DistanceMode::Incremental), "G91");
+    }
+
+    #[test]
+    fn unit_mode_display_and_gcode_number() {
+        assert_eq!(UnitMode::Inches.gcode_number(), 20);
+        assert_eq!(UnitMode::Millimeters.gcode_number(), 21);
+        assert_eq!(format!("{}", UnitMode::Inches), "G20");
+        assert_eq!(format!("{}", UnitMode::Millimeters), "G21");
+    }
+
+    #[test]
+    fn parse_error_display() {
+        assert_eq!(format!("{}", ParseError::InvalidNumber("abc".into())), "Invalid number: abc");
+        assert_eq!(format!("{}", ParseError::UnknownGCode(99)), "Unknown G-code: G99");
+        assert_eq!(format!("{}", ParseError::UnknownMCode(99)), "Unknown M-code: M99");
+        assert_eq!(format!("{}", ParseError::MissingParameter('Z')), "Missing parameter: Z");
+        assert_eq!(format!("{}", ParseError::EmptyLine), "Empty line");
+    }
+
+    #[test]
+    fn validation_error_display() {
+        assert_eq!(format!("{}", ValidationError::InvalidFeedRate(-1.0)), "Invalid feed rate: -1");
+        assert_eq!(format!("{}", ValidationError::InvalidDwellTime(-2.0)), "Invalid dwell time: -2");
+        assert_eq!(format!("{}", ValidationError::InvalidArcRadius), "Invalid arc radius");
+        assert_eq!(format!("{}", ValidationError::NoAxisSpecified), "No axis specified");
+        assert_eq!(format!("{}", ValidationError::SpindleSpeedOutOfRange(99999)), "Spindle speed out of range: 99999");
+    }
+
+    #[test]
+    fn work_offset_display() {
+        assert_eq!(format!("{}", WorkOffset::G54), "G54");
+        assert_eq!(format!("{}", WorkOffset::G59), "G59");
+    }
+
+    #[test]
+    fn parse_line_empty() {
+        assert_eq!(parse_line("   "), Err(ParseError::EmptyLine));
+    }
+
+    #[test]
+    fn parse_line_comment() {
+        let cmd = parse_line("(this is a comment)").unwrap();
+        assert!(matches!(cmd, GCodeCommand::Comment(_)));
+    }
+
+    #[test]
+    fn parse_line_m_code() {
+        let cmd = parse_line("M02").unwrap();
+        assert!(matches!(cmd, GCodeCommand::ProgramEnd));
+    }
+
+    #[test]
+    fn parse_words_basic() {
+        let words = parse_words("G1 X10.5 Y-3.2 F500").unwrap();
+        assert_eq!(words.len(), 4);
+        assert_eq!(words[0], ('G', 1.0));
+        assert_eq!(words[1], ('X', 10.5));
+        assert_eq!(words[2], ('Y', -3.2));
+        assert_eq!(words[3], ('F', 500.0));
+    }
+
+    #[test]
+    fn parse_words_letter_only() {
+        // A letter with no number should default to 0.0
+        let words = parse_words("G").unwrap();
+        assert_eq!(words, vec![('G', 0.0)]);
+    }
 }

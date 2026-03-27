@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used)]
 //! Tests for the Dispatcher trait.
 
 use hil_backplane::dispatcher::Dispatcher;

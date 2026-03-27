@@ -1274,4 +1274,16 @@ mod tests {
             assert!(first_dx.is_finite());
         }
     }
+
+    #[test]
+    fn test_zigzag_surface_y_scan_direction() {
+        let mesh = make_flat_surface_mesh();
+        let cut_params = CutParams::default();
+        let surface = SurfaceParams::new(&mesh, cut_params, ScanDirection::Y);
+        let strategy = ZigzagSurfaceStrategy;
+        let toolpaths = strategy.generate_surface(&surface);
+        assert!(!toolpaths.is_empty());
+        let total_moves: usize = toolpaths.iter().map(|tp| tp.moves.len()).sum();
+        assert!(total_moves > 1);
+    }
 }

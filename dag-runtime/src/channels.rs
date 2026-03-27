@@ -54,10 +54,10 @@ mod tests {
     #[test]
     fn test_map_channels_set_get() {
         let mut ch = MapChannels::new();
-        ch.set("adc0", 3.14);
-        assert_eq!(ch.get("adc0"), 3.14);
-        ch.set("adc0", 6.28);
-        assert_eq!(ch.get("adc0"), 6.28);
+        ch.set("adc0", 3.25);
+        assert_eq!(ch.get("adc0"), 3.25);
+        ch.set("adc0", 6.5);
+        assert_eq!(ch.get("adc0"), 6.5);
     }
 
     #[test]

@@ -89,4 +89,26 @@ mod tests {
         assert_eq!(series.len(), 5);
         assert_eq!(series, &[3.0, 4.0, 5.0, 6.0, 7.0]);
     }
+
+    #[test]
+    fn plot_module_trait() {
+        let mut b = PlotBlock::new(100);
+        assert_eq!(b.name(), "Plot");
+        assert_eq!(b.block_type(), "plot");
+        assert_eq!(b.input_ports().len(), 1);
+        assert_eq!(b.output_ports().len(), 1);
+        assert!(b.config_json().contains("max_samples"));
+        assert!(b.as_analysis().is_none());
+        assert!(b.as_codegen().is_none());
+        assert!(b.as_sim_model().is_none());
+        assert!(b.as_tick().is_some());
+    }
+
+    #[test]
+    fn from_config_and_default_max_samples() {
+        let cfg: PlotConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(cfg.max_samples, 1000);
+        let b = PlotBlock::from_config(cfg);
+        assert_eq!(b.max_samples, 1000);
+    }
 }

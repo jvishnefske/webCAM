@@ -453,4 +453,92 @@ mod tests {
         assert_eq!(paths[0].points[0], Vec2::new(10.0, 10.0));
         assert_eq!(paths[0].points[1], Vec2::new(15.0, 10.0));
     }
+
+    #[test]
+    fn test_extract_path_d_attrs() {
+        let svg = r#"<path d="M 0 0 L 1 1"/><path d="M 2 2 L 3 3"/>"#;
+        let attrs = extract_path_d_attrs(svg);
+        assert_eq!(attrs.len(), 2);
+        assert_eq!(attrs[0], "M 0 0 L 1 1");
+        assert_eq!(attrs[1], "M 2 2 L 3 3");
+    }
+
+    #[test]
+    fn test_extract_rects() {
+        let svg = r#"<rect x="1" y="2" width="10" height="5"/>"#;
+        let rects = extract_rects(svg);
+        assert_eq!(rects.len(), 1);
+        assert!(rects[0].closed);
+        assert_eq!(rects[0].points[0], Vec2::new(1.0, 2.0));
+        assert_eq!(rects[0].points[1], Vec2::new(11.0, 2.0));
+    }
+
+    #[test]
+    fn test_extract_circles() {
+        let svg = r#"<circle cx="5" cy="5" r="3"/>"#;
+        let circles = extract_circles(svg);
+        assert_eq!(circles.len(), 1);
+        assert!(circles[0].closed);
+        assert_eq!(circles[0].points.len(), 64);
+    }
+
+    #[test]
+    fn test_extract_poly_elements_polygon() {
+        let svg = r#"<polygon points="0,0 10,0 10,10"/>"#;
+        let polys = extract_poly_elements(svg);
+        assert_eq!(polys.len(), 1);
+        assert!(polys[0].closed);
+        assert_eq!(polys[0].points.len(), 3);
+    }
+
+    #[test]
+    fn test_extract_poly_elements_polyline() {
+        let svg = r#"<polyline points="1,1 2,2 3,3"/>"#;
+        let polys = extract_poly_elements(svg);
+        assert_eq!(polys.len(), 1);
+        assert!(!polys[0].closed);
+        assert_eq!(polys[0].points.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_points_attr() {
+        let pts = parse_points_attr("10,20 30,40").unwrap();
+        assert_eq!(pts.len(), 2);
+        assert_eq!(pts[0], Vec2::new(10.0, 20.0));
+        assert_eq!(pts[1], Vec2::new(30.0, 40.0));
+    }
+
+    #[test]
+    fn test_read_one() {
+        let tokens = vec!["42.5".to_string()];
+        let mut i = 0;
+        assert_eq!(read_one(&tokens, &mut i).unwrap(), 42.5);
+        assert_eq!(i, 1);
+    }
+
+    #[test]
+    fn test_subdivide_cubic() {
+        let mut out = Vec::new();
+        let p0 = Vec2::new(0.0, 0.0);
+        let p1 = Vec2::new(1.0, 2.0);
+        let p2 = Vec2::new(3.0, 2.0);
+        let p3 = Vec2::new(4.0, 0.0);
+        subdivide_cubic(&mut out, p0, p1, p2, p3, 4);
+        assert_eq!(out.len(), 4);
+        // Last point should be p3
+        assert!((out[3].x - 4.0).abs() < 1e-10);
+        assert!((out[3].y - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_subdivide_quadratic() {
+        let mut out = Vec::new();
+        let p0 = Vec2::new(0.0, 0.0);
+        let p1 = Vec2::new(2.0, 4.0);
+        let p2 = Vec2::new(4.0, 0.0);
+        subdivide_quadratic(&mut out, p0, p1, p2, 4);
+        assert_eq!(out.len(), 4);
+        assert!((out[3].x - 4.0).abs() < 1e-10);
+        assert!((out[3].y - 0.0).abs() < 1e-10);
+    }
 }

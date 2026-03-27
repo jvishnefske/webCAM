@@ -158,4 +158,35 @@ endsolid test";
         assert_eq!(mesh.triangles.len(), 1);
         assert_eq!(mesh.triangles[0].v1.x, 1.0);
     }
+
+    #[test]
+    fn test_parse_ascii_stl_directly() {
+        let stl = b"solid cube
+  facet normal 0 0 -1
+    outer loop
+      vertex 0 0 0
+      vertex 1 0 0
+      vertex 1 1 0
+    endloop
+  endfacet
+  facet normal 0 0 -1
+    outer loop
+      vertex 0 0 0
+      vertex 1 1 0
+      vertex 0 1 0
+    endloop
+  endfacet
+endsolid cube";
+        let mesh = parse_ascii_stl(stl).unwrap();
+        assert_eq!(mesh.triangles.len(), 2);
+        assert_eq!(mesh.triangles[0].normal.z, -1.0);
+    }
+
+    #[test]
+    fn test_parse_ascii_vec3() {
+        let v = parse_ascii_vec3("vertex 1.5 2.5 3.5", "vertex").unwrap();
+        assert_eq!(v.x, 1.5);
+        assert_eq!(v.y, 2.5);
+        assert_eq!(v.z, 3.5);
+    }
 }

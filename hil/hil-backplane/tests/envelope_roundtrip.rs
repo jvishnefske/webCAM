@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used)]
 //! Envelope encode/decode round-trip tests for all `MessageKind` variants.
 
 use hil_backplane::envelope::{Envelope, MessageKind, ENVELOPE_SIZE};

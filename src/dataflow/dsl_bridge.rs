@@ -299,6 +299,76 @@ mod tests {
     }
 
     #[test]
+    fn test_ast_to_snapshot_blocks_and_channels() {
+        let src = "block a: constant(1.0)\nblock b: constant(2.0)\nblock s: add\na.out -> s.a\nb.out -> s.b\n";
+        let graph = parser::parse(src).unwrap();
+        let snap = ast_to_snapshot(&graph).unwrap();
+        assert_eq!(snap.blocks.len(), 3);
+        assert_eq!(snap.channels.len(), 2);
+        assert_eq!(snap.tick_count, 0);
+        assert!((snap.time - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_dsl_value_to_json_all_variants() {
+        use parser::ast::Value;
+
+        // Int
+        let v = dsl_value_to_json(&Value::Int(42));
+        assert_eq!(v, serde_json::json!(42));
+
+        // Float
+        let v = dsl_value_to_json(&Value::Float(3.25));
+        assert_eq!(v, serde_json::json!(3.25));
+
+        // Text
+        let v = dsl_value_to_json(&Value::Text("hello".into()));
+        assert_eq!(v, serde_json::json!("hello"));
+
+        // Ident
+        let v = dsl_value_to_json(&Value::Ident("foo".into()));
+        assert_eq!(v, serde_json::json!("foo"));
+
+        // List
+        let v = dsl_value_to_json(&Value::List(vec![Value::Int(1), Value::Int(2)]));
+        assert_eq!(v, serde_json::json!([1, 2]));
+
+        // Map
+        let v = dsl_value_to_json(&Value::Map(vec![("k".into(), Value::Int(10))]));
+        assert_eq!(v, serde_json::json!({"k": 10}));
+    }
+
+    #[test]
+    fn test_positional_to_json_constant() {
+        let args = vec![parser::ast::Value::Float(99.0)];
+        let json: serde_json::Value = serde_json::from_str(&positional_to_json("constant", &args)).unwrap();
+        assert_eq!(json["value"], 99.0);
+    }
+
+    #[test]
+    fn test_positional_to_json_gain() {
+        let args = vec![parser::ast::Value::Float(2.5)];
+        let json: serde_json::Value = serde_json::from_str(&positional_to_json("gain", &args)).unwrap();
+        assert_eq!(json["param1"], 2.5);
+        assert_eq!(json["op"], "Gain");
+    }
+
+    #[test]
+    fn test_positional_to_json_clamp() {
+        let args = vec![parser::ast::Value::Float(0.0), parser::ast::Value::Float(10.0)];
+        let json: serde_json::Value = serde_json::from_str(&positional_to_json("clamp", &args)).unwrap();
+        assert_eq!(json["param1"], 0.0);
+        assert_eq!(json["param2"], 10.0);
+    }
+
+    #[test]
+    fn test_positional_to_json_generic_fallback() {
+        let args = vec![parser::ast::Value::Int(7)];
+        let json: serde_json::Value = serde_json::from_str(&positional_to_json("unknown_type", &args)).unwrap();
+        assert_eq!(json["arg0"], 7);
+    }
+
+    #[test]
     fn dsl_config_named_to_json() {
         let config = parser::ast::Config::Named(vec![
             ("channel".into(), parser::ast::Value::Int(0)),

@@ -187,6 +187,30 @@ mod tests {
     }
 
     #[test]
+    fn set_get_gpio_state() {
+        let mut p = WasmSimPeripherals::new();
+        p.set_gpio_state(3, true);
+        assert!(p.get_gpio_state(3));
+        assert!(!p.get_gpio_state(4));
+    }
+
+    #[test]
+    fn push_uart_data() {
+        let mut p = WasmSimPeripherals::new();
+        p.push_uart_data(1, b"test");
+        let mut buf = [0u8; 10];
+        let n = p.uart_read(1, &mut buf);
+        assert_eq!(n, 4);
+        assert_eq!(&buf[..4], b"test");
+    }
+
+    #[test]
+    fn get_stepper_position_default() {
+        let p = WasmSimPeripherals::new();
+        assert_eq!(p.get_stepper_position(0), 0);
+    }
+
+    #[test]
     fn display_write() {
         let mut p = WasmSimPeripherals::new();
         p.display_write(0, 0x3C, "Hello", "World");

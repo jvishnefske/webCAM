@@ -73,13 +73,11 @@ struct Cli {
 /// Scans `/dev` for `i2c-*` device nodes, returning sorted paths.
 fn detect_i2c_devices() -> Vec<String> {
     let mut paths = Vec::new();
-    for entry in std::fs::read_dir("/dev").into_iter().flatten() {
-        if let Ok(entry) = entry {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if name.starts_with("i2c-") {
-                paths.push(format!("/dev/{name}"));
-            }
+    for entry in std::fs::read_dir("/dev").into_iter().flatten().flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.starts_with("i2c-") {
+            paths.push(format!("/dev/{name}"));
         }
     }
     paths.sort();

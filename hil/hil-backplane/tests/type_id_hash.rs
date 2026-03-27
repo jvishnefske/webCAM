@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used)]
 //! FNV-1a hash determinism, stability, and collision checks.
 
 use hil_backplane::message::type_id_hash;

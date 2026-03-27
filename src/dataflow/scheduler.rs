@@ -61,4 +61,11 @@ mod tests {
         s.speed = 0.0;
         assert_eq!(s.advance(1.0), 0);
     }
+
+    #[test]
+    fn batch_returns_steps_and_dt() {
+        let (steps, dt) = Scheduler::batch(100, 0.01);
+        assert_eq!(steps, 100);
+        assert!((dt - 0.01).abs() < 1e-12);
+    }
 }

@@ -29,6 +29,7 @@ pub fn is_dap_tag(tag: u32) -> bool {
 ///
 /// Returns `Err(())` if the CBOR is malformed or does not contain
 /// a tag-40 message with a byte string at key 1.
+#[allow(clippy::result_unit_err)]
 pub fn decode_dap_request(cbor: &[u8]) -> Result<&[u8], ()> {
     let mut dec = minicbor::Decoder::new(cbor);
 
@@ -56,6 +57,7 @@ pub fn decode_dap_request(cbor: &[u8]) -> Result<&[u8], ()> {
 /// # Errors
 ///
 /// Returns `Err(())` if `buf` is too small for the encoded response.
+#[allow(clippy::result_unit_err)]
 pub fn encode_dap_response(buf: &mut [u8], dap_data: &[u8]) -> Result<usize, ()> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
@@ -67,7 +69,8 @@ pub fn encode_dap_response(buf: &mut [u8], dap_data: &[u8]) -> Result<usize, ()>
     enc.u32(1).map_err(|_| ())?;
     enc.bytes(dap_data).map_err(|_| ())?;
 
-    drop(enc);
+    // End the encoder's borrow on `writer` so we can measure remaining capacity.
+    let _ = enc;
     let remaining = writer.len();
     Ok(buf_len - remaining)
 }
@@ -84,6 +87,7 @@ pub fn encode_dap_response(buf: &mut [u8], dap_data: &[u8]) -> Result<usize, ()>
 ///
 /// Returns `Err(())` if CBOR decoding fails, the tag is not 40,
 /// the processor returns 0 bytes, or the response buffer is too small.
+#[allow(clippy::result_unit_err)]
 pub fn handle_dap_request<P: DapProcessor + ?Sized>(
     dap: &mut P,
     request: &[u8],

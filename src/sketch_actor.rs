@@ -1200,6 +1200,45 @@ mod tests {
     }
 
     #[test]
+    fn test_move_point() {
+        let mut actor = SketchActor::new();
+        let p1 = actor.add_point(0.0, 0.0);
+        actor.move_point(p1, 5.0, 7.0);
+        let pt = actor.point(p1).unwrap();
+        assert!((pt.x - 5.0).abs() < 1e-9);
+        assert!((pt.y - 7.0).abs() < 1e-9);
+        // Moving nonexistent point should not panic
+        actor.move_point(999, 1.0, 1.0);
+    }
+
+    #[test]
+    fn test_apply_angle() {
+        let mut actor = SketchActor::new();
+        let p1 = actor.add_point_fixed(0.0, 0.0);
+        let p2 = actor.add_point(10.0, 0.0);
+        // Constrain angle to 90 degrees (pi/2)
+        actor.add_constraint(Constraint::Angle(p1, p2, std::f64::consts::FRAC_PI_2));
+        let result = actor.solve(500);
+        assert_eq!(result.status, SolveStatus::Converged);
+        let b = actor.point(p2).unwrap();
+        // p2 should be roughly above p1 (angle = pi/2 means pointing up)
+        assert!(b.x.abs() < 0.5, "p2.x should be near 0, got {}", b.x);
+        assert!(b.y > 5.0, "p2.y should be positive, got {}", b.y);
+    }
+
+    #[test]
+    fn test_constraint_error_and_max() {
+        let mut actor = SketchActor::new();
+        let p1 = actor.add_point(0.0, 0.0);
+        let p2 = actor.add_point(3.0, 4.0);
+        // Distance is 5.0, constrain to 10.0
+        actor.add_constraint(Constraint::Distance(p1, p2, 10.0));
+        // Before solving, error should be |5 - 10| = 5
+        let max_err = actor.max_constraint_error();
+        assert!((max_err - 5.0).abs() < 1e-6, "max_err={max_err}");
+    }
+
+    #[test]
     fn test_rectangle_fully_constrained() {
         // A rectangle: 4 points, fixed origin, width=20, height=10
         let mut actor = SketchActor::new();

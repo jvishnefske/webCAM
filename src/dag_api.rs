@@ -9,6 +9,12 @@ pub struct DagHandle {
     dag: Dag,
 }
 
+impl Default for DagHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl DagHandle {
     #[wasm_bindgen(constructor)]
@@ -281,6 +287,120 @@ mod tests {
         assert!(json.contains(r#""value":2"#));
         assert!(json.contains(r#""a":0"#));
         assert!(json.contains(r#""b":1"#));
+    }
+
+    #[test]
+    fn test_dag_handle_constant() {
+        let mut h = DagHandle::new();
+        let id = h.constant(3.25).unwrap();
+        assert_eq!(id, 0);
+        assert_eq!(h.evaluate_node(id), 3.25);
+    }
+
+    #[test]
+    fn test_dag_handle_input() {
+        let mut h = DagHandle::new();
+        let id = h.input("x").unwrap();
+        assert_eq!(id, 0);
+        // Input with NullChannels yields 0.0
+        assert_eq!(h.evaluate_node(id), 0.0);
+    }
+
+    #[test]
+    fn test_dag_handle_output() {
+        let mut h = DagHandle::new();
+        let c = h.constant(5.0).unwrap();
+        let id = h.output("y", c).unwrap();
+        assert_eq!(id, 1);
+        assert_eq!(h.evaluate_node(id), 5.0);
+    }
+
+    #[test]
+    fn test_dag_handle_add() {
+        let mut h = DagHandle::new();
+        let a = h.constant(1.0).unwrap();
+        let b = h.constant(2.0).unwrap();
+        let c = h.add(a, b).unwrap();
+        assert_eq!(h.evaluate_node(c), 3.0);
+    }
+
+    #[test]
+    fn test_dag_handle_sub() {
+        let mut h = DagHandle::new();
+        let a = h.constant(5.0).unwrap();
+        let b = h.constant(3.0).unwrap();
+        let c = h.sub(a, b).unwrap();
+        assert_eq!(h.evaluate_node(c), 2.0);
+    }
+
+    #[test]
+    fn test_dag_handle_mul() {
+        let mut h = DagHandle::new();
+        let a = h.constant(3.0).unwrap();
+        let b = h.constant(4.0).unwrap();
+        let c = h.mul(a, b).unwrap();
+        assert_eq!(h.evaluate_node(c), 12.0);
+    }
+
+    #[test]
+    fn test_dag_handle_div() {
+        let mut h = DagHandle::new();
+        let a = h.constant(10.0).unwrap();
+        let b = h.constant(2.0).unwrap();
+        let c = h.div(a, b).unwrap();
+        assert_eq!(h.evaluate_node(c), 5.0);
+    }
+
+    #[test]
+    fn test_dag_handle_neg() {
+        let mut h = DagHandle::new();
+        let a = h.constant(7.0).unwrap();
+        let b = h.neg(a).unwrap();
+        assert_eq!(h.evaluate_node(b), -7.0);
+    }
+
+    #[test]
+    fn test_dag_handle_pow() {
+        let mut h = DagHandle::new();
+        let a = h.constant(2.0).unwrap();
+        let b = h.constant(3.0).unwrap();
+        let c = h.pow(a, b).unwrap();
+        assert_eq!(h.evaluate_node(c), 8.0);
+    }
+
+    #[test]
+    fn test_dag_handle_relu() {
+        let mut h = DagHandle::new();
+        let pos = h.constant(5.0).unwrap();
+        let neg = h.constant(-3.0).unwrap();
+        let r1 = h.relu(pos).unwrap();
+        let r2 = h.relu(neg).unwrap();
+        assert_eq!(h.evaluate_node(r1), 5.0);
+        assert_eq!(h.evaluate_node(r2), 0.0);
+    }
+
+    #[test]
+    fn test_dag_handle_publish_subscribe() {
+        let mut h = DagHandle::new();
+        let sub_id = h.subscribe("topic_a").unwrap();
+        let c = h.constant(1.0).unwrap();
+        let pub_id = h.publish("topic_a", c).unwrap();
+        assert_eq!(sub_id, 0);
+        assert_eq!(pub_id, 2);
+        assert_eq!(h.len(), 3);
+    }
+
+    #[test]
+    fn test_dag_handle_from_cbor() {
+        let mut h = DagHandle::new();
+        let a = h.constant(2.0).unwrap();
+        let b = h.constant(3.0).unwrap();
+        let _ = h.add(a, b).unwrap();
+        let bytes = h.to_cbor();
+
+        let h2 = DagHandle::from_cbor(&bytes).unwrap();
+        assert_eq!(h2.len(), 3);
+        assert_eq!(h2.evaluate_node(2), 5.0);
     }
 
     #[test]

@@ -1068,6 +1068,321 @@ mod tests {
         assert_eq!(config.laser_power, Some(100.0));
         assert_eq!(config.passes, Some(1));
     }
+
+    // ── Dataflow WASM API coverage tests ────────────────────────────
+
+    #[test]
+    fn test_dataflow_new_and_destroy() {
+        let id = dataflow_new(0.01);
+        assert!(id > 0);
+        dataflow_destroy(id);
+        // destroying again is a no-op
+        dataflow_destroy(id);
+    }
+
+    #[test]
+    fn test_dataflow_block_types() {
+        let json = dataflow_block_types();
+        let types: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        assert!(!types.is_empty());
+    }
+
+    #[test]
+    fn test_dataflow_add_and_remove_block() {
+        let gid = dataflow_new(0.01);
+        let bid = dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        assert!(bid > 0);
+        dataflow_remove_block(gid, bid).unwrap();
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_dataflow_update_block() {
+        let gid = dataflow_new(0.01);
+        let bid = dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        dataflow_update_block(gid, bid, "constant", r#"{"value":2.0}"#).unwrap();
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_dataflow_connect_and_disconnect() {
+        // Use entirely internal APIs to avoid JsValue::from_str panics on non-wasm
+        let gid = dataflow_new(0.01);
+        DATAFLOW_GRAPHS.with(|g| {
+            let mut graphs = g.borrow_mut();
+            let graph = graphs.get_mut(&gid).unwrap();
+            let src = graph.add_block(Box::new(
+                dataflow::blocks::constant::ConstantBlock::new(1.0),
+            ));
+            let dst = graph.add_block(Box::new(
+                dataflow::blocks::function::FunctionBlock::gain(2.0),
+            ));
+            let ch = graph.connect(src, 0, dst, 0).unwrap();
+            graph.disconnect(ch);
+        });
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_dataflow_snapshot() {
+        let gid = dataflow_new(0.01);
+        dataflow_add_block(gid, "constant", r#"{"value":5.0}"#).unwrap();
+        let snap = dataflow_snapshot(gid).unwrap();
+        assert!(snap.contains("constant"));
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_dataflow_run() {
+        let gid = dataflow_new(0.01);
+        dataflow_add_block(gid, "constant", r#"{"value":3.0}"#).unwrap();
+        let snap = dataflow_run(gid, 10, 0.01).unwrap();
+        assert!(snap.contains("constant"));
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_dataflow_advance() {
+        let gid = dataflow_new(0.01);
+        dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let snap = dataflow_advance(gid, 0.05).unwrap();
+        assert!(!snap.is_empty());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_dataflow_set_speed() {
+        let gid = dataflow_new(0.01);
+        dataflow_set_speed(gid, 2.0).unwrap();
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_dataflow_codegen() {
+        let gid = dataflow_new(0.01);
+        dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let result = dataflow_codegen(gid, 0.01).unwrap();
+        assert!(result.contains("main.rs") || result.contains("Cargo.toml"));
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_dataflow_codegen_multi() {
+        let gid = dataflow_new(0.01);
+        dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let targets = r#"[{"target":"Host","binding":{"target":"Host","pins":[]}}]"#;
+        let result = dataflow_codegen_multi(gid, 0.01, targets).unwrap();
+        assert!(!result.is_empty());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_dataflow_simulation_mode() {
+        let gid = dataflow_new(0.01);
+        dataflow_set_simulation_mode(gid, true).unwrap();
+        dataflow_set_sim_adc(gid, 0, 3.3).unwrap();
+        let duty = dataflow_get_sim_pwm(gid, 0).unwrap();
+        assert!((duty - 0.0).abs() < f64::EPSILON);
+        dataflow_destroy(gid);
+    }
+
+    // ── Sketch WASM API coverage tests ──────────────────────────────
+
+    #[test]
+    fn test_sketch_reset_and_snapshot() {
+        sketch_reset();
+        let snap = sketch_snapshot().unwrap();
+        assert!(snap.contains("points"));
+    }
+
+    #[test]
+    fn test_sketch_add_point() {
+        sketch_reset();
+        let r = sketch_add_point(10.0, 20.0);
+        assert!(r.contains("\"id\""));
+    }
+
+    #[test]
+    fn test_sketch_add_fixed_point() {
+        sketch_reset();
+        let r = sketch_add_fixed_point(5.0, 5.0);
+        assert!(r.contains("\"id\""));
+    }
+
+    #[test]
+    fn test_sketch_move_and_remove_point() {
+        sketch_reset();
+        let r: serde_json::Value = serde_json::from_str(&sketch_add_point(0.0, 0.0)).unwrap();
+        let id = r["id"].as_u64().unwrap() as u32;
+        sketch_move_point(id, 1.0, 1.0);
+        sketch_remove_point(id);
+    }
+
+    #[test]
+    fn test_sketch_set_fixed() {
+        sketch_reset();
+        let r: serde_json::Value = serde_json::from_str(&sketch_add_point(0.0, 0.0)).unwrap();
+        let id = r["id"].as_u64().unwrap() as u32;
+        sketch_set_fixed(id, true);
+        sketch_set_fixed(id, false);
+    }
+
+    #[test]
+    fn test_sketch_add_and_remove_constraint() {
+        sketch_reset();
+        let p1: serde_json::Value =
+            serde_json::from_str(&sketch_add_point(0.0, 0.0)).unwrap();
+        let p2: serde_json::Value =
+            serde_json::from_str(&sketch_add_point(10.0, 0.0)).unwrap();
+        let id1 = p1["id"].as_u64().unwrap() as u32;
+        let id2 = p2["id"].as_u64().unwrap() as u32;
+        let ids_json = format!("[{id1},{id2}]");
+        let cr = sketch_add_constraint("distance", &ids_json, 10.0, 0.0).unwrap();
+        assert!(cr.contains("\"id\""));
+        let cv: serde_json::Value = serde_json::from_str(&cr).unwrap();
+        let cid = cv["id"].as_u64().unwrap() as u32;
+        sketch_remove_constraint(cid);
+    }
+
+    #[test]
+    fn test_sketch_solve() {
+        sketch_reset();
+        sketch_add_point(0.0, 0.0);
+        sketch_add_point(10.0, 0.0);
+        let snap = sketch_solve().unwrap();
+        assert!(snap.contains("points"));
+    }
+
+    #[test]
+    fn test_sketch_pump() {
+        sketch_reset();
+        sketch_add_point(1.0, 2.0);
+        let snap = sketch_pump().unwrap();
+        assert!(snap.contains("points"));
+    }
+
+    // ── CAM function coverage tests ─────────────────────────────────
+
+    fn simple_svg() -> &'static str {
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+            <rect x="10" y="10" width="80" height="80"/>
+        </svg>"#
+    }
+
+    fn minimal_ascii_stl() -> &'static [u8] {
+        b"solid test
+facet normal 0 0 1
+  outer loop
+    vertex 0 0 0
+    vertex 1 0 0
+    vertex 0 1 0
+  endloop
+endfacet
+endsolid test"
+    }
+
+    #[test]
+    fn test_process_stl_default() {
+        let result = process_stl(minimal_ascii_stl(), "{}");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_preview_svg() {
+        let result = preview_svg(simple_svg());
+        assert!(result.is_ok());
+        let json = result.unwrap();
+        let paths: Vec<Vec<[f64; 2]>> = serde_json::from_str(&json).unwrap();
+        assert!(!paths.is_empty());
+    }
+
+    #[test]
+    fn test_preview_stl() {
+        let result = preview_stl(minimal_ascii_stl(), "{}");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_sim_moves_svg() {
+        let result = sim_moves_svg(simple_svg(), r#"{"strategy":"contour"}"#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_sim_moves_stl() {
+        let result = sim_moves_stl(minimal_ascii_stl(), "{}");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_flatten_moves_empty() {
+        let result = flatten_moves(&[]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "[]");
+    }
+
+    #[test]
+    fn test_build_toolpaths_svg_laser() {
+        let polylines = svg::parse_svg(simple_svg()).unwrap();
+        let config = CamConfig {
+            machine_type: "laser_cutter".into(),
+            strategy: "laser_cut".into(),
+            laser_power: Some(80.0),
+            ..CamConfig::default()
+        };
+        let tps = build_toolpaths_svg(&polylines, &config);
+        assert!(!tps.is_empty());
+    }
+
+    #[test]
+    fn test_build_toolpaths_stl_zigzag() {
+        let mesh = stl::parse_stl(minimal_ascii_stl()).unwrap();
+        let config = CamConfig {
+            strategy: "zigzag".into(),
+            ..CamConfig::default()
+        };
+        // zigzag strategy on minimal mesh; may return empty but should not panic
+        let _tps = build_toolpaths_stl(&mesh, &config);
+    }
+
+    #[test]
+    fn test_scan_direction_from_config() {
+        let mut config = CamConfig::default();
+        assert!(matches!(scan_direction_from_config(&config), ScanDirection::X));
+        config.scan_direction = "y".into();
+        assert!(matches!(scan_direction_from_config(&config), ScanDirection::Y));
+        config.scan_direction = "Y".into();
+        assert!(matches!(scan_direction_from_config(&config), ScanDirection::Y));
+    }
+
+    #[test]
+    fn test_laser_params_from_config() {
+        let config = CamConfig::default();
+        assert!(laser_params_from_config(&config).is_none());
+        let laser_config = CamConfig {
+            machine_type: "laser_cutter".into(),
+            laser_power: Some(50.0),
+            passes: Some(2),
+            air_assist: Some(true),
+            ..CamConfig::default()
+        };
+        let lp = laser_params_from_config(&laser_config).unwrap();
+        assert!((lp.power - 50.0).abs() < f64::EPSILON);
+        assert_eq!(lp.passes, 2);
+        assert!(lp.air_assist);
+    }
+
+    #[test]
+    fn test_strategy_from_config() {
+        // Just ensure all branches produce a strategy without panic
+        for s in &["contour", "pocket", "perimeter", "laser_cut", "laser_engrave"] {
+            let config = CamConfig {
+                strategy: s.to_string(),
+                ..CamConfig::default()
+            };
+            let _ = strategy_from_config(&config);
+        }
+    }
 }
 
 // ── Dataflow Simulator WASM API ─────────────────────────────────────
