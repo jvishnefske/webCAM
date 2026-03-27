@@ -1,0 +1,13 @@
+[package]
+name = "mlir-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MLIR-based code generation backend for the RustCAM dataflow engine"
+
+[dependencies]
+module-traits.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
