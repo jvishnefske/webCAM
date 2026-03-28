@@ -23,6 +23,7 @@ members = [
     "hil/board-support-pi-zero",
     "hil/pico-bootloader",
     "hil/hil-frontend",
+    "hil/combined-frontend",
     "mlir-codegen",
 ]
 default-members = [
