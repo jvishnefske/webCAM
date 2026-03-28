@@ -13,8 +13,14 @@ build: ## Build native (for testing)
 lint: ## Run clippy (matches CI)
 	cargo clippy --all-targets -- -D warnings
 
-test: ## Run all default-member tests (matches CI)
-	cargo test
+test: ## Run all library crate tests with coverage (llvm-cov)
+	cargo llvm-cov --workspace \
+		--exclude board-support-pico \
+		--exclude board-support-pico2 \
+		--exclude board-support-stm32 \
+		--exclude pico-bootloader \
+		--exclude combined-frontend \
+		--exclude hil-frontend
 
 wasm: ## Build WASM + JS bindings (requires wasm-pack)
 	wasm-pack build --target web --out-dir www/pkg --release
