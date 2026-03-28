@@ -7,38 +7,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { HilClient } from './hil-client';
 
-// Minimal CBOR encoding helpers (matching dag-core/src/cbor.rs wire format)
-// Op tags: 0=Const, 10=Subscribe, 11=Publish
-function cborDag(ops: number[][]): Uint8Array {
-  // Encode as CBOR array of arrays using raw bytes
-  // This is a simplified encoder for test use only
-  const parts: number[] = [];
-  // CBOR definite-length array header
-  if (ops.length < 24) {
-    parts.push(0x80 | ops.length); // array(n)
-  } else {
-    parts.push(0x98, ops.length); // array(n) for n < 256
-  }
-  for (const op of ops) {
-    // Each op is a small CBOR array
-    parts.push(0x80 | op.length); // inner array header
-    for (const val of op) {
-      if (Number.isInteger(val) && val >= 0 && val < 24) {
-        parts.push(val); // tiny uint
-      } else if (Number.isInteger(val) && val >= 0 && val < 256) {
-        parts.push(0x18, val); // uint8
-      } else {
-        // f64 — CBOR major type 7, additional info 27
-        parts.push(0xfb);
-        const buf = new ArrayBuffer(8);
-        new DataView(buf).setFloat64(0, val, false);
-        parts.push(...new Uint8Array(buf));
-      }
-    }
-  }
-  return new Uint8Array(parts);
-}
-
 // Encode a CBOR text string
 function cborStr(s: string): number[] {
   const bytes = new TextEncoder().encode(s);
