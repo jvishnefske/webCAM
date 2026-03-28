@@ -240,7 +240,7 @@ export class HilClient {
   async deployDag(cborBytes: Uint8Array): Promise<{ok?: boolean; nodes?: number; error?: string}> {
     const resp = await fetch(`${this.httpBase}/api/dag`, {
       method: 'POST',
-      body: cborBytes,
+      body: cborBytes as unknown as BodyInit,
     });
     return resp.json();
   }
