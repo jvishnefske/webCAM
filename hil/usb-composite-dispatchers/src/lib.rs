@@ -7,6 +7,7 @@ mod test_logger {
     #[defmt::global_logger]
     struct TestLogger;
 
+    // SAFETY: Test-only no-op logger; single-threaded test runner.
     unsafe impl defmt::Logger for TestLogger {
         fn acquire() {}
         unsafe fn flush() {}

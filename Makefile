@@ -1,8 +1,21 @@
 .PHONY: build wasm lint test ts ci release serve clean help \
        hil-firmware hil-stm32 hil-pi-zero hil-jlink-flash hil-verify all \
-       dag-frontend embed-assets
+       dag-frontend combined-frontend embed-assets
 
 WASM_TARGET = wasm32-unknown-unknown
+
+# Crates excluded from host workspace builds:
+# - Firmware binaries require embedded ARM targets and activate conflicting
+#   critical-section features (embassy-rp → restore-state-u8 vs
+#   cortex-m → restore-state-bool — mutually exclusive)
+# - WASM frontends require wasm32-unknown-unknown target
+WORKSPACE_EXCLUDES = \
+	--exclude board-support-pico \
+	--exclude board-support-pico2 \
+	--exclude board-support-stm32 \
+	--exclude pico-bootloader \
+	--exclude combined-frontend \
+	--exclude hil-frontend
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -10,17 +23,11 @@ help: ## Show this help
 build: ## Build native (for testing)
 	cargo build --release
 
-lint: ## Run clippy (matches CI)
-	cargo clippy --all-targets -- -D warnings
+lint: ## Run clippy on all host crates (matches CI)
+	cargo clippy --workspace $(WORKSPACE_EXCLUDES) --all-targets -- -D warnings
 
 test: ## Run all library crate tests with coverage (llvm-cov)
-	cargo llvm-cov --workspace \
-		--exclude board-support-pico \
-		--exclude board-support-pico2 \
-		--exclude board-support-stm32 \
-		--exclude pico-bootloader \
-		--exclude combined-frontend \
-		--exclude hil-frontend
+	cargo llvm-cov --workspace $(WORKSPACE_EXCLUDES)
 
 wasm: ## Build WASM + JS bindings (requires wasm-pack)
 	wasm-pack build --target web --out-dir www/pkg --release
@@ -57,7 +64,10 @@ hil-jlink-flash: hil-firmware ## Flash Pico firmware via JLink
 hil-firmware: ## Build Pico firmware
 	cargo build-pico
 
-hil-pico2: dag-frontend ## Build Pico 2 firmware with DAG runtime
+combined-frontend: ## Build combined Leptos frontend (WASM) via Trunk
+	cd hil/combined-frontend && trunk build --release
+
+hil-pico2: combined-frontend dag-frontend ## Build Pico 2 firmware with DAG runtime
 	EMBASSY_USB_MAX_INTERFACE_COUNT=16 EMBASSY_USB_MAX_HANDLER_COUNT=8 \
 	cargo build -p board-support-pico2 --target thumbv8m.main-none-eabihf --release
 

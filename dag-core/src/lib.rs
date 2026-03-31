@@ -40,3 +40,6 @@ pub mod cbor;
 pub mod eval;
 pub mod op;
 pub mod templates;
+
+#[cfg(feature = "json")]
+pub mod json;

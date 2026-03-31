@@ -378,6 +378,253 @@ body {
     color: var(--text-primary);
 }
 
+/* DAG Editor Layout */
+.dag-editor-layout {
+    display: grid;
+    grid-template-columns: 200px 1fr 300px;
+    gap: 1rem;
+    min-height: 500px;
+}
+
+/* Palette */
+.dag-palette {
+    background-color: var(--bg-card);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    padding: 0.75rem;
+    overflow-y: auto;
+    max-height: 600px;
+}
+
+.palette-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 0.75rem;
+    color: var(--text-primary);
+}
+
+.palette-category {
+    margin-bottom: 0.5rem;
+}
+
+.palette-category-header {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    width: 100%;
+    padding: 0.4rem 0.5rem;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background-color 0.15s;
+}
+
+.palette-category-header:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.palette-chevron {
+    font-size: 0.7rem;
+    width: 0.8rem;
+    text-align: center;
+}
+
+.palette-category-body {
+    padding-left: 0.25rem;
+}
+
+.palette-block-btn {
+    display: block;
+    width: 100%;
+    padding: 0.4rem 0.6rem;
+    margin: 0.15rem 0;
+    background-color: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.palette-block-btn:hover {
+    background-color: var(--accent-dim);
+    border-color: var(--accent);
+}
+
+/* Canvas */
+.dag-canvas-container {
+    background-color: var(--bg-card);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.dag-toolbar {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.5rem 0.75rem;
+    background-color: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+}
+
+.dag-status {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-left: auto;
+    font-family: monospace;
+}
+
+.dag-canvas {
+    flex: 1;
+    min-height: 380px;
+    background-color: #0d0d20;
+    background-image:
+        linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 20px 20px;
+}
+
+/* SVG nodes */
+.dag-node {
+    cursor: pointer;
+}
+
+.dag-node-rect {
+    fill: var(--bg-card);
+    stroke: var(--border);
+    stroke-width: 1.5;
+    transition: stroke 0.15s;
+}
+
+.dag-node:hover .dag-node-rect {
+    stroke: var(--accent-dim);
+}
+
+.dag-node.selected .dag-node-rect {
+    stroke: var(--accent);
+    stroke-width: 2;
+}
+
+.dag-node-title {
+    fill: var(--text-primary);
+    font-size: 11px;
+    font-weight: 600;
+    text-anchor: middle;
+    dominant-baseline: auto;
+}
+
+.dag-node-type {
+    fill: var(--text-secondary);
+    font-size: 9px;
+    font-family: monospace;
+    text-anchor: middle;
+    dominant-baseline: auto;
+}
+
+.dag-port {
+    stroke: none;
+}
+
+.dag-port-in {
+    fill: var(--success);
+}
+
+.dag-port-out {
+    fill: var(--accent);
+}
+
+.dag-port-label {
+    fill: var(--text-secondary);
+    font-size: 8px;
+    font-family: monospace;
+    dominant-baseline: auto;
+}
+
+.dag-port-label-right {
+    text-anchor: end;
+}
+
+/* Config Panel */
+.dag-config-panel {
+    background-color: var(--bg-card);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    padding: 0.75rem;
+    overflow-y: auto;
+    max-height: 600px;
+}
+
+.config-panel-title {
+    font-weight: 600;
+    font-size: 1rem;
+    margin-bottom: 0.75rem;
+    color: var(--accent);
+}
+
+.config-fields {
+    margin-bottom: 1rem;
+}
+
+.config-section-title {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0.75rem 0 0.35rem;
+}
+
+.config-channels {
+    background-color: #0a0a1a;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.5rem;
+    font-family: monospace;
+    font-size: 0.8rem;
+    color: var(--success);
+    white-space: pre-wrap;
+    max-height: 100px;
+    overflow-y: auto;
+}
+
+.config-il {
+    background-color: #0a0a1a;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.5rem;
+    font-family: monospace;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.config-empty {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    padding: 1rem;
+}
+
+.form-group-checkbox label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
     .card-grid {
@@ -410,5 +657,9 @@ body {
 
     .form-row {
         flex-direction: column;
+    }
+
+    .dag-editor-layout {
+        grid-template-columns: 1fr;
     }
 }

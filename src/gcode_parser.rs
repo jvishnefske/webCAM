@@ -845,4 +845,55 @@ mod tests {
         let words = parse_words("G").unwrap();
         assert_eq!(words, vec![('G', 0.0)]);
     }
+
+    #[test]
+    fn motion_mode_display_and_gcode_number() {
+        assert_eq!(format!("{}", MotionMode::Rapid), "G00");
+        assert_eq!(format!("{}", MotionMode::Linear), "G01");
+        assert_eq!(format!("{}", MotionMode::ClockwiseArc), "G02");
+        assert_eq!(format!("{}", MotionMode::CounterClockwiseArc), "G03");
+        assert_eq!(MotionMode::Rapid.gcode_number(), 0);
+        assert_eq!(MotionMode::CounterClockwiseArc.gcode_number(), 3);
+    }
+
+    #[test]
+    fn axis_mask_any() {
+        assert!(!AxisMask { x: false, y: false, z: false }.any());
+        assert!(AxisMask { x: true, y: false, z: false }.any());
+    }
+
+    #[test]
+    fn gcode_command_is_modal() {
+        assert!(GCodeCommand::SetUnits(UnitMode::Millimeters).is_modal());
+        let rapid = GCodeCommand::RapidMove { x: None, y: None, z: None };
+        assert!(!rapid.is_modal());
+    }
+
+    #[test]
+    fn gcode_command_motion_mode() {
+        let rapid = GCodeCommand::RapidMove { x: None, y: None, z: None };
+        assert_eq!(rapid.motion_mode(), Some(MotionMode::Rapid));
+        assert_eq!(GCodeCommand::ProgramEnd.motion_mode(), None);
+    }
+
+    #[test]
+    fn parse_line_implicit_linear() {
+        // Line with X/Y/Z but no G code should be treated as G1
+        let cmd = parse_line("X10 Y20").unwrap();
+        assert!(matches!(cmd, GCodeCommand::LinearMove { .. }));
+    }
+
+    #[test]
+    fn parse_words_invalid_number() {
+        // A number like "1.2.3" should fail to parse
+        let result = parse_words("G1.2.3");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn spindle_control_is_running() {
+        assert!(SpindleControl::Clockwise(SpindleSpeed::new(1000)).is_running());
+        assert!(SpindleControl::CounterClockwise(SpindleSpeed::new(500)).is_running());
+        assert!(!SpindleControl::Off.is_running());
+    }
 }

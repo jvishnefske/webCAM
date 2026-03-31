@@ -536,7 +536,7 @@ mod tests {
         dec.u32().unwrap()
     }
 
-    fn decode_error_message<'a>(buf: &'a [u8]) -> &'a str {
+    fn decode_error_message(buf: &[u8]) -> &str {
         let mut dec = minicbor::Decoder::new(buf);
         let _map = dec.map().unwrap();
         let _k0 = dec.u32().unwrap();

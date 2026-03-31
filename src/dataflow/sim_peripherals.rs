@@ -225,4 +225,10 @@ mod tests {
         assert_eq!(lines.0, "Hello");
         assert_eq!(lines.1, "World");
     }
+
+    #[test]
+    fn wasm_sim_peripherals_default() {
+        let mut p = WasmSimPeripherals::default();
+        assert_eq!(p.adc_read(0), 0.0);
+    }
 }

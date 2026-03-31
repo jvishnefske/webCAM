@@ -224,3 +224,14 @@ impl Default for Toolpath {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn toolpath_default() {
+        let tp = Toolpath::default();
+        assert!(tp.moves.is_empty());
+    }
+}

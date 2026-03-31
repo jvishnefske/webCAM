@@ -238,4 +238,11 @@ mod tests {
         assert!(sm.as_codegen().is_none());
         assert!(sm.as_sim_model().is_none());
     }
+
+    #[test]
+    fn config_default() {
+        let cfg = StateMachineConfig::default();
+        assert!(!cfg.states.is_empty());
+        assert!(!cfg.initial.is_empty());
+    }
 }

@@ -400,6 +400,20 @@ mod tests {
     }
 
     #[test]
+    fn create_block_invalid_json_errors() {
+        // Exercise all map_err closures by passing invalid JSON to each block type
+        let bad = "not json";
+        for bt in &[
+            "constant", "gain", "clamp", "plot", "udp_source", "udp_sink",
+            "adc_source", "pwm_sink", "gpio_out", "gpio_in", "uart_tx", "uart_rx",
+            "state_machine", "pubsub_sink", "pubsub_source", "encoder",
+            "ssd1306_display", "tmc2209_stepper", "tmc2209_stallguard",
+        ] {
+            assert!(create_block(bt, bad).is_err(), "expected error for {bt}");
+        }
+    }
+
+    #[test]
     fn constant_block_default_trait_methods() {
         let b = constant::ConstantBlock::new(1.0);
         assert!(b.as_analysis().is_none());

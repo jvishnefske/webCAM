@@ -1251,4 +1251,11 @@ mod tests {
         assert!((r3.y - 10.0).abs() < 1e-3, "p3.y={}", r3.y);
         let _ = r0; // used as fixed anchor
     }
+
+    #[test]
+    fn sketch_actor_default() {
+        let actor = SketchActor::default();
+        let snap = actor.snapshot();
+        assert!(snap.points.is_empty());
+    }
 }

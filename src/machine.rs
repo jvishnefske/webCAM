@@ -205,4 +205,10 @@ mod tests {
         assert_eq!(p2.name, "CNC Mill");
         assert_eq!(p2.machine_type, MachineType::CncMill);
     }
+
+    #[test]
+    fn machine_profile_default() {
+        let p = MachineProfile::default();
+        assert!(!p.name.is_empty());
+    }
 }
