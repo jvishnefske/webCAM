@@ -467,6 +467,7 @@ impl<B: BusSet> MultiI2cHandlerBuilder<B> {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic)]
 mod tests {
     use super::*;
     use embassy_usb::control::Recipient;

@@ -395,6 +395,41 @@ mod tests {
     }
 
     #[test]
+    fn ast_to_snapshot_unknown_from_block() {
+        let src = "block a: constant(1.0)\nblock b: gain(2.0)\nnonexistent.out -> b.in\n";
+        let graph = parser::parse(src).unwrap();
+        let result = ast_to_snapshot(&graph);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown block"));
+    }
+
+    #[test]
+    fn ast_to_snapshot_unknown_to_block() {
+        let src = "block a: constant(1.0)\na.out -> nonexistent.in\n";
+        let graph = parser::parse(src).unwrap();
+        let result = ast_to_snapshot(&graph);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn ast_to_snapshot_bad_port_name() {
+        let src = "block a: constant(1.0)\nblock b: gain(2.0)\na.fake_port -> b.in\n";
+        let graph = parser::parse(src).unwrap();
+        let result = ast_to_snapshot(&graph);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("no output port"));
+    }
+
+    #[test]
+    fn ast_to_snapshot_bad_input_port() {
+        let src = "block a: constant(1.0)\nblock b: gain(2.0)\na.out -> b.fake_in\n";
+        let graph = parser::parse(src).unwrap();
+        let result = ast_to_snapshot(&graph);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("no input port"));
+    }
+
+    #[test]
     fn dsl_config_named_to_json() {
         let config = parser::ast::Config::Named(vec![
             ("channel".into(), parser::ast::Value::Int(0)),

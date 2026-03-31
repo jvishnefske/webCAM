@@ -13,6 +13,7 @@ path = "src/lib.rs"
 leptos = { version = "0.7", features = ["csr"] }
 wasm-bindgen = "0.2"
 crc32fast = "1"
+wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
     "WebSocket",
     "BinaryType",
@@ -31,6 +32,12 @@ web-sys = { version = "0.3", features = [
     "console",
     "Window",
     "Storage",
+    "EventTarget",
+    "Headers",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
 ] }
 js-sys = "0.3"
 minicbor = { version = "0.25", features = ["std"] }
@@ -38,5 +45,6 @@ gloo-timers = "0.3"
 console_error_panic_hook = "0.1"
 module-traits = { path = "../../module-traits" }
 dag-core = { path = "../../dag-core", default-features = false, features = ["std"] }
+configurable-blocks = { path = "../../configurable-blocks" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

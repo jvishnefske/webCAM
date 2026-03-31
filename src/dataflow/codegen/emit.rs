@@ -2701,4 +2701,112 @@ mod tests {
         assert!(result.workspaces.contains_key(&TargetFamily::Rp2040));
         assert!(result.workspaces.contains_key(&TargetFamily::Stm32f4));
     }
+
+    #[test]
+    fn codegen_backend_default() {
+        let _ = CodegenBackend::default();
+    }
+
+    fn make_embedded_block(id: u32, block_type: &str, config: serde_json::Value, inputs: Vec<PortDef>, outputs: Vec<PortDef>) -> BlockSnapshot {
+        let n_outputs = outputs.len();
+        BlockSnapshot {
+            id,
+            block_type: block_type.to_string(),
+            name: format!("{}_{id}", block_type),
+            inputs,
+            outputs,
+            config,
+            output_values: vec![None; n_outputs],
+            target: None,
+            custom_codegen: None,
+        }
+    }
+
+    #[test]
+    fn logic_lib_with_embedded_blocks() {
+        let snap = GraphSnapshot {
+            blocks: vec![
+                make_embedded_block(1, "adc_source", serde_json::json!({"channel": 0, "resolution_bits": 12}), vec![], vec![PortDef::new("out", PortKind::Float)]),
+                make_embedded_block(2, "pwm_sink", serde_json::json!({"channel": 0, "frequency_hz": 1000}), vec![PortDef::new("in", PortKind::Float)], vec![]),
+                make_embedded_block(3, "gpio_out", serde_json::json!({"pin": 13}), vec![PortDef::new("in", PortKind::Float)], vec![]),
+                make_embedded_block(4, "gpio_in", serde_json::json!({"pin": 2}), vec![], vec![PortDef::new("out", PortKind::Float)]),
+                make_embedded_block(5, "uart_tx", serde_json::json!({"port": 0, "baud": 115200}), vec![PortDef::new("in", PortKind::Float)], vec![]),
+                make_embedded_block(6, "uart_rx", serde_json::json!({"port": 0, "baud": 115200}), vec![], vec![PortDef::new("out", PortKind::Float)]),
+                make_embedded_block(7, "encoder", serde_json::json!({"channel": 0}), vec![], vec![PortDef::new("position", PortKind::Float), PortDef::new("velocity", PortKind::Float)]),
+                make_embedded_block(8, "ssd1306_display", serde_json::json!({"i2c_bus": 0, "address": 60}), vec![PortDef::new("line1", PortKind::Float), PortDef::new("line2", PortKind::Float)], vec![]),
+                make_embedded_block(9, "tmc2209_stepper", serde_json::json!({"uart_port": 0, "uart_addr": 0, "steps_per_rev": 200, "microsteps": 16}), vec![PortDef::new("target", PortKind::Float), PortDef::new("enable", PortKind::Float)], vec![PortDef::new("position", PortKind::Float)]),
+                make_embedded_block(10, "tmc2209_stallguard", serde_json::json!({"uart_port": 0, "uart_addr": 0, "threshold": 50}), vec![], vec![PortDef::new("value", PortKind::Float), PortDef::new("stall", PortKind::Float)]),
+                make_embedded_block(11, "state_machine", serde_json::json!({"states": ["idle", "run"], "initial": "idle", "transitions": []}), vec![PortDef::new("guard_0", PortKind::Float)], vec![PortDef::new("state", PortKind::Float), PortDef::new("active_idle", PortKind::Float), PortDef::new("active_run", PortKind::Float)]),
+                make_embedded_block(12, "udp_source", serde_json::json!({"address": "127.0.0.1:5000"}), vec![], vec![PortDef::new("out", PortKind::Float)]),
+                make_embedded_block(13, "udp_sink", serde_json::json!({"address": "127.0.0.1:5001"}), vec![PortDef::new("in", PortKind::Float)], vec![]),
+            ],
+            channels: vec![
+                ch(1, 1, 0, 2, 0), // adc -> pwm
+                ch(2, 4, 0, 3, 0), // gpio_in -> gpio_out
+            ],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let result = generate_logic_lib_rs(&snap).unwrap();
+        assert!(result.contains("hw.adc_read"));
+        assert!(result.contains("hw.pwm_write"));
+        assert!(result.contains("hw.gpio_write"));
+        assert!(result.contains("hw.gpio_read"));
+        assert!(result.contains("hw.uart_write"));
+        assert!(result.contains("hw.uart_read"));
+        assert!(result.contains("hw.encoder_read"));
+        assert!(result.contains("hw.display_write"));
+        assert!(result.contains("hw.stepper_move"));
+        assert!(result.contains("hw.stallguard_read"));
+        assert!(result.contains("sm_11.tick"));
+    }
+
+    #[test]
+    fn blocks_rs_with_embedded_blocks() {
+        let snap = GraphSnapshot {
+            blocks: vec![
+                make_embedded_block(1, "adc_source", serde_json::json!({"channel": 0}), vec![], vec![PortDef::new("out", PortKind::Float)]),
+                make_embedded_block(2, "pwm_sink", serde_json::json!({"channel": 0}), vec![PortDef::new("in", PortKind::Float)], vec![]),
+                make_embedded_block(3, "gpio_out", serde_json::json!({"pin": 13}), vec![PortDef::new("in", PortKind::Float)], vec![]),
+                make_embedded_block(4, "gpio_in", serde_json::json!({"pin": 2}), vec![], vec![PortDef::new("out", PortKind::Float)]),
+                make_embedded_block(5, "uart_tx", serde_json::json!({"port": 0}), vec![PortDef::new("in", PortKind::Float)], vec![]),
+                make_embedded_block(6, "uart_rx", serde_json::json!({"port": 0}), vec![], vec![PortDef::new("out", PortKind::Float)]),
+                make_embedded_block(7, "encoder", serde_json::json!({"channel": 0}), vec![], vec![PortDef::new("position", PortKind::Float), PortDef::new("velocity", PortKind::Float)]),
+                make_embedded_block(8, "ssd1306_display", serde_json::json!({"i2c_bus": 0, "address": 60}), vec![PortDef::new("line1", PortKind::Float)], vec![]),
+                make_embedded_block(9, "tmc2209_stepper", serde_json::json!({"uart_port": 0}), vec![PortDef::new("target", PortKind::Float)], vec![PortDef::new("position", PortKind::Float)]),
+                make_embedded_block(10, "tmc2209_stallguard", serde_json::json!({"uart_port": 0, "uart_addr": 0, "threshold": 50}), vec![], vec![PortDef::new("value", PortKind::Float), PortDef::new("stall", PortKind::Float)]),
+            ],
+            channels: vec![
+                ch(1, 1, 0, 2, 0),
+                ch(2, 4, 0, 3, 0),
+            ],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let result = generate_blocks_rs(&snap).unwrap();
+        assert!(result.contains("ADC channel"));
+        assert!(result.contains("PWM channel"));
+        assert!(result.contains("GPIO pin"));
+        assert!(result.contains("UART"));
+        assert!(result.contains("encoder channel"));
+        let main = generate_main_rs(&snap, 0.01).unwrap();
+        assert!(main.contains("fn main()"));
+    }
+
+    #[test]
+    fn logic_blocks_rs_with_embedded_blocks() {
+        let snap = GraphSnapshot {
+            blocks: vec![
+                make_embedded_block(1, "adc_source", serde_json::json!({"channel": 0}), vec![], vec![PortDef::new("out", PortKind::Float)]),
+                make_gain_snapshot(2, 3.0),
+                make_embedded_block(3, "pwm_sink", serde_json::json!({"channel": 0}), vec![PortDef::new("in", PortKind::Float)], vec![]),
+            ],
+            channels: vec![ch(1, 1, 0, 2, 0), ch(2, 2, 0, 3, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let result = generate_logic_blocks_rs(&snap).unwrap();
+        // Only non-embedded blocks should appear in logic blocks
+        assert!(result.contains("block_2"));
+    }
 }

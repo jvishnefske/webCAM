@@ -25,6 +25,7 @@ members = [
     "hil/hil-frontend",
     "hil/combined-frontend",
     "mlir-codegen",
+    "configurable-blocks",
 ]
 default-members = [
     ".",
@@ -35,6 +36,7 @@ default-members = [
     "pubsub",
     "parser",
     "mlir-codegen",
+    "configurable-blocks",
 ]
 
 [workspace.package]

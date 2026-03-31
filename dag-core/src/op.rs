@@ -6,6 +6,7 @@ pub type ChannelName = String;
 pub type Topic = String;
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Op {
     // Sources
     Const(f64),
@@ -106,6 +107,36 @@ impl Dag {
 impl Default for Dag {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl core::fmt::Display for DagError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            DagError::InvalidNodeRef { op_index, referenced } => {
+                write!(f, "node {} references invalid node {}", op_index, referenced)
+            }
+            DagError::Full => write!(f, "DAG is full"),
+        }
+    }
+}
+
+#[cfg(feature = "serde")]
+impl serde::Serialize for Dag {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.nodes.serialize(serializer)
+    }
+}
+
+#[cfg(feature = "serde")]
+impl<'de> serde::Deserialize<'de> for Dag {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let ops = Vec::<Op>::deserialize(deserializer)?;
+        let mut dag = Dag::new();
+        for op in ops {
+            dag.add_op(op).map_err(serde::de::Error::custom)?;
+        }
+        Ok(dag)
     }
 }
 

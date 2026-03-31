@@ -1,6 +1,47 @@
 /* tslint:disable */
 /* eslint-disable */
 
+export class DagHandle {
+    free(): void;
+    [Symbol.dispose](): void;
+    add(a: number, b: number): number;
+    constant(value: number): number;
+    div(a: number, b: number): number;
+    /**
+     * Evaluate the DAG with null channels (pure math).
+     * Returns the values array as a `Float64Array`.
+     */
+    evaluate(): Float64Array;
+    /**
+     * Get value at a specific node after evaluation.
+     */
+    evaluate_node(node_id: number): number;
+    /**
+     * Decode from CBOR bytes.
+     */
+    static from_cbor(bytes: Uint8Array): DagHandle;
+    input(name: string): number;
+    is_empty(): boolean;
+    len(): number;
+    mul(a: number, b: number): number;
+    neg(a: number): number;
+    constructor();
+    output(name: string, src: number): number;
+    pow(base: number, exp: number): number;
+    publish(topic: string, src: number): number;
+    relu(a: number): number;
+    sub(a: number, b: number): number;
+    subscribe(topic: string): number;
+    /**
+     * Encode to CBOR bytes.
+     */
+    to_cbor(): Uint8Array;
+    /**
+     * Get a JSON representation of the DAG structure for the UI.
+     */
+    to_json(): string;
+}
+
 /**
  * Return JSON list of available machine profiles.
  */
@@ -52,6 +93,11 @@ export function dataflow_destroy(graph_id: number): void;
 export function dataflow_disconnect(graph_id: number, channel_id: number): void;
 
 /**
+ * Read the last PWM duty written by a simulated PWM block.
+ */
+export function dataflow_get_sim_pwm(graph_id: number, channel: number): number;
+
+/**
  * Create a new dataflow graph. Returns its id.
  */
 export function dataflow_new(dt: number): number;
@@ -66,6 +112,17 @@ export function dataflow_remove_block(graph_id: number, block_id: number): void;
  * Returns snapshot JSON.
  */
 export function dataflow_run(graph_id: number, steps: number, dt: number): string;
+
+/**
+ * Set a simulated ADC channel voltage.
+ */
+export function dataflow_set_sim_adc(graph_id: number, channel: number, voltage: number): void;
+
+/**
+ * Enable or disable simulation mode for a graph.
+ * When enabled, peripheral blocks use SimModel dispatch with simulated peripherals.
+ */
+export function dataflow_set_simulation_mode(graph_id: number, enabled: boolean): void;
 
 /**
  * Set the simulation speed multiplier.
@@ -197,7 +254,28 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
     readonly memory: WebAssembly.Memory;
+    readonly __wbg_daghandle_free: (a: number, b: number) => void;
     readonly available_profiles: () => [number, number];
+    readonly daghandle_add: (a: number, b: number, c: number) => [number, number, number];
+    readonly daghandle_constant: (a: number, b: number) => [number, number, number];
+    readonly daghandle_div: (a: number, b: number, c: number) => [number, number, number];
+    readonly daghandle_evaluate: (a: number) => [number, number];
+    readonly daghandle_evaluate_node: (a: number, b: number) => number;
+    readonly daghandle_from_cbor: (a: number, b: number) => [number, number, number];
+    readonly daghandle_input: (a: number, b: number, c: number) => [number, number, number];
+    readonly daghandle_is_empty: (a: number) => number;
+    readonly daghandle_len: (a: number) => number;
+    readonly daghandle_mul: (a: number, b: number, c: number) => [number, number, number];
+    readonly daghandle_neg: (a: number, b: number) => [number, number, number];
+    readonly daghandle_new: () => number;
+    readonly daghandle_output: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly daghandle_pow: (a: number, b: number, c: number) => [number, number, number];
+    readonly daghandle_publish: (a: number, b: number, c: number, d: number) => [number, number, number];
+    readonly daghandle_relu: (a: number, b: number) => [number, number, number];
+    readonly daghandle_sub: (a: number, b: number, c: number) => [number, number, number];
+    readonly daghandle_subscribe: (a: number, b: number, c: number) => [number, number, number];
+    readonly daghandle_to_cbor: (a: number) => [number, number];
+    readonly daghandle_to_json: (a: number) => [number, number, number, number];
     readonly dataflow_add_block: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly dataflow_advance: (a: number, b: number) => [number, number, number, number];
     readonly dataflow_block_types: () => [number, number];
@@ -206,9 +284,12 @@ export interface InitOutput {
     readonly dataflow_connect: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly dataflow_destroy: (a: number) => void;
     readonly dataflow_disconnect: (a: number, b: number) => [number, number];
+    readonly dataflow_get_sim_pwm: (a: number, b: number) => [number, number, number];
     readonly dataflow_new: (a: number) => number;
     readonly dataflow_remove_block: (a: number, b: number) => [number, number];
     readonly dataflow_run: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly dataflow_set_sim_adc: (a: number, b: number, c: number) => [number, number];
+    readonly dataflow_set_simulation_mode: (a: number, b: number) => [number, number];
     readonly dataflow_set_speed: (a: number, b: number) => [number, number];
     readonly dataflow_snapshot: (a: number) => [number, number, number, number];
     readonly dataflow_update_block: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
@@ -236,9 +317,9 @@ export interface InitOutput {
     readonly __externref_table_alloc: () => number;
     readonly __wbindgen_externrefs: WebAssembly.Table;
     readonly __wbindgen_free: (a: number, b: number, c: number) => void;
+    readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_malloc: (a: number, b: number) => number;
     readonly __wbindgen_realloc: (a: number, b: number, c: number, d: number) => number;
-    readonly __externref_table_dealloc: (a: number) => void;
     readonly __wbindgen_start: () => void;
 }
 

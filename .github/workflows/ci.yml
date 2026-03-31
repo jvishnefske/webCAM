@@ -29,8 +29,23 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: www/package-lock.json
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - run: >-
+          cargo clippy --workspace
+          --exclude board-support-pico
+          --exclude board-support-pico2
+          --exclude board-support-stm32
+          --exclude pico-bootloader
+          --exclude combined-frontend
+          --exclude hil-frontend
+          --all-targets -- -D warnings
+      - run: >-
+          cargo test --workspace
+          --exclude board-support-pico
+          --exclude board-support-pico2
+          --exclude board-support-stm32
+          --exclude pico-bootloader
+          --exclude combined-frontend
+          --exclude hil-frontend
       - run: wasm-pack build --target web --out-dir www/pkg --release
       - run: cd www && npm ci && npm run typecheck && npm run test && npm run build
       - name: Remove build-only files from www

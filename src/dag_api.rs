@@ -426,4 +426,10 @@ mod tests {
         let result = dag.output("out", 10);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn dag_handle_default() {
+        let d = DagHandle::default();
+        assert!(d.is_empty());
+    }
 }

@@ -347,6 +347,7 @@ pub async fn write_frame(
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 

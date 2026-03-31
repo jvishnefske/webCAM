@@ -518,4 +518,48 @@ mod tests {
         let adc_snap = snap.blocks.iter().find(|b| b.id == adc.0).unwrap();
         assert_eq!(adc_snap.output_values[0], None);
     }
+
+    #[test]
+    fn dataflow_graph_default() {
+        let g = DataflowGraph::default();
+        let snap = g.snapshot();
+        assert!(snap.blocks.is_empty());
+    }
+
+    #[test]
+    fn remove_block_with_outputs() {
+        // Exercise remove_block::{closure#1} (outputs.retain)
+        let mut g = DataflowGraph::new();
+        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
+        g.tick(0.01); // produce output
+        assert!(g.remove_block(c));
+        let snap = g.snapshot();
+        assert!(snap.blocks.is_empty());
+    }
+
+    #[test]
+    fn replace_block_prunes_extra_ports() {
+        // Exercise replace_block::{closure#0} (channels.retain for port pruning)
+        let mut g = DataflowGraph::new();
+        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
+        let gain = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+        g.connect(c, 0, gain, 0).unwrap();
+        // Replace gain (1 input, 1 output) with a block that has 0 inputs
+        // This should prune the channel because to_port 0 >= new n_in=0
+        g.replace_block(gain, Box::new(ConstantBlock::new(5.0))).unwrap();
+        let snap = g.snapshot();
+        // Channel should be pruned since ConstantBlock has 0 inputs
+        assert!(snap.channels.is_empty());
+    }
+
+    #[test]
+    fn snapshot_with_codegen_block() {
+        // Exercise snapshot::{closure#0}::{closure#1} (custom_codegen path)
+        use crate::dataflow::blocks::embedded::{AdcBlock, AdcConfig};
+        let mut g = DataflowGraph::new();
+        g.add_block(Box::new(AdcBlock::from_config(AdcConfig::default())));
+        let snap = g.snapshot();
+        // AdcBlock implements Codegen, so custom_codegen may be Some
+        assert_eq!(snap.blocks.len(), 1);
+    }
 }
