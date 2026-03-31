@@ -6,6 +6,11 @@ use dag_core::eval::{ChannelReader, ChannelWriter, EvalResult, PubSubReader, Pub
 use dag_core::op::Dag;
 
 /// Owns a DAG and its evaluation buffer, providing a tick-based execution loop.
+///
+/// Mirrors the embedded DAG executor on microcontrollers (Pico2), using
+/// [`MapChannels`](crate::channels::MapChannels) and
+/// [`SimplePubSub`](crate::pubsub::SimplePubSub) as host-side stand-ins
+/// for HAL peripherals.
 pub struct DagExecutor {
     dag: Option<Dag>,
     values: Vec<f64>,
@@ -25,6 +30,50 @@ impl DagExecutor {
     /// Load a new DAG from CBOR bytes. Returns error if decode fails.
     pub fn load_cbor(&mut self, bytes: &[u8]) -> Result<(), DecodeError> {
         let dag = dag_core::cbor::decode_dag(bytes)?;
+        self.values = vec![0.0; dag.len()];
+        self.dag = Some(dag);
+        self.tick_count = 0;
+        Ok(())
+    }
+
+    /// Load a new DAG from a JSON string. Returns error if decode fails.
+    ///
+    /// Requires the `json` cargo feature.
+    ///
+    /// # Example: iterator-style test-vector evaluation
+    ///
+    /// ```
+    /// use dag_runtime::executor::DagExecutor;
+    /// use dag_runtime::channels::MapChannels;
+    /// use dag_runtime::pubsub::SimplePubSub;
+    ///
+    /// // JSON DAG: read "adc0", multiply by 2, write to "pwm0"
+    /// let json = r#"[{"Input":"adc0"},{"Const":2.0},{"Mul":[0,1]},{"Output":["pwm0",2]}]"#;
+    ///
+    /// let mut exec = DagExecutor::new();
+    /// exec.load_json(json).unwrap();
+    ///
+    /// let mut ch_in = MapChannels::new();
+    /// let mut ch_out = MapChannels::new();
+    /// let ps = SimplePubSub::new();
+    /// let mut ps_w = SimplePubSub::new();
+    ///
+    /// // Push test vectors and collect output stream -- iterator pattern
+    /// let results: Vec<f64> = [1.0, 2.0, 4.0, 8.0]
+    ///     .iter()
+    ///     .map(|&input| {
+    ///         ch_in.set("adc0", input);
+    ///         exec.tick(&ch_in, &mut ch_out, &ps, &mut ps_w)
+    ///             .unwrap()
+    ///             .outputs[0].1
+    ///     })
+    ///     .collect();
+    ///
+    /// assert_eq!(results, vec![2.0, 4.0, 8.0, 16.0]);
+    /// ```
+    #[cfg(feature = "json")]
+    pub fn load_json(&mut self, json: &str) -> Result<(), dag_core::json::JsonDecodeError> {
+        let dag = dag_core::json::decode_dag_json_str(json)?;
         self.values = vec![0.0; dag.len()];
         self.dag = Some(dag);
         self.tick_count = 0;
