@@ -9,6 +9,8 @@ description = "Embedded DAG runtime: executor, channels, pubsub, and HTTP servin
 default = ["std"]
 std = ["dag-core/std"]
 embedded-assets = []
+json = ["dag-core/json", "dep:serde_json"]
 
 [dependencies]
 dag-core = { path = "../dag-core", default-features = false }
+serde_json = { version = "1", optional = true }
