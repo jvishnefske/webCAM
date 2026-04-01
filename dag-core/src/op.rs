@@ -61,28 +61,16 @@ impl Dag {
     pub fn add_op(&mut self, op: Op) -> Result<NodeId, DagError> {
         let current = self.nodes.len();
 
-        // Collect all NodeId references from the op and validate them
-        let refs: &[NodeId] = match &op {
-            Op::Const(_) | Op::Input(_) | Op::Subscribe(_) => &[],
-            Op::Output(_, src) | Op::Neg(src) | Op::Relu(src) => {
-                // Use a trick: we can't return a slice from a local,
-                // so validate inline instead
+        // Validate that all NodeId references point to earlier nodes
+        match &op {
+            Op::Const(_) | Op::Input(_) | Op::Subscribe(_) => {}
+            Op::Output(_, src) | Op::Neg(src) | Op::Relu(src) | Op::Publish(_, src) => {
                 if *src as usize >= current {
                     return Err(DagError::InvalidNodeRef {
                         op_index: current,
                         referenced: *src,
                     });
                 }
-                &[]
-            }
-            Op::Publish(_, src) => {
-                if *src as usize >= current {
-                    return Err(DagError::InvalidNodeRef {
-                        op_index: current,
-                        referenced: *src,
-                    });
-                }
-                &[]
             }
             Op::Add(a, b) | Op::Mul(a, b) | Op::Sub(a, b) | Op::Div(a, b) | Op::Pow(a, b) => {
                 for &r in &[*a, *b] {
@@ -93,10 +81,8 @@ impl Dag {
                         });
                     }
                 }
-                &[]
             }
-        };
-        let _ = refs; // suppress unused warning
+        }
 
         let id = current as NodeId;
         self.nodes.push(op);
@@ -113,8 +99,15 @@ impl Default for Dag {
 impl core::fmt::Display for DagError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
-            DagError::InvalidNodeRef { op_index, referenced } => {
-                write!(f, "node {} references invalid node {}", op_index, referenced)
+            DagError::InvalidNodeRef {
+                op_index,
+                referenced,
+            } => {
+                write!(
+                    f,
+                    "node {} references invalid node {}",
+                    op_index, referenced
+                )
             }
             DagError::Full => write!(f, "DAG is full"),
         }
@@ -199,6 +192,26 @@ mod tests {
                 referenced: 2
             }
         );
+    }
+
+    #[test]
+    fn test_dag_error_display() {
+        let err = DagError::InvalidNodeRef {
+            op_index: 3,
+            referenced: 10,
+        };
+        let msg = alloc::format!("{err}");
+        assert!(msg.contains("node 3 references invalid node 10"));
+
+        let err2 = DagError::Full;
+        let msg2 = alloc::format!("{err2}");
+        assert!(msg2.contains("full"));
+    }
+
+    #[test]
+    fn test_dag_default() {
+        let dag = Dag::default();
+        assert!(dag.is_empty());
     }
 
     #[test]
