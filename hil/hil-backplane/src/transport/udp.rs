@@ -82,3 +82,25 @@ impl Transport for UdpTransport {
         }
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn with_defaults_creates_transport() {
+        let transport = UdpTransport::with_defaults().expect("with_defaults should succeed");
+        let addr = transport.local_addr().expect("local_addr should succeed");
+        assert_eq!(addr.port(), DEFAULT_PORT);
+    }
+
+    #[test]
+    fn local_addr_returns_bound_address() {
+        // Use port 0 to get an ephemeral port (avoids conflicts)
+        let transport =
+            UdpTransport::new(DEFAULT_MULTICAST_ADDR, 0).expect("new should succeed");
+        let addr = transport.local_addr().expect("local_addr should succeed");
+        assert_ne!(addr.port(), 0); // OS should assign a non-zero port
+    }
+}

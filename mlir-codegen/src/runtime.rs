@@ -1062,6 +1062,104 @@ mod tests {
     }
 
     #[test]
+    fn gpio_read_write_block_fn() {
+        let r = BlockFn::GpioRead(5);
+        assert_eq!(r.n_outputs(), 1);
+        let mut out = [0.0];
+        r.call(&[], &mut out, &mut NullHardware);
+        assert_eq!(out[0], 0.0);
+
+        let w = BlockFn::GpioWrite(3);
+        assert_eq!(w.n_outputs(), 0);
+        w.call(&[1.0], &mut [], &mut NullHardware);
+    }
+
+    #[test]
+    fn uart_rx_tx_block_fn() {
+        let rx = BlockFn::UartRx(0);
+        assert_eq!(rx.n_outputs(), 1);
+        let mut out = [0.0];
+        rx.call(&[], &mut out, &mut NullHardware);
+
+        let tx = BlockFn::UartTx(1);
+        assert_eq!(tx.n_outputs(), 0);
+        tx.call(&[42.0], &mut [], &mut NullHardware);
+    }
+
+    #[test]
+    fn encoder_read_block_fn() {
+        let enc = BlockFn::EncoderRead(0);
+        assert_eq!(enc.n_outputs(), 2);
+        let mut out = [0.0, 0.0];
+        enc.call(&[], &mut out, &mut NullHardware);
+        assert_eq!(out[1], 0.0); // velocity placeholder
+    }
+
+    #[test]
+    fn display_write_block_fn() {
+        let dw = BlockFn::DisplayWrite(0, 0x3C);
+        assert_eq!(dw.n_outputs(), 0);
+        dw.call(&[1.0, 2.0], &mut [], &mut NullHardware);
+    }
+
+    #[test]
+    fn stepper_block_fn() {
+        let s = BlockFn::Stepper(0);
+        assert_eq!(s.n_outputs(), 1);
+        let mut out = [0.0];
+        s.call(&[100.0, 1.0], &mut out, &mut NullHardware);
+    }
+
+    #[test]
+    fn stallguard_block_fn() {
+        let sg = BlockFn::StallGuard { port: 0, addr: 0, threshold: 10.0 };
+        assert_eq!(sg.n_outputs(), 2);
+        let mut out = [0.0, 0.0];
+        sg.call(&[], &mut out, &mut NullHardware);
+        // NullHardware returns 0 which is < 10, so detected = 1.0
+        assert_eq!(out[1], 1.0);
+    }
+
+    #[test]
+    fn publish_block_fn() {
+        let p = BlockFn::Publish("topic".into());
+        assert_eq!(p.n_outputs(), 0);
+        p.call(&[42.0], &mut [], &mut NullHardware);
+    }
+
+    #[test]
+    fn subscribe_block_fn() {
+        let s = BlockFn::Subscribe("topic".into());
+        assert_eq!(s.n_outputs(), 1);
+        let mut out = [99.0];
+        s.call(&[], &mut out, &mut NullHardware);
+        // Subscribe is passive -- output retains the value
+        assert_eq!(out[0], 99.0);
+    }
+
+    #[test]
+    fn from_snapshot_all_block_types() {
+        for (bt, cfg) in &[
+            ("gpio_in", serde_json::json!({"pin": 0})),
+            ("gpio_out", serde_json::json!({"pin": 1})),
+            ("uart_rx", serde_json::json!({"port": 0})),
+            ("uart_tx", serde_json::json!({"port": 1})),
+            ("encoder", serde_json::json!({"channel": 0})),
+            ("ssd1306_display", serde_json::json!({"i2c_bus": 0, "address": 60})),
+            ("tmc2209_stepper", serde_json::json!({"uart_port": 0})),
+            ("tmc2209_stallguard", serde_json::json!({"uart_port": 0, "uart_addr": 0, "threshold": 5})),
+            ("pubsub_source", serde_json::json!({"topic": "test"})),
+            ("pubsub_sink", serde_json::json!({"topic": "test"})),
+            ("json_encode", serde_json::json!({})),
+            ("json_decode", serde_json::json!({})),
+        ] {
+            let b = block(1, bt, cfg.clone());
+            let f = BlockFn::from_snapshot(&b);
+            assert!(f.is_ok(), "from_snapshot failed for {bt}: {:?}", f.err());
+        }
+    }
+
+    #[test]
     fn unsupported_block_type_errors() {
         let s = snap(
             vec![block(1, "quantum_flux", serde_json::json!({}))],
@@ -1069,5 +1167,106 @@ mod tests {
         );
         let err = DagRuntime::from_snapshot(&s).unwrap_err();
         assert!(err.contains("unsupported"));
+    }
+
+    #[test]
+    fn receive_unknown_topic_is_noop() {
+        let s = snap(
+            vec![block(1, "pubsub_source", serde_json::json!({"topic": "t"}))],
+            vec![],
+        );
+        let mut rt = DagRuntime::from_snapshot(&s).unwrap();
+        rt.receive("nonexistent", 42.0);
+        rt.tick(&mut NullHardware);
+        // Should not crash, value for "t" should be 0
+        assert_eq!(rt.read_output(1, 0), Some(0.0));
+    }
+
+    #[test]
+    fn read_output_nonexistent_block() {
+        let s = snap(
+            vec![block(1, "constant", serde_json::json!({"value": 1.0}))],
+            vec![],
+        );
+        let rt = DagRuntime::from_snapshot(&s).unwrap();
+        assert_eq!(rt.read_output(999, 0), None);
+    }
+
+    #[test]
+    fn state_len_and_node_count() {
+        let s = snap(
+            vec![
+                block(1, "constant", serde_json::json!({"value": 1.0})),
+                block(2, "constant", serde_json::json!({"value": 2.0})),
+            ],
+            vec![],
+        );
+        let rt = DagRuntime::from_snapshot(&s).unwrap();
+        assert_eq!(rt.node_count(), 2);
+        // 2 output slots + 1 zero slot = 3
+        assert_eq!(rt.state_len(), 3);
+    }
+
+    #[test]
+    fn pubsub_sink_block_fn_via_runtime() {
+        struct CapturePubSub {
+            publishes: Vec<(String, f64)>,
+        }
+        impl HardwareBridge for CapturePubSub {
+            fn publish(&mut self, topic: &str, value: f64) {
+                self.publishes.push((topic.to_string(), value));
+            }
+        }
+
+        let mut sink = block(2, "pubsub_sink", serde_json::json!({"topic": "out_topic"}));
+        sink.inputs = vec![PortDef {
+            name: "value".into(),
+            kind: PortKind::Float,
+        }];
+        sink.outputs = vec![];
+
+        let s = snap(
+            vec![
+                block(1, "constant", serde_json::json!({"value": 42.0})),
+                sink,
+            ],
+            vec![chan(1, 1, 0, 2, 0)],
+        );
+        let mut rt = DagRuntime::from_snapshot(&s).unwrap();
+        let mut hw = CapturePubSub { publishes: vec![] };
+        rt.tick(&mut hw);
+        assert_eq!(hw.publishes.len(), 1);
+        assert_eq!(hw.publishes[0].0, "out_topic");
+        assert!((hw.publishes[0].1 - 42.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn from_json_invalid_json() {
+        let result = DagRuntime::from_json("not valid json");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("JSON parse error"));
+    }
+
+    #[test]
+    fn state_machine_no_states_errors() {
+        let cfg = serde_json::json!({"states": [], "transitions": []});
+        let b = block(1, "state_machine", cfg);
+        let result = BlockFn::from_snapshot(&b);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("no states"));
+    }
+
+    #[test]
+    fn state_machine_default_initial() {
+        let cfg = serde_json::json!({
+            "states": ["a", "b"],
+            "initial": "nonexistent",
+            "transitions": []
+        });
+        let b = block(1, "state_machine", cfg);
+        let f = BlockFn::from_snapshot(&b).unwrap();
+        if let BlockFn::StateMachine { initial, .. } = f {
+            assert_eq!(initial, 0); // defaults to first state when not found
+        }
     }
 }

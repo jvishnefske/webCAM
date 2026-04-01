@@ -334,6 +334,16 @@ fn external_input_accessor() {
     assert_eq!(dev.external_input(), 0x1234);
 }
 
+#[test]
+fn pins_accessor() {
+    let dev = Tca9555::new(addr());
+    // pins() should return a reference to the SimPins backend.
+    // Default external input is 0xFFFF.
+    assert_eq!(dev.pins().external_input(), 0xFFFF);
+    dev.pins().set_external_input(0xABCD);
+    assert_eq!(dev.pins().external_input(), 0xABCD);
+}
+
 // --- Loopback: A's outputs → B's inputs ---
 
 #[test]

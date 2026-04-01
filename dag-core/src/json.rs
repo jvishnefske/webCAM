@@ -38,8 +38,8 @@ pub fn encode_dag_json_string(dag: &Dag) -> String {
 
 /// Decode a `Dag` from a JSON byte slice, validating via `add_op`.
 pub fn decode_dag_json(bytes: &[u8]) -> Result<Dag, JsonDecodeError> {
-    let ops: Vec<Op> =
-        serde_json::from_slice(bytes).map_err(|e| JsonDecodeError::Json(alloc::format!("{}", e)))?;
+    let ops: Vec<Op> = serde_json::from_slice(bytes)
+        .map_err(|e| JsonDecodeError::Json(alloc::format!("{}", e)))?;
     let mut dag = Dag::new();
     for op in ops {
         dag.add_op(op).map_err(JsonDecodeError::Dag)?;
@@ -70,10 +70,7 @@ mod tests {
 
     #[test]
     fn test_round_trip_input_output() {
-        let ops = vec![
-            Op::Input("adc0".into()),
-            Op::Output("pwm0".into(), 0),
-        ];
+        let ops = vec![Op::Input("adc0".into()), Op::Output("pwm0".into(), 0)];
         assert_eq!(round_trip_ops(&ops), ops);
     }
 

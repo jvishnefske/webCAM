@@ -263,6 +263,7 @@ pub fn lower_graph(snap: &GraphSnapshot) -> Result<String, String> {
             "constant" => emit_constant(&mut out, id, block)?,
             "gain" => emit_gain(&mut out, id, block, &inputs)?,
             "add" => emit_add(&mut out, id, &inputs)?,
+            "subtract" => emit_subtract(&mut out, id, &inputs)?,
             "multiply" => emit_multiply(&mut out, id, &inputs)?,
             "clamp" => emit_clamp(&mut out, id, block, &inputs)?,
             "adc_source" => emit_adc_read(&mut out, id, block)?,
@@ -354,6 +355,19 @@ fn emit_multiply(out: &mut String, id: u32, inputs: &[String]) -> Result<(), Str
         out,
         "    {ssa} = {op}({a}, {b}) : f64",
         op = dialect::OP_MUL,
+    )
+    .unwrap();
+    Ok(())
+}
+
+fn emit_subtract(out: &mut String, id: u32, inputs: &[String]) -> Result<(), String> {
+    let a = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
+    let b = inputs.get(1).map(|s| s.as_str()).unwrap_or("%zero");
+    let ssa = dialect::ssa_name(id, 0);
+    writeln!(
+        out,
+        "    {ssa} = {op}({a}, {b}) : f64",
+        op = dialect::OP_SUB,
     )
     .unwrap();
     Ok(())
@@ -851,5 +865,373 @@ mod tests {
         assert!(mlir.contains("dataflow.subscribe"));
         assert!(mlir.contains("dataflow.publish"));
         assert!(mlir.contains("bridge_1_0"));
+    }
+
+    #[test]
+    fn lower_subtract_block() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 10.0})),
+            make_block(2, "constant", serde_json::json!({"value": 3.0})),
+            {
+                let mut b = make_block(3, "subtract", serde_json::json!({}));
+                b.inputs = vec![
+                    PortDef {
+                        name: "a".to_string(),
+                        kind: PortKind::Float,
+                    },
+                    PortDef {
+                        name: "b".to_string(),
+                        kind: PortKind::Float,
+                    },
+                ];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 3, 0), make_channel(2, 2, 0, 3, 1)];
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(
+            mlir.contains("dataflow.subtract(%v1_p0, %v2_p0)"),
+            "expected dataflow.subtract with wired inputs, got:\n{mlir}"
+        );
+    }
+
+    #[test]
+    fn lower_clamp_block() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 50.0})),
+            {
+                let mut b = make_block(
+                    2,
+                    "clamp",
+                    serde_json::json!({"param1": 0.0, "param2": 100.0}),
+                );
+                b.inputs = vec![PortDef {
+                    name: "in".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(
+            mlir.contains("dataflow.clamp(%v1_p0)"),
+            "expected dataflow.clamp with wired input, got:\n{mlir}"
+        );
+        assert!(
+            mlir.contains("min ="),
+            "expected min attribute in clamp, got:\n{mlir}"
+        );
+        assert!(
+            mlir.contains("max ="),
+            "expected max attribute in clamp, got:\n{mlir}"
+        );
+    }
+
+    #[test]
+    fn lower_adc_source() {
+        let blocks = vec![{
+            let mut b = make_block(1, "adc_source", serde_json::json!({"channel": 2}));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot {
+            blocks,
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(
+            mlir.contains("dataflow.adc_read"),
+            "expected dataflow.adc_read op, got:\n{mlir}"
+        );
+        assert!(
+            mlir.contains("channel = 2 : i32"),
+            "expected channel attribute of 2, got:\n{mlir}"
+        );
+    }
+
+    #[test]
+    fn lower_pwm_sink() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 0.5})),
+            {
+                let mut b = make_block(2, "pwm_sink", serde_json::json!({"channel": 3}));
+                b.inputs = vec![PortDef {
+                    name: "duty".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(
+            mlir.contains("dataflow.pwm_write(%v1_p0)"),
+            "expected dataflow.pwm_write with wired input, got:\n{mlir}"
+        );
+        assert!(
+            mlir.contains("channel = 3 : i32"),
+            "expected channel attribute of 3, got:\n{mlir}"
+        );
+    }
+
+    #[test]
+    fn lower_channel_wiring() {
+        // A constant's output SSA value must appear as the gain's input operand
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 7.0})),
+            {
+                let mut b = make_block(2, "gain", serde_json::json!({"param1": 2.0}));
+                b.inputs = vec![PortDef {
+                    name: "in".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
+        let mlir = lower_graph(&snap).unwrap();
+        // The constant block 1 produces %v1_p0
+        assert!(
+            mlir.contains("%v1_p0"),
+            "expected SSA name %v1_p0 for constant output, got:\n{mlir}"
+        );
+        // The gain block 2 must use %v1_p0 as its input operand
+        assert!(
+            mlir.contains("dataflow.gain(%v1_p0)"),
+            "expected gain to reference constant's SSA value, got:\n{mlir}"
+        );
+        // The gain block 2 produces %v2_p0
+        assert!(
+            mlir.contains("%v2_p0"),
+            "expected SSA name %v2_p0 for gain output, got:\n{mlir}"
+        );
+    }
+
+    #[test]
+    fn lower_gpio_blocks() {
+        let blocks = vec![
+            {
+                let mut b = make_block(1, "gpio_in", serde_json::json!({"pin": 5}));
+                b.inputs = vec![];
+                b
+            },
+            {
+                let mut b = make_block(2, "gpio_out", serde_json::json!({"pin": 7}));
+                b.inputs = vec![PortDef {
+                    name: "value".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("dataflow.gpio_read"), "got:\n{mlir}");
+        assert!(mlir.contains("dataflow.gpio_write"), "got:\n{mlir}");
+    }
+
+    #[test]
+    fn lower_uart_blocks() {
+        let blocks = vec![
+            {
+                let mut b = make_block(1, "uart_rx", serde_json::json!({"port": 0}));
+                b.inputs = vec![];
+                b
+            },
+            {
+                let mut b = make_block(2, "uart_tx", serde_json::json!({"port": 1}));
+                b.inputs = vec![PortDef { name: "data".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("dataflow.uart_rx"), "got:\n{mlir}");
+        assert!(mlir.contains("dataflow.uart_tx"), "got:\n{mlir}");
+    }
+
+    #[test]
+    fn lower_encoder_block() {
+        let blocks = vec![{
+            let mut b = make_block(1, "encoder", serde_json::json!({"channel": 0}));
+            b.inputs = vec![];
+            b.outputs = vec![
+                PortDef { name: "position".to_string(), kind: PortKind::Float },
+                PortDef { name: "velocity".to_string(), kind: PortKind::Float },
+            ];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![], tick_count: 0, time: 0.0 };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("dataflow.encoder_read"), "got:\n{mlir}");
+    }
+
+    #[test]
+    fn lower_display_write_block() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            make_block(2, "constant", serde_json::json!({"value": 2.0})),
+            {
+                let mut b = make_block(3, "ssd1306_display", serde_json::json!({"i2c_bus": 0, "address": 60}));
+                b.inputs = vec![
+                    PortDef { name: "line1".to_string(), kind: PortKind::Float },
+                    PortDef { name: "line2".to_string(), kind: PortKind::Float },
+                ];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 3, 0), make_channel(2, 2, 0, 3, 1)];
+        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("dataflow.display_write"), "got:\n{mlir}");
+    }
+
+    #[test]
+    fn lower_stepper_block() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 100.0})),
+            make_block(2, "constant", serde_json::json!({"value": 1.0})),
+            {
+                let mut b = make_block(3, "tmc2209_stepper", serde_json::json!({"uart_port": 0}));
+                b.inputs = vec![
+                    PortDef { name: "target".to_string(), kind: PortKind::Float },
+                    PortDef { name: "enable".to_string(), kind: PortKind::Float },
+                ];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 3, 0), make_channel(2, 2, 0, 3, 1)];
+        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("dataflow.stepper_move"), "got:\n{mlir}");
+        assert!(mlir.contains("dataflow.stepper_enable"), "got:\n{mlir}");
+        assert!(mlir.contains("dataflow.stepper_position"), "got:\n{mlir}");
+    }
+
+    #[test]
+    fn lower_stallguard_block() {
+        let blocks = vec![{
+            let mut b = make_block(1, "tmc2209_stallguard", serde_json::json!({"uart_port": 0, "uart_addr": 0, "threshold": 10}));
+            b.inputs = vec![];
+            b.outputs = vec![
+                PortDef { name: "value".to_string(), kind: PortKind::Float },
+                PortDef { name: "detect".to_string(), kind: PortKind::Float },
+            ];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![], tick_count: 0, time: 0.0 };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("dataflow.stallguard_read"), "got:\n{mlir}");
+    }
+
+    #[test]
+    fn lower_udp_blocks() {
+        let blocks = vec![
+            {
+                let mut b = make_block(1, "udp_source", serde_json::json!({}));
+                b.inputs = vec![];
+                b
+            },
+            {
+                let mut b = make_block(2, "udp_sink", serde_json::json!({}));
+                b.inputs = vec![PortDef { name: "in".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("UDP source") || mlir.contains("UDP sink") || mlir.contains("arith.constant"), "got:\n{mlir}");
+    }
+
+    #[test]
+    fn lower_unsupported_block_type() {
+        let blocks = vec![make_block(1, "totally_unknown", serde_json::json!({}))];
+        let snap = GraphSnapshot { blocks, channels: vec![], tick_count: 0, time: 0.0 };
+        let result = lower_graph(&snap);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unsupported"));
+    }
+
+    #[test]
+    fn lower_multiple_channels() {
+        // Three-block chain: const(5) → gain(×3) → gain(×2)
+        // SSA threading: %v1_p0 → gain → %v2_p0 → gain → %v3_p0
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 5.0})),
+            {
+                let mut b = make_block(2, "gain", serde_json::json!({"param1": 3.0}));
+                b.inputs = vec![PortDef {
+                    name: "in".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b
+            },
+            {
+                let mut b = make_block(3, "gain", serde_json::json!({"param1": 2.0}));
+                b.inputs = vec![PortDef {
+                    name: "in".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0), make_channel(2, 2, 0, 3, 0)];
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
+        let mlir = lower_graph(&snap).unwrap();
+        // First gain uses the constant's output
+        assert!(
+            mlir.contains("dataflow.gain(%v1_p0)"),
+            "expected first gain to use %v1_p0, got:\n{mlir}"
+        );
+        // Second gain uses the first gain's output
+        assert!(
+            mlir.contains("dataflow.gain(%v2_p0)"),
+            "expected second gain to use %v2_p0, got:\n{mlir}"
+        );
+        // The final output SSA is %v3_p0
+        assert!(
+            mlir.contains("%v3_p0"),
+            "expected final SSA %v3_p0, got:\n{mlir}"
+        );
     }
 }

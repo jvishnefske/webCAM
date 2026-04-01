@@ -127,33 +127,37 @@ fn compress_combined_frontend(out: &PathBuf) {
         return;
     }
 
-    let entries = match fs::read_dir(&dist) {
-        Ok(e) => e,
+    let mut entries: Vec<_> = match fs::read_dir(&dist) {
+        Ok(e) => e.flatten().collect(),
         Err(_) => return,
     };
+
+    // Sort entries by modification time (newest first) to prefer latest build
+    entries.sort_by_key(|e| e.metadata().and_then(|m| m.modified()).ok());
+    entries.reverse();
 
     let mut found_html = false;
     let mut found_js = false;
     let mut found_wasm = false;
     let mut found_css = false;
 
-    for entry in entries.flatten() {
+    for entry in entries {
         let path = entry.path();
         if !path.is_file() {
             continue;
         }
         let name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n.to_string(),
+            Some(n) => n,
             None => continue,
         };
 
-        let (out_name, found_flag) = if name.ends_with(".html") {
+        let (out_name, found_flag) = if name.ends_with(".html") && !found_html {
             ("combined_index.html.gz", &mut found_html)
-        } else if name.ends_with(".js") {
+        } else if name.ends_with(".js") && !found_js && name.starts_with("combined-frontend-") {
             ("combined_app.js.gz", &mut found_js)
-        } else if name.ends_with(".wasm") {
+        } else if name.ends_with(".wasm") && !found_wasm && name.starts_with("combined-frontend-") {
             ("combined_app_wasm.gz", &mut found_wasm)
-        } else if name.ends_with(".css") {
+        } else if name.ends_with(".css") && !found_css && name.starts_with("style-") {
             ("combined_style.css.gz", &mut found_css)
         } else {
             continue;

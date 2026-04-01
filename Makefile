@@ -1,4 +1,4 @@
-.PHONY: build wasm lint test ts ci release serve clean help \
+.PHONY: build wasm lint test ts ci release serve clean help verify \
        hil-firmware hil-stm32 hil-pi-zero hil-jlink-flash hil-verify all \
        dag-frontend combined-frontend embed-assets
 
@@ -9,13 +9,21 @@ WASM_TARGET = wasm32-unknown-unknown
 #   critical-section features (embassy-rp → restore-state-u8 vs
 #   cortex-m → restore-state-bool — mutually exclusive)
 # - WASM frontends require wasm32-unknown-unknown target
+# - Hardware-only crates (no_std USB/GPIO dispatchers, Pi Zero binary)
+#   require physical hardware and cannot be tested on host
 WORKSPACE_EXCLUDES = \
 	--exclude board-support-pico \
 	--exclude board-support-pico2 \
 	--exclude board-support-stm32 \
 	--exclude pico-bootloader \
 	--exclude combined-frontend \
-	--exclude hil-frontend
+	--exclude hil-frontend \
+	--exclude board-support-pi-zero \
+	--exclude gs-usb-device \
+	--exclude vprbrd-usb-gpio \
+	--exclude usb-composite-dispatchers
+
+all: hil-verify ci ## Run everything
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -27,7 +35,7 @@ lint: ## Run clippy on all host crates (matches CI)
 	cargo clippy --workspace $(WORKSPACE_EXCLUDES) --all-targets -- -D warnings
 
 test: ## Run all library crate tests with coverage (llvm-cov)
-	cargo llvm-cov --workspace $(WORKSPACE_EXCLUDES)
+	cargo llvm-cov --fail-under-functions 95 --workspace $(WORKSPACE_EXCLUDES)
 
 wasm: ## Build WASM + JS bindings (requires wasm-pack)
 	wasm-pack build --target web --out-dir www/pkg --release
@@ -62,7 +70,7 @@ hil-jlink-flash: hil-firmware ## Flash Pico firmware via JLink
 	$(JLINK) -device RP2040_M0_0 -if SWD -speed $(JLINK_SPEED) -autoconnect 1 -CommandFile /tmp/jlink-pico.jlink
 
 hil-firmware: ## Build Pico firmware
-	cargo build-pico
+	cargo build -p board-support-pico --target thumbv6m-none-eabi --release
 
 combined-frontend: ## Build combined Leptos frontend (WASM) via Trunk
 	cd hil/combined-frontend && trunk build --release
@@ -91,4 +99,3 @@ dag-frontend: ## Build DAG editor JS bundle
 embed-assets: dag-frontend ## Gzip frontend assets and generate Rust source
 	bash tools/embed-assets.sh
 
-all: ci hil-verify ## Run everything

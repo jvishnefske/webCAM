@@ -1,8 +1,8 @@
 //! Header component with connection status badge.
 
-use leptos::prelude::*;
 use crate::app::AppContext;
 use crate::ws_client::ConnState;
+use leptos::prelude::*;
 
 #[component]
 pub fn Header() -> impl IntoView {

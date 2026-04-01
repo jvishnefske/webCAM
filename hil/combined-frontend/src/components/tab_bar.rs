@@ -1,7 +1,7 @@
 //! Tab navigation bar.
 
-use leptos::prelude::*;
 use crate::app::{AppContext, Tab};
+use leptos::prelude::*;
 
 #[component]
 pub fn TabBar() -> impl IntoView {

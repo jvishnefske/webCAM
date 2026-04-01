@@ -65,6 +65,12 @@ mod tests {
     }
 
     #[test]
+    fn test_simple_pubsub_default_trait() {
+        let ps = SimplePubSub::default();
+        assert_eq!(ps.get("x"), 0.0);
+    }
+
+    #[test]
     fn test_simple_pubsub_reader_writer() {
         let mut ps = SimplePubSub::new();
         let writer: &mut dyn PubSubWriter = &mut ps;

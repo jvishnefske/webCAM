@@ -91,13 +91,14 @@ pub async fn run_with_api<B: I2cBusSet>(
         }
         defmt::info!("WS: client connected");
 
-        // Read HTTP upgrade request into a fixed buffer
-        let mut http_buf = [0u8; 512];
+        // Read HTTP upgrade request into a fixed buffer (1KB for modern browser headers)
+        let mut http_buf = [0u8; 1024];
         let mut http_len = 0;
         let upgrade_result = 'upgrade: {
             // Read until we see \r\n\r\n (end of HTTP headers)
             loop {
                 if http_len >= http_buf.len() {
+                    defmt::warn!("WS: HTTP request too large (>{=usize}B)", http_buf.len());
                     break 'upgrade Err(());
                 }
                 let n = match socket.read(&mut http_buf[http_len..]).await {
@@ -124,7 +125,8 @@ pub async fn run_with_api<B: I2cBusSet>(
         };
 
         if upgrade_result.is_err() {
-            defmt::warn!("WS: failed to read HTTP upgrade");
+            defmt::warn!("WS: failed to read HTTP request headers");
+            let _ = socket.flush().await;
             socket.close();
             continue;
         }
@@ -188,6 +190,7 @@ pub async fn run_with_api<B: I2cBusSet>(
                         defmt::warn!("HTTP: failed to serve static file");
                     }
                 }
+                let _ = socket.flush().await;
                 socket.close();
                 embassy_time::Timer::after_millis(10).await;
                 continue;

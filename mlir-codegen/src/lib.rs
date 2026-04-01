@@ -139,4 +139,195 @@ mod tests {
         assert!(output.mlir_text.contains("dataflow.constant"));
         assert!(output.peripherals_h.contains("hw_adc_read"));
     }
+
+    #[test]
+    fn test_build_runtime_valid() {
+        let json = r#"{
+            "blocks": [{
+                "id": 1,
+                "block_type": "constant",
+                "name": "const_1",
+                "inputs": [],
+                "outputs": [{"name": "out", "kind": "Float"}],
+                "config": {"value": 7.0},
+                "output_values": []
+            }],
+            "channels": [],
+            "tick_count": 0,
+            "time": 0.0
+        }"#;
+        let rt = build_runtime(json);
+        assert!(rt.is_ok(), "build_runtime should succeed for valid JSON");
+        let rt = rt.unwrap();
+        assert_eq!(rt.node_count(), 1);
+    }
+
+    #[test]
+    fn test_build_runtime_invalid_json() {
+        let result = build_runtime("not json");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("JSON parse error"),
+            "expected JSON parse error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_build_runtime_tick() {
+        let json = r#"{
+            "blocks": [{
+                "id": 1,
+                "block_type": "constant",
+                "name": "const_1",
+                "inputs": [],
+                "outputs": [{"name": "out", "kind": "Float"}],
+                "config": {"value": 42.0},
+                "output_values": []
+            }],
+            "channels": [],
+            "tick_count": 0,
+            "time": 0.0
+        }"#;
+        let mut rt = build_runtime(json).unwrap();
+        rt.tick(&mut NullHardware);
+        let val = rt.read_output(1, 0);
+        assert_eq!(
+            val,
+            Some(42.0),
+            "constant block should produce its configured value after tick"
+        );
+    }
+
+    #[test]
+    fn test_generate_logic_files_has_expected_paths() {
+        let snap = GraphSnapshot {
+            blocks: vec![lower::BlockSnapshot {
+                id: 1,
+                block_type: "constant".to_string(),
+                name: "c".to_string(),
+                inputs: vec![],
+                outputs: vec![lower::PortDef {
+                    name: "out".to_string(),
+                    kind: module_traits::value::PortKind::Float,
+                }],
+                config: serde_json::json!({"value": 1.0}),
+                output_values: vec![],
+                custom_codegen: None,
+            }],
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let files = generate_logic_files(&snap).unwrap();
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+
+        let expected = [
+            "logic/csrc/graph.mlir",
+            "logic/csrc/peripherals.h",
+            "logic/csrc/logic.c",
+            "logic/build.rs",
+            "logic/Cargo.toml",
+            "logic/src/ffi.rs",
+            "logic/src/lib.rs",
+        ];
+        for path in &expected {
+            assert!(
+                paths.contains(path),
+                "expected path {path} not found in generated files; got: {paths:?}"
+            );
+        }
+        assert_eq!(
+            files.len(),
+            expected.len(),
+            "unexpected number of generated files"
+        );
+    }
+
+    #[test]
+    fn test_graph_to_mlir_empty_graph() {
+        let snap = GraphSnapshot {
+            blocks: vec![],
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let mlir = graph_to_mlir(&snap).unwrap();
+        assert!(
+            mlir.contains("func.func @tick"),
+            "empty graph should still produce a tick function"
+        );
+        assert!(
+            mlir.contains("module"),
+            "empty graph should still produce a module wrapper"
+        );
+        assert!(
+            mlir.contains("return"),
+            "empty graph tick function should have a return"
+        );
+    }
+
+    #[test]
+    fn test_compile_multi_block() {
+        // constant(5.0) -> gain(2.0) chain
+        let snap = GraphSnapshot {
+            blocks: vec![
+                lower::BlockSnapshot {
+                    id: 1,
+                    block_type: "constant".to_string(),
+                    name: "src".to_string(),
+                    inputs: vec![],
+                    outputs: vec![lower::PortDef {
+                        name: "out".to_string(),
+                        kind: module_traits::value::PortKind::Float,
+                    }],
+                    config: serde_json::json!({"value": 5.0}),
+                    output_values: vec![],
+                    custom_codegen: None,
+                },
+                lower::BlockSnapshot {
+                    id: 2,
+                    block_type: "gain".to_string(),
+                    name: "amp".to_string(),
+                    inputs: vec![lower::PortDef {
+                        name: "in".to_string(),
+                        kind: module_traits::value::PortKind::Float,
+                    }],
+                    outputs: vec![lower::PortDef {
+                        name: "out".to_string(),
+                        kind: module_traits::value::PortKind::Float,
+                    }],
+                    config: serde_json::json!({"param1": 2.0}),
+                    output_values: vec![],
+                    custom_codegen: None,
+                },
+            ],
+            channels: vec![lower::Channel {
+                id: lower::ChannelId(1),
+                from_block: lower::BlockId(1),
+                from_port: 0,
+                to_block: lower::BlockId(2),
+                to_port: 0,
+            }],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let output = compile_to_c(&snap).unwrap();
+        assert!(
+            output.mlir_text.contains("dataflow.constant"),
+            "MLIR should contain constant op"
+        );
+        assert!(
+            output.mlir_text.contains("dataflow.gain"),
+            "MLIR should contain gain op"
+        );
+        assert!(
+            output.mlir_text.contains("5"),
+            "MLIR should contain the constant value 5"
+        );
+        assert!(
+            output.mlir_text.contains("2"),
+            "MLIR should contain the gain factor 2"
+        );
+    }
 }

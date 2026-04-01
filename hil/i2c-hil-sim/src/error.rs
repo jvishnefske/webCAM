@@ -53,3 +53,43 @@ impl core::fmt::Display for BusError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    extern crate alloc;
+    use super::*;
+    use alloc::format;
+    use embedded_hal::i2c::Error;
+
+    #[test]
+    fn display_no_device() {
+        let err = BusError::NoDeviceAtAddress(0x48);
+        assert_eq!(format!("{err}"), "no device at address 0x48");
+    }
+
+    #[test]
+    fn display_data_nak() {
+        assert_eq!(format!("{}", BusError::DataNak), "data not acknowledged");
+    }
+
+    #[test]
+    fn display_device_error() {
+        assert_eq!(format!("{}", BusError::DeviceError), "device processing error");
+    }
+
+    #[test]
+    fn error_kind_mapping() {
+        assert!(matches!(
+            BusError::NoDeviceAtAddress(0).kind(),
+            ErrorKind::NoAcknowledge(NoAcknowledgeSource::Address)
+        ));
+        assert!(matches!(
+            BusError::DataNak.kind(),
+            ErrorKind::NoAcknowledge(NoAcknowledgeSource::Data)
+        ));
+        assert!(matches!(
+            BusError::DeviceError.kind(),
+            ErrorKind::Other
+        ));
+    }
+}

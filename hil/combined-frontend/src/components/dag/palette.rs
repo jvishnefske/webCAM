@@ -2,14 +2,12 @@
 
 use leptos::prelude::*;
 
-use configurable_blocks::registry::{BlockDescriptor, descriptors_by_category};
+use configurable_blocks::registry::{descriptors_by_category, BlockDescriptor};
 use configurable_blocks::schema::BlockCategory;
 
 /// Palette showing block categories as collapsible sub-menus.
 #[component]
-pub fn BlockPalette(
-    on_add: Callback<String>,
-) -> impl IntoView {
+pub fn BlockPalette(on_add: Callback<String>) -> impl IntoView {
     let groups = descriptors_by_category();
 
     view! {

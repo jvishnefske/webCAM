@@ -185,6 +185,19 @@ mod tests {
     }
 
     #[test]
+    fn frame_debug_format() {
+        let f = Frame::new(
+            NodeAddr::new(1, 2, 3),
+            NodeAddr::BROADCAST,
+            TopicId::from_raw(42),
+        );
+        let dbg = std::format!("{:?}", f);
+        assert!(dbg.contains("Frame"));
+        assert!(dbg.contains("source"));
+        assert!(dbg.contains("destination"));
+    }
+
+    #[test]
     fn max_payload_round_trip() {
         let mut f = Frame::new(
             NodeAddr::new(1, 1, 1),

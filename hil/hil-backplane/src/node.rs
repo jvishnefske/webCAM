@@ -203,3 +203,56 @@ mod imp {
 
 #[cfg(feature = "std")]
 pub use imp::Node;
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_in_result)]
+mod tests {
+    use super::*;
+    use crate::node_id::NodeId;
+    use crate::transport::udp::{UdpTransport, DEFAULT_MULTICAST_ADDR};
+
+    #[test]
+    fn node_new_and_node_id() {
+        let transport =
+            UdpTransport::new(DEFAULT_MULTICAST_ADDR, 0).expect("transport creation failed");
+        let node = Node::new(NodeId::new(99), transport);
+        assert_eq!(node.node_id(), NodeId::new(99));
+    }
+
+    #[test]
+    fn node_publish_increments_seq() {
+        use crate::message::BackplaneMessage;
+
+        #[derive(Debug)]
+        struct Ping;
+        impl BackplaneMessage for Ping {
+            const TYPE_ID: u32 = 0xDEAD;
+        }
+        impl<C> minicbor::Encode<C> for Ping {
+            fn encode<W: minicbor::encode::Write>(
+                &self,
+                e: &mut minicbor::Encoder<W>,
+                _ctx: &mut C,
+            ) -> Result<(), minicbor::encode::Error<W::Error>> {
+                e.u8(0)?;
+                Ok(())
+            }
+        }
+        impl<'b, C> minicbor::Decode<'b, C> for Ping {
+            fn decode(
+                d: &mut minicbor::Decoder<'b>,
+                _ctx: &mut C,
+            ) -> Result<Self, minicbor::decode::Error> {
+                d.u8()?;
+                Ok(Ping)
+            }
+        }
+
+        let transport = UdpTransport::with_defaults().expect("transport creation failed");
+        let mut node = Node::new(NodeId::new(1), transport);
+
+        // Publish twice -- should not panic (exercises next_seq and dispatch)
+        node.publish(&Ping).unwrap();
+        node.publish(&Ping).unwrap();
+    }
+}

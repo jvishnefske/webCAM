@@ -92,6 +92,22 @@ mod tests {
     }
 
     #[test]
+    fn test_descriptors_by_category() {
+        let groups = descriptors_by_category();
+        assert!(!groups.is_empty());
+        // Control category should have PID
+        let control = groups
+            .iter()
+            .find(|(cat, _)| *cat == BlockCategory::Control);
+        assert!(control.is_some());
+        assert!(control
+            .unwrap()
+            .1
+            .iter()
+            .any(|d| d.block_type == "pid"));
+    }
+
+    #[test]
     fn test_palette_json() {
         let json = palette_json();
         assert!(json.contains("pid"));

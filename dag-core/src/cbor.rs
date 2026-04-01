@@ -341,6 +341,29 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_error_display() {
+        let err = DecodeError::Cbor("bad data".into());
+        let msg = alloc::format!("{err}");
+        assert!(msg.contains("CBOR decode error"));
+
+        let err2 = DecodeError::Dag(crate::op::DagError::Full);
+        let msg2 = alloc::format!("{err2}");
+        assert!(msg2.contains("DAG validation error"));
+    }
+
+    #[test]
+    fn test_dag_decode_impl_roundtrip() {
+        let mut dag = Dag::new();
+        dag.subscribe("s").unwrap();
+        dag.publish("p", 0).unwrap();
+
+        let bytes = minicbor::to_vec(&dag).expect("encode Dag");
+        let decoded: Dag = minicbor::decode(&bytes).expect("decode Dag");
+        assert_eq!(dag.len(), decoded.len());
+        assert_eq!(dag.nodes(), decoded.nodes());
+    }
+
+    #[test]
     fn test_decode_invalid_cbor() {
         let garbage = &[0xFF, 0xFE, 0x00, 0x01];
         let result = decode_dag(garbage);
@@ -350,6 +373,51 @@ mod tests {
             Err(other) => panic!("expected DecodeError::Cbor, got {:?}", other),
             Ok(_) => panic!("expected error, got Ok"),
         }
+    }
+
+    #[test]
+    fn test_decode_unknown_op_tag() {
+        let mut buf = Vec::new();
+        {
+            let mut e = minicbor::Encoder::new(&mut buf);
+            e.array(2).unwrap().u8(255).unwrap().f64(0.0).unwrap();
+        }
+
+        let result = minicbor::decode::<Op>(&buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decode_dag_topological_error() {
+        let mut buf = Vec::new();
+        {
+            let mut e = minicbor::Encoder::new(&mut buf);
+            e.array(1).unwrap();
+            e.array(3).unwrap().u8(3).unwrap().u16(5).unwrap().u16(6).unwrap();
+        }
+
+        let result = decode_dag(&buf);
+        assert!(matches!(result, Err(DecodeError::Dag(_))));
+    }
+
+    #[test]
+    fn test_decode_dag_indefinite_length_error() {
+        let bytes = &[0x9F, 0xFF]; // CBOR indefinite-length array
+        let result = decode_dag(bytes);
+        assert!(matches!(result, Err(DecodeError::Cbor(_))));
+    }
+
+    #[test]
+    fn test_decode_dag_impl_topological_error() {
+        let mut buf = Vec::new();
+        {
+            let mut e = minicbor::Encoder::new(&mut buf);
+            e.array(1).unwrap();
+            e.array(3).unwrap().u8(3).unwrap().u16(5).unwrap().u16(6).unwrap();
+        }
+
+        let result = minicbor::decode::<Dag>(&buf);
+        assert!(result.is_err());
     }
 
     #[test]

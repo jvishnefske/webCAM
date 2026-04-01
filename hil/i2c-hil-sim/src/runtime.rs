@@ -530,6 +530,26 @@ mod tests {
     }
 
     #[test]
+    fn runtime_bus_device_accessor() {
+        let mut bus = RuntimeBus::<4>::new();
+        bus.add_device(Address::new(0x48).unwrap(), b"X", &[0xAA; 4])
+            .unwrap();
+
+        let dev = bus.device(0).unwrap();
+        assert!(dev.is_active());
+        assert_eq!(dev.name(), b"X");
+        assert_eq!(dev.registers()[0], 0xAA);
+
+        assert!(bus.device(99).is_none());
+    }
+
+    #[test]
+    fn runtime_bus_default_trait() {
+        let bus = RuntimeBus::<4>::default();
+        assert_eq!(bus.active_count(), 0);
+    }
+
+    #[test]
     fn set_registers_nonexistent_device_fails() {
         let mut bus = RuntimeBus::<4>::new();
         assert!(bus

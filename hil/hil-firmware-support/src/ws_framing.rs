@@ -406,6 +406,28 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_request_method_get() {
+        let request = b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert_eq!(parse_request_method(request), Some("GET"));
+    }
+
+    #[test]
+    fn test_parse_request_method_post() {
+        let request = b"POST /api HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert_eq!(parse_request_method(request), Some("POST"));
+    }
+
+    #[test]
+    fn test_base64_encode_two_byte_padding() {
+        // Input of length 1 -- should produce 4 chars with two '=' pads
+        let mut output = [0u8; 4];
+        let len = base64_encode(&[0xFF], &mut output);
+        assert_eq!(len, 4);
+        assert_eq!(output[2], b'=');
+        assert_eq!(output[3], b'=');
+    }
+
+    #[test]
     fn test_build_upgrade_response_format() {
         let key = *b"dGhlIHNhbXBsZSBub25jZQ==";
         let mut buf = [0u8; 256];

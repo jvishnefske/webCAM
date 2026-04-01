@@ -69,6 +69,28 @@ impl BlockCategory {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_block_category_label() {
+        assert_eq!(BlockCategory::Math.label(), "Math");
+        assert_eq!(BlockCategory::Control.label(), "Control");
+        assert_eq!(BlockCategory::Io.label(), "I/O");
+        assert_eq!(BlockCategory::PubSub.label(), "Pub/Sub");
+        assert_eq!(BlockCategory::Monitor.label(), "Monitor");
+    }
+
+    #[test]
+    fn test_block_category_all() {
+        let all = BlockCategory::all();
+        assert_eq!(all.len(), 5);
+        assert!(all.contains(&BlockCategory::Math));
+        assert!(all.contains(&BlockCategory::Monitor));
+    }
+}
+
 /// Pubsub or hardware channel declared by a configurable block.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeclaredChannel {

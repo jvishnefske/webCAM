@@ -189,4 +189,60 @@ endsolid cube";
         assert_eq!(v.y, 2.5);
         assert_eq!(v.z, 3.5);
     }
+
+    #[test]
+    fn test_too_short_data_falls_through_to_ascii() {
+        // Data shorter than 84 bytes goes to parse_ascii_stl
+        let result = parse_stl(b"short");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_binary_stl_truncated() {
+        // Valid header claiming 1 triangle but data is truncated
+        let mut data = vec![0u8; 84 + 10]; // too short for 50 bytes per triangle
+        data[80] = 1;
+        let result = parse_binary_stl(&data);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("truncated"));
+    }
+
+    #[test]
+    fn test_parse_ascii_vec3_wrong_prefix() {
+        let result = parse_ascii_vec3("normal 1 2 3", "vertex");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_ascii_vec3_wrong_count() {
+        let result = parse_ascii_vec3("vertex 1.0 2.0", "vertex");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Expected 3 floats"));
+    }
+
+    #[test]
+    fn test_parse_ascii_vec3_bad_float() {
+        let result = parse_ascii_vec3("vertex abc 2.0 3.0", "vertex");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_vertex_line_none() {
+        let result = parse_vertex_line(None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unexpected end"));
+    }
+
+    #[test]
+    fn test_parse_ascii_stl_empty() {
+        let result = parse_ascii_stl(b"solid empty\nendsolid empty");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No triangles"));
+    }
+
+    #[test]
+    fn test_binary_stl_too_short_header() {
+        let result = parse_binary_stl(&[0u8; 10]);
+        assert!(result.is_err());
+    }
 }

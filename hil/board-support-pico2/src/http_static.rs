@@ -4,7 +4,8 @@ use hil_firmware_support::http_static::StaticAssets;
 
 // -- Combined frontend (Leptos: HIL + DAG + Deploy) --
 #[cfg(has_combined_frontend)]
-static COMBINED_INDEX_GZ: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/combined_index.html.gz"));
+static COMBINED_INDEX_GZ: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/combined_index.html.gz"));
 #[cfg(has_combined_frontend)]
 static COMBINED_JS_GZ: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/combined_app.js.gz"));
 #[cfg(has_combined_frontend)]

@@ -12,7 +12,7 @@
 //! setpoint/feedback topics, computes P+I+D terms, clamps output, and publishes
 //! the result — all as a single configurable block that lowers to ~20 DAG ops.
 
-pub mod schema;
-pub mod registry;
-pub mod lower;
 pub mod blocks;
+pub mod lower;
+pub mod registry;
+pub mod schema;
