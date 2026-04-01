@@ -64,9 +64,15 @@ impl Default for PidBlock {
 }
 
 impl ConfigurableBlock for PidBlock {
-    fn block_type(&self) -> &str { "pid" }
-    fn display_name(&self) -> &str { "PID Controller" }
-    fn category(&self) -> BlockCategory { BlockCategory::Control }
+    fn block_type(&self) -> &str {
+        "pid"
+    }
+    fn display_name(&self) -> &str {
+        "PID Controller"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::Control
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
@@ -132,9 +138,15 @@ impl ConfigurableBlock for PidBlock {
     }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(v) = config.get("kp").and_then(|v| v.as_f64()) { self.kp = v; }
-        if let Some(v) = config.get("ki").and_then(|v| v.as_f64()) { self.ki = v; }
-        if let Some(v) = config.get("kd").and_then(|v| v.as_f64()) { self.kd = v; }
+        if let Some(v) = config.get("kp").and_then(|v| v.as_f64()) {
+            self.kp = v;
+        }
+        if let Some(v) = config.get("ki").and_then(|v| v.as_f64()) {
+            self.ki = v;
+        }
+        if let Some(v) = config.get("kd").and_then(|v| v.as_f64()) {
+            self.kd = v;
+        }
         if let Some(v) = config.get("setpoint_topic").and_then(|v| v.as_str()) {
             self.setpoint_topic = v.into();
         }
@@ -144,8 +156,12 @@ impl ConfigurableBlock for PidBlock {
         if let Some(v) = config.get("output_topic").and_then(|v| v.as_str()) {
             self.output_topic = v.into();
         }
-        if let Some(v) = config.get("out_min").and_then(|v| v.as_f64()) { self.out_min = v; }
-        if let Some(v) = config.get("out_max").and_then(|v| v.as_f64()) { self.out_max = v; }
+        if let Some(v) = config.get("out_min").and_then(|v| v.as_f64()) {
+            self.out_min = v;
+        }
+        if let Some(v) = config.get("out_max").and_then(|v| v.as_f64()) {
+            self.out_max = v;
+        }
         if let Some(v) = config.get("deploy_node").and_then(|v| v.as_str()) {
             self.deploy_node = v.into();
         }
@@ -175,28 +191,28 @@ impl ConfigurableBlock for PidBlock {
         let mut dag = Dag::new();
 
         // Subscribe to inputs
-        let setpoint = dag.subscribe(&self.setpoint_topic)?;   // %0
-        let feedback = dag.subscribe(&self.feedback_topic)?;    // %1
+        let setpoint = dag.subscribe(&self.setpoint_topic)?; // %0
+        let feedback = dag.subscribe(&self.feedback_topic)?; // %1
 
         // Error = setpoint - feedback
-        let error = dag.sub(setpoint, feedback)?;               // %2
+        let error = dag.sub(setpoint, feedback)?; // %2
 
         // P term: error * kp
-        let kp_const = dag.constant(self.kp)?;                  // %3
-        let p_term = dag.mul(error, kp_const)?;                 // %4
+        let kp_const = dag.constant(self.kp)?; // %3
+        let p_term = dag.mul(error, kp_const)?; // %4
 
         // I term (per-tick contribution): error * ki
-        let ki_const = dag.constant(self.ki)?;                  // %5
-        let i_term = dag.mul(error, ki_const)?;                 // %6
+        let ki_const = dag.constant(self.ki)?; // %5
+        let i_term = dag.mul(error, ki_const)?; // %6
 
         // D term approximation: -error * kd (negative for derivative)
-        let kd_const = dag.constant(self.kd)?;                  // %7
-        let neg_error = dag.neg(error)?;                        // %8
-        let d_term = dag.mul(neg_error, kd_const)?;             // %9
+        let kd_const = dag.constant(self.kd)?; // %7
+        let neg_error = dag.neg(error)?; // %8
+        let d_term = dag.mul(neg_error, kd_const)?; // %9
 
         // Sum: P + I + D
-        let pi = dag.add(p_term, i_term)?;                     // %10
-        let raw_output = dag.add(pi, d_term)?;                  // %11
+        let pi = dag.add(p_term, i_term)?; // %10
+        let raw_output = dag.add(pi, d_term)?; // %11
 
         // Clamp to [out_min, out_max] using relu decomposition:
         // clamp(x, min, max) = relu(x - min) + min - relu(relu(x - min) + min - max)
@@ -213,13 +229,8 @@ impl ConfigurableBlock for PidBlock {
         let pub_node = dag.publish(&self.output_topic, clamped)?;
 
         let ports = BlockPorts {
-            inputs: vec![
-                ("setpoint".into(), setpoint),
-                ("feedback".into(), feedback),
-            ],
-            outputs: vec![
-                ("output".into(), pub_node),
-            ],
+            inputs: vec![("setpoint".into(), setpoint), ("feedback".into(), feedback)],
+            outputs: vec![("output".into(), pub_node)],
         };
 
         Ok(LowerResult { ports, dag })
@@ -251,9 +262,15 @@ impl Default for SimpleGainBlock {
 }
 
 impl ConfigurableBlock for SimpleGainBlock {
-    fn block_type(&self) -> &str { "gain" }
-    fn display_name(&self) -> &str { "Gain" }
-    fn category(&self) -> BlockCategory { BlockCategory::Math }
+    fn block_type(&self) -> &str {
+        "gain"
+    }
+    fn display_name(&self) -> &str {
+        "Gain"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::Math
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
@@ -289,7 +306,9 @@ impl ConfigurableBlock for SimpleGainBlock {
     }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(v) = config.get("factor").and_then(|v| v.as_f64()) { self.factor = v; }
+        if let Some(v) = config.get("factor").and_then(|v| v.as_f64()) {
+            self.factor = v;
+        }
         if let Some(v) = config.get("input_topic").and_then(|v| v.as_str()) {
             self.input_topic = v.into();
         }
@@ -356,9 +375,15 @@ impl Default for PubSubBridgeBlock {
 }
 
 impl ConfigurableBlock for PubSubBridgeBlock {
-    fn block_type(&self) -> &str { "pubsub_bridge" }
-    fn display_name(&self) -> &str { "PubSub Bridge" }
-    fn category(&self) -> BlockCategory { BlockCategory::PubSub }
+    fn block_type(&self) -> &str {
+        "pubsub_bridge"
+    }
+    fn display_name(&self) -> &str {
+        "PubSub Bridge"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::PubSub
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
@@ -400,7 +425,9 @@ impl ConfigurableBlock for PubSubBridgeBlock {
         if let Some(v) = config.get("publish_topic").and_then(|v| v.as_str()) {
             self.publish_topic = v.into();
         }
-        if let Some(v) = config.get("gain").and_then(|v| v.as_f64()) { self.gain = v; }
+        if let Some(v) = config.get("gain").and_then(|v| v.as_f64()) {
+            self.gain = v;
+        }
         if let Some(v) = config.get("deploy_node").and_then(|v| v.as_str()) {
             self.deploy_node = v.into();
         }
@@ -479,7 +506,9 @@ mod tests {
         let dag = &result.dag;
 
         // With pure P control (ki=kd=0), output = clamp(error * kp, -10, 10)
-        let mut pubsub = MockPubSub { values: BTreeMap::new() };
+        let mut pubsub = MockPubSub {
+            values: BTreeMap::new(),
+        };
         pubsub.values.insert("sp".into(), 5.0);
         pubsub.values.insert("fb".into(), 3.0);
 
@@ -509,7 +538,9 @@ mod tests {
         let result = pid.lower().expect("lower failed");
         let dag = &result.dag;
 
-        let mut pubsub = MockPubSub { values: BTreeMap::new() };
+        let mut pubsub = MockPubSub {
+            values: BTreeMap::new(),
+        };
         pubsub.values.insert("sp".into(), 10.0);
         pubsub.values.insert("fb".into(), 0.0);
 
@@ -573,7 +604,9 @@ mod tests {
         let result = gain.lower().expect("lower failed");
         let dag = &result.dag;
 
-        let mut pubsub = MockPubSub { values: BTreeMap::new() };
+        let mut pubsub = MockPubSub {
+            values: BTreeMap::new(),
+        };
         pubsub.values.insert("in".into(), 4.0);
 
         let mut values = vec![0.0; dag.len()];
@@ -607,8 +640,193 @@ mod tests {
         let groups = super::super::registry_by_category();
         assert!(!groups.is_empty());
         // Control category should have PID
-        let control = groups.iter().find(|(cat, _)| *cat == BlockCategory::Control);
+        let control = groups
+            .iter()
+            .find(|(cat, _)| *cat == BlockCategory::Control);
         assert!(control.is_some());
         assert!(control.unwrap().1.iter().any(|e| e.block_type == "pid"));
+    }
+
+    // --- PidBlock: block_type, display_name, category, config_json ---
+    #[test]
+    fn test_pid_block_type_and_display() {
+        let pid = PidBlock::default();
+        assert_eq!(pid.block_type(), "pid");
+        assert_eq!(pid.display_name(), "PID Controller");
+        assert_eq!(pid.category(), BlockCategory::Control);
+    }
+
+    #[test]
+    fn test_pid_config_json() {
+        let pid = PidBlock::default();
+        let json = pid.config_json();
+        assert_eq!(json["kp"], 1.0);
+        assert_eq!(json["ki"], 0.1);
+        assert_eq!(json["kd"], 0.01);
+        assert_eq!(json["setpoint_topic"], "ctrl/setpoint");
+        assert_eq!(json["feedback_topic"], "ctrl/feedback");
+        assert_eq!(json["output_topic"], "ctrl/output");
+        assert_eq!(json["out_min"], -100.0);
+        assert_eq!(json["out_max"], 100.0);
+        assert_eq!(json["deploy_node"], "pico2");
+    }
+
+    // --- SimpleGainBlock: all ConfigurableBlock methods ---
+    #[test]
+    fn test_gain_block_type_and_display() {
+        let g = SimpleGainBlock::default();
+        assert_eq!(g.block_type(), "gain");
+        assert_eq!(g.display_name(), "Gain");
+        assert_eq!(g.category(), BlockCategory::Math);
+    }
+
+    #[test]
+    fn test_gain_config_schema() {
+        let g = SimpleGainBlock::default();
+        let schema = g.config_schema();
+        assert_eq!(schema.len(), 4);
+        assert!(schema.iter().any(|f| f.key == "factor"));
+        assert!(schema.iter().any(|f| f.key == "input_topic"));
+        assert!(schema.iter().any(|f| f.key == "output_topic"));
+        assert!(schema.iter().any(|f| f.key == "deploy_node"));
+    }
+
+    #[test]
+    fn test_gain_config_json() {
+        let g = SimpleGainBlock::default();
+        let json = g.config_json();
+        assert_eq!(json["factor"], 1.0);
+        assert_eq!(json["input_topic"], "signal/in");
+        assert_eq!(json["output_topic"], "signal/out");
+        assert_eq!(json["deploy_node"], "pico2");
+    }
+
+    #[test]
+    fn test_gain_apply_config() {
+        let mut g = SimpleGainBlock::default();
+        g.apply_config(&serde_json::json!({
+            "factor": 5.0,
+            "input_topic": "x/in",
+            "output_topic": "x/out",
+            "deploy_node": "pico3"
+        }));
+        assert_eq!(g.factor, 5.0);
+        assert_eq!(g.input_topic, "x/in");
+        assert_eq!(g.output_topic, "x/out");
+        assert_eq!(g.deploy_node, "pico3");
+    }
+
+    #[test]
+    fn test_gain_declared_channels() {
+        let g = SimpleGainBlock::default();
+        let channels = g.declared_channels();
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[0].kind, ChannelKind::PubSub);
+        assert_eq!(channels[1].direction, ChannelDirection::Output);
+    }
+
+    // --- PubSubBridgeBlock: all ConfigurableBlock methods ---
+    #[test]
+    fn test_bridge_block_type_and_display() {
+        let b = PubSubBridgeBlock::default();
+        assert_eq!(b.block_type(), "pubsub_bridge");
+        assert_eq!(b.display_name(), "PubSub Bridge");
+        assert_eq!(b.category(), BlockCategory::PubSub);
+    }
+
+    #[test]
+    fn test_bridge_config_schema() {
+        let b = PubSubBridgeBlock::default();
+        let schema = b.config_schema();
+        assert_eq!(schema.len(), 4);
+        assert!(schema.iter().any(|f| f.key == "subscribe_topic"));
+        assert!(schema.iter().any(|f| f.key == "publish_topic"));
+        assert!(schema.iter().any(|f| f.key == "gain"));
+        assert!(schema.iter().any(|f| f.key == "deploy_node"));
+    }
+
+    #[test]
+    fn test_bridge_config_json() {
+        let b = PubSubBridgeBlock::default();
+        let json = b.config_json();
+        assert_eq!(json["subscribe_topic"], "sensor/raw");
+        assert_eq!(json["publish_topic"], "sensor/scaled");
+        assert_eq!(json["gain"], 1.0);
+        assert_eq!(json["deploy_node"], "pico2");
+    }
+
+    #[test]
+    fn test_bridge_apply_config() {
+        let mut b = PubSubBridgeBlock::default();
+        b.apply_config(&serde_json::json!({
+            "subscribe_topic": "a/b",
+            "publish_topic": "c/d",
+            "gain": 2.5,
+            "deploy_node": "pico4"
+        }));
+        assert_eq!(b.subscribe_topic, "a/b");
+        assert_eq!(b.publish_topic, "c/d");
+        assert_eq!(b.gain, 2.5);
+        assert_eq!(b.deploy_node, "pico4");
+    }
+
+    #[test]
+    fn test_bridge_declared_channels() {
+        let b = PubSubBridgeBlock::default();
+        let channels = b.declared_channels();
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[0].kind, ChannelKind::PubSub);
+        assert_eq!(channels[1].direction, ChannelDirection::Output);
+    }
+
+    #[test]
+    fn test_bridge_non_unity_gain_lower() {
+        let bridge = PubSubBridgeBlock {
+            subscribe_topic: "a".into(),
+            publish_topic: "b".into(),
+            gain: 2.0,
+            deploy_node: "pico2".into(),
+        };
+        let result = bridge.lower().expect("lower failed");
+        // Non-unity gain: Subscribe + Const + Mul + Publish = 4 nodes
+        assert_eq!(result.dag.len(), 4);
+
+        let mut pubsub = MockPubSub {
+            values: BTreeMap::new(),
+        };
+        pubsub.values.insert("a".into(), 5.0);
+
+        let mut values = vec![0.0; result.dag.len()];
+        let eval = result.dag.evaluate(&NullChannels, &pubsub, &mut values);
+        assert_eq!(eval.publishes.len(), 1);
+        assert_eq!(eval.publishes[0].0, "b");
+        assert!((eval.publishes[0].1 - 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_pid_default() {
+        let pid = PidBlock::default();
+        assert_eq!(pid.kp, 1.0);
+        assert_eq!(pid.ki, 0.1);
+        assert_eq!(pid.kd, 0.01);
+        assert_eq!(pid.out_min, -100.0);
+        assert_eq!(pid.out_max, 100.0);
+    }
+
+    #[test]
+    fn test_gain_default() {
+        let g = SimpleGainBlock::default();
+        assert_eq!(g.factor, 1.0);
+        assert_eq!(g.input_topic, "signal/in");
+    }
+
+    #[test]
+    fn test_bridge_default() {
+        let b = PubSubBridgeBlock::default();
+        assert_eq!(b.subscribe_topic, "sensor/raw");
+        assert_eq!(b.publish_topic, "sensor/scaled");
+        assert_eq!(b.gain, 1.0);
     }
 }

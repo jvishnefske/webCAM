@@ -1,7 +1,7 @@
 //! I2C bus overview panel — shows detected buses and devices.
 
-use leptos::prelude::*;
 use crate::app::AppContext;
+use leptos::prelude::*;
 
 #[component]
 pub fn BusOverview() -> impl IntoView {

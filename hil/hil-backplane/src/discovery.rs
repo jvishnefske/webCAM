@@ -106,3 +106,295 @@ impl<'b, C> minicbor::Decode<'b, C> for NodeAnnounce {
         })
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_in_result)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn node_announce_roundtrip() {
+        let mut publishes = heapless::Vec::new();
+        publishes.push(100).unwrap();
+        publishes.push(200).unwrap();
+        let mut serves = heapless::Vec::new();
+        serves.push(300).unwrap();
+
+        let original = NodeAnnounce {
+            node_id: NodeId::new(42),
+            name: heapless::String::try_from("test-node").unwrap(),
+            publishes,
+            serves,
+        };
+
+        let encoded = minicbor::to_vec(&original).expect("encode failed");
+        let decoded: NodeAnnounce = minicbor::decode(&encoded).expect("decode failed");
+
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn node_announce_empty_lists() {
+        let original = NodeAnnounce {
+            node_id: NodeId::new(0),
+            name: heapless::String::try_from("empty").unwrap(),
+            publishes: heapless::Vec::new(),
+            serves: heapless::Vec::new(),
+        };
+
+        let encoded = minicbor::to_vec(&original).expect("encode failed");
+        let decoded: NodeAnnounce = minicbor::decode(&encoded).expect("decode failed");
+
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn node_announce_type_id() {
+        // Verify the TYPE_ID is deterministic
+        let id1 = NodeAnnounce::TYPE_ID;
+        let id2 = NodeAnnounce::TYPE_ID;
+        assert_eq!(id1, id2);
+        assert_ne!(id1, 0);
+    }
+
+    #[test]
+    fn node_announce_full_lists() {
+        let mut publishes = heapless::Vec::new();
+        for i in 0..16u32 {
+            publishes.push(i * 10).unwrap();
+        }
+        let mut serves = heapless::Vec::new();
+        for i in 0..16u32 {
+            serves.push(i * 100).unwrap();
+        }
+
+        let original = NodeAnnounce {
+            node_id: NodeId::new(255),
+            name: heapless::String::try_from("full-node").unwrap(),
+            publishes,
+            serves,
+        };
+
+        let encoded = minicbor::to_vec(&original).expect("encode failed");
+        let decoded: NodeAnnounce = minicbor::decode(&encoded).expect("decode failed");
+
+        assert_eq!(decoded, original);
+        assert_eq!(decoded.publishes.len(), 16);
+        assert_eq!(decoded.serves.len(), 16);
+        assert_eq!(decoded.publishes[0], 0);
+        assert_eq!(decoded.publishes[15], 150);
+        assert_eq!(decoded.serves[15], 1500);
+    }
+
+    #[test]
+    fn node_announce_max_node_id() {
+        let original = NodeAnnounce {
+            node_id: NodeId::new(u32::MAX),
+            name: heapless::String::try_from("max-id").unwrap(),
+            publishes: heapless::Vec::new(),
+            serves: heapless::Vec::new(),
+        };
+
+        let encoded = minicbor::to_vec(&original).expect("encode failed");
+        let decoded: NodeAnnounce = minicbor::decode(&encoded).expect("decode failed");
+        assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn node_announce_long_name() {
+        // 64-byte name (max for heapless::String<64>)
+        let long_name: String = "a".repeat(64);
+        let original = NodeAnnounce {
+            node_id: NodeId::new(1),
+            name: heapless::String::try_from(long_name.as_str()).unwrap(),
+            publishes: heapless::Vec::new(),
+            serves: heapless::Vec::new(),
+        };
+
+        let encoded = minicbor::to_vec(&original).expect("encode failed");
+        let decoded: NodeAnnounce = minicbor::decode(&encoded).expect("decode failed");
+        assert_eq!(decoded, original);
+        assert_eq!(decoded.name.len(), 64);
+    }
+
+    #[test]
+    fn node_announce_only_publishes() {
+        let mut publishes = heapless::Vec::new();
+        publishes.push(42).unwrap();
+
+        let original = NodeAnnounce {
+            node_id: NodeId::new(7),
+            name: heapless::String::try_from("pub-only").unwrap(),
+            publishes,
+            serves: heapless::Vec::new(),
+        };
+
+        let encoded = minicbor::to_vec(&original).expect("encode failed");
+        let decoded: NodeAnnounce = minicbor::decode(&encoded).expect("decode failed");
+        assert_eq!(decoded, original);
+        assert_eq!(decoded.publishes.len(), 1);
+        assert!(decoded.serves.is_empty());
+    }
+
+    #[test]
+    fn node_announce_only_serves() {
+        let mut serves = heapless::Vec::new();
+        serves.push(99).unwrap();
+
+        let original = NodeAnnounce {
+            node_id: NodeId::new(8),
+            name: heapless::String::try_from("srv-only").unwrap(),
+            publishes: heapless::Vec::new(),
+            serves,
+        };
+
+        let encoded = minicbor::to_vec(&original).expect("encode failed");
+        let decoded: NodeAnnounce = minicbor::decode(&encoded).expect("decode failed");
+        assert_eq!(decoded, original);
+        assert!(decoded.publishes.is_empty());
+        assert_eq!(decoded.serves.len(), 1);
+    }
+
+    #[test]
+    fn node_announce_clone_and_debug() {
+        let original = NodeAnnounce {
+            node_id: NodeId::new(1),
+            name: heapless::String::try_from("debug").unwrap(),
+            publishes: heapless::Vec::new(),
+            serves: heapless::Vec::new(),
+        };
+        let cloned = original.clone();
+        assert_eq!(cloned, original);
+        let debug = format!("{:?}", original);
+        assert!(debug.contains("NodeAnnounce"));
+    }
+
+    #[test]
+    fn decode_ignores_unknown_keys() {
+        // Encode with an extra unknown key (99) that should be skipped
+        let mut buf = Vec::new();
+        let mut e = minicbor::Encoder::new(&mut buf);
+        e.map(5).unwrap();
+        e.u32(0).unwrap().encode(NodeId::new(1)).unwrap();
+        e.u32(1).unwrap().str("test").unwrap();
+        e.u32(2).unwrap().array(0).unwrap();
+        e.u32(3).unwrap().array(0).unwrap();
+        // Unknown key — should be skipped
+        e.u32(99).unwrap().str("ignored").unwrap();
+        drop(e);
+
+        let decoded: NodeAnnounce = minicbor::decode(&buf).expect("decode should skip unknown keys");
+        assert_eq!(decoded.node_id, NodeId::new(1));
+        assert_eq!(decoded.name.as_str(), "test");
+    }
+
+    #[test]
+    fn decode_missing_node_id_fails() {
+        // Map with name, publishes, serves but no node_id (key 0)
+        let mut buf = Vec::new();
+        let mut e = minicbor::Encoder::new(&mut buf);
+        e.map(3).unwrap();
+        e.u32(1).unwrap().str("test").unwrap();
+        e.u32(2).unwrap().array(0).unwrap();
+        e.u32(3).unwrap().array(0).unwrap();
+        drop(e);
+
+        let result = minicbor::decode::<NodeAnnounce>(&buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_missing_name_fails() {
+        let mut buf = Vec::new();
+        let mut e = minicbor::Encoder::new(&mut buf);
+        e.map(3).unwrap();
+        e.u32(0).unwrap().encode(NodeId::new(1)).unwrap();
+        e.u32(2).unwrap().array(0).unwrap();
+        e.u32(3).unwrap().array(0).unwrap();
+        drop(e);
+
+        let result = minicbor::decode::<NodeAnnounce>(&buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_missing_publishes_fails() {
+        let mut buf = Vec::new();
+        let mut e = minicbor::Encoder::new(&mut buf);
+        e.map(3).unwrap();
+        e.u32(0).unwrap().encode(NodeId::new(1)).unwrap();
+        e.u32(1).unwrap().str("test").unwrap();
+        e.u32(3).unwrap().array(0).unwrap();
+        drop(e);
+
+        let result = minicbor::decode::<NodeAnnounce>(&buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_missing_serves_fails() {
+        let mut buf = Vec::new();
+        let mut e = minicbor::Encoder::new(&mut buf);
+        e.map(3).unwrap();
+        e.u32(0).unwrap().encode(NodeId::new(1)).unwrap();
+        e.u32(1).unwrap().str("test").unwrap();
+        e.u32(2).unwrap().array(0).unwrap();
+        drop(e);
+
+        let result = minicbor::decode::<NodeAnnounce>(&buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_name_too_long_fails() {
+        let long_name = "a".repeat(65); // exceeds heapless::String<64>
+        let mut buf = Vec::new();
+        let mut e = minicbor::Encoder::new(&mut buf);
+        e.map(4).unwrap();
+        e.u32(0).unwrap().encode(NodeId::new(1)).unwrap();
+        e.u32(1).unwrap().str(&long_name).unwrap();
+        e.u32(2).unwrap().array(0).unwrap();
+        e.u32(3).unwrap().array(0).unwrap();
+        drop(e);
+
+        let result = minicbor::decode::<NodeAnnounce>(&buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_publishes_overflow_fails() {
+        // 17 items exceeds heapless::Vec capacity of 16
+        let mut buf = Vec::new();
+        let mut e = minicbor::Encoder::new(&mut buf);
+        e.map(4).unwrap();
+        e.u32(0).unwrap().encode(NodeId::new(1)).unwrap();
+        e.u32(1).unwrap().str("test").unwrap();
+        e.u32(2).unwrap().array(17).unwrap();
+        for i in 0..17u32 {
+            e.u32(i).unwrap();
+        }
+        e.u32(3).unwrap().array(0).unwrap();
+        drop(e);
+
+        let result = minicbor::decode::<NodeAnnounce>(&buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_serves_overflow_fails() {
+        let mut buf = Vec::new();
+        let mut e = minicbor::Encoder::new(&mut buf);
+        e.map(4).unwrap();
+        e.u32(0).unwrap().encode(NodeId::new(1)).unwrap();
+        e.u32(1).unwrap().str("test").unwrap();
+        e.u32(2).unwrap().array(0).unwrap();
+        e.u32(3).unwrap().array(17).unwrap();
+        for i in 0..17u32 {
+            e.u32(i).unwrap();
+        }
+        drop(e);
+
+        let result = minicbor::decode::<NodeAnnounce>(&buf);
+        assert!(result.is_err());
+    }
+}

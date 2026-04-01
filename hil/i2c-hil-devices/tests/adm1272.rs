@@ -124,6 +124,60 @@ fn limit_read_write() {
 }
 
 #[test]
+fn telemetry_temperature() {
+    let dev = Adm1272::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_read_temperature_1(0xBEEF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    let mut buf = [0u8; 2];
+    bus.write_read(ADDR, &[0x8D], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0xBEEF);
+}
+
+#[test]
+fn telemetry_pin() {
+    let dev = Adm1272::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_read_pin(0xCAFE);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    let mut buf = [0u8; 2];
+    bus.write_read(ADDR, &[0x97], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0xCAFE);
+}
+
+#[test]
+fn status_word_w1c_cascade_clears_vout() {
+    let dev = Adm1272::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_vout(0xFF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    // W1C STATUS_WORD high bit 7 (bit 15) should cascade to clear STATUS_VOUT
+    bus.write(ADDR, &[0x79, 0x00, 0x80]).unwrap();
+
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7A], &mut buf).unwrap();
+    assert_eq!(buf[0], 0x00);
+}
+
+#[test]
+fn status_word_w1c_cascade_clears_input() {
+    let dev = Adm1272::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_input(0xFF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    // W1C STATUS_WORD high bit 5 (bit 13) should cascade to clear STATUS_INPUT
+    bus.write(ADDR, &[0x79, 0x00, 0x20]).unwrap();
+
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7C], &mut buf).unwrap();
+    assert_eq!(buf[0], 0x00);
+}
+
+#[test]
 fn status_byte_w1c_cascade() {
     let dev = Adm1272::new(Address::new(ADDR).unwrap());
     let mut engine = PmBusEngine::new(dev);

@@ -101,7 +101,8 @@ fn ConfigFieldEditor(
                         }
                     />
                 </div>
-            }.into_any()
+            }
+            .into_any()
         }
         FieldKind::Int => {
             let key = field.key.clone();
@@ -122,7 +123,8 @@ fn ConfigFieldEditor(
                         }
                     />
                 </div>
-            }.into_any()
+            }
+            .into_any()
         }
         FieldKind::Text => {
             let key = field.key.clone();
@@ -140,7 +142,8 @@ fn ConfigFieldEditor(
                         }
                     />
                 </div>
-            }.into_any()
+            }
+            .into_any()
         }
         FieldKind::Bool => {
             let key = field.key.clone();
@@ -160,7 +163,8 @@ fn ConfigFieldEditor(
                         {label}
                     </label>
                 </div>
-            }.into_any()
+            }
+            .into_any()
         }
         FieldKind::Select(options) => {
             let key = field.key.clone();
@@ -183,7 +187,8 @@ fn ConfigFieldEditor(
                         }).collect_view()}
                     </select>
                 </div>
-            }.into_any()
+            }
+            .into_any()
         }
     }
 }

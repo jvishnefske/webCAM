@@ -541,4 +541,140 @@ mod tests {
         assert!((out[3].x - 4.0).abs() < 1e-10);
         assert!((out[3].y - 0.0).abs() < 1e-10);
     }
+
+    #[test]
+    fn test_empty_svg() {
+        let result = parse_svg("<svg></svg>");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("No paths found"));
+    }
+
+    #[test]
+    fn test_path_with_h_v_commands() {
+        let svg = r#"<svg><path d="M 0 0 H 10 V 10 h -10 v -10 Z"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0].closed);
+        // M + H + V + h + v = 5 points
+        assert_eq!(paths[0].points.len(), 5);
+    }
+
+    #[test]
+    fn test_path_with_cubic_bezier() {
+        let svg = r#"<svg><path d="M 0 0 C 1 2 3 2 4 0"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        // 1 (M) + 16 (C subdivision) = 17
+        assert_eq!(paths[0].points.len(), 17);
+    }
+
+    #[test]
+    fn test_path_with_relative_cubic() {
+        let svg = r#"<svg><path d="M 0 0 c 1 2 3 2 4 0"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].points.len(), 17);
+    }
+
+    #[test]
+    fn test_path_with_quadratic_bezier() {
+        let svg = r#"<svg><path d="M 0 0 Q 2 4 4 0"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        // 1 (M) + 16 (Q subdivision) = 17
+        assert_eq!(paths[0].points.len(), 17);
+    }
+
+    #[test]
+    fn test_path_with_relative_quadratic() {
+        let svg = r#"<svg><path d="M 0 0 q 2 4 4 0"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].points.len(), 17);
+    }
+
+    #[test]
+    fn test_extract_attr_single_quotes() {
+        let tag = "<path d='M 0 0 L 1 1'";
+        let result = extract_attr(tag, "d");
+        assert_eq!(result, Some("M 0 0 L 1 1".to_string()));
+    }
+
+    #[test]
+    fn test_extract_attr_missing() {
+        let tag = "<path class=\"test\"";
+        let result = extract_attr(tag, "d");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_parse_points_attr_odd_count() {
+        let result = parse_points_attr("10,20 30");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Odd number"));
+    }
+
+    #[test]
+    fn test_parse_points_attr_bad_number() {
+        let result = parse_points_attr("10,abc");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_read_one_end_of_data() {
+        let tokens: Vec<String> = vec![];
+        let mut i = 0;
+        let result = read_one(&tokens, &mut i);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unexpected end"));
+    }
+
+    #[test]
+    fn test_read_one_not_a_number() {
+        let tokens = vec!["abc".to_string()];
+        let mut i = 0;
+        let result = read_one(&tokens, &mut i);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Expected number"));
+    }
+
+    #[test]
+    fn test_tokenize_d_negative_numbers() {
+        let tokens = tokenize_d("M 0 0 L -5-3");
+        // Should split -5 and -3 as separate tokens
+        assert!(tokens.contains(&"-5".to_string()));
+        assert!(tokens.contains(&"-3".to_string()));
+    }
+
+    #[test]
+    fn test_zero_radius_circle_ignored() {
+        let svg = r#"<circle cx="5" cy="5" r="0"/>"#;
+        let circles = extract_circles(svg);
+        assert!(circles.is_empty());
+    }
+
+    #[test]
+    fn test_zero_size_rect_ignored() {
+        let svg = r#"<rect x="0" y="0" width="0" height="10"/>"#;
+        let rects = extract_rects(svg);
+        assert!(rects.is_empty());
+    }
+
+    #[test]
+    fn test_path_with_implicit_lineto_after_m() {
+        // After M, subsequent pairs are implicit L
+        let svg = r#"<svg><path d="M 0 0 5 0 5 5"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].points.len(), 3);
+    }
+
+    #[test]
+    fn test_is_number() {
+        assert!(is_number("3.14"));
+        assert!(is_number("-1"));
+        assert!(is_number("0"));
+        assert!(!is_number("M"));
+        assert!(!is_number("abc"));
+    }
 }

@@ -429,6 +429,52 @@ fn ina230_pointer_persists() {
 }
 
 #[test]
+fn power_zero_when_both_zero_but_cal_nonzero() {
+    // When shunt_voltage=0 and bus_voltage=0, power should be 0
+    // even if calibration is nonzero.
+    let dev = Ina230::new(addr());
+    let mut bus = SimBusBuilder::new().with_device(dev).build();
+    bus.write(0x40, &[0x05, 0x0A, 0x00]).unwrap(); // cal = 2560
+    assert_eq!(read_reg(&mut bus, 0x40, 0x03), 0);
+}
+
+#[test]
+fn current_truncation() {
+    // Verify that integer truncation works as expected.
+    // shunt=1, cal=1 -> (1 * 1) / 2048 = 0 (truncated)
+    let mut dev = Ina230::new(addr());
+    dev.set_shunt_voltage_raw(1);
+    let mut bus = SimBusBuilder::new().with_device(dev).build();
+    bus.write(0x40, &[0x05, 0x00, 0x01]).unwrap(); // cal = 1
+    assert_eq!(read_reg(&mut bus, 0x40, 0x04), 0);
+}
+
+#[test]
+fn reset_clears_injected_values() {
+    // After reset, shunt_voltage and bus_voltage should be zero
+    let mut dev = Ina230::new(addr());
+    dev.set_shunt_voltage_raw(5000);
+    dev.set_bus_voltage_raw(10000);
+    let mut bus = SimBusBuilder::new().with_device(dev).build();
+
+    // Trigger reset
+    bus.write(0x40, &[0x00, 0x80, 0x00]).unwrap();
+    assert_eq!(read_reg(&mut bus, 0x40, 0x01), 0);
+    assert_eq!(read_reg(&mut bus, 0x40, 0x02), 0);
+}
+
+#[test]
+fn write_and_read_mask_enable() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ina230::new(addr()))
+        .build();
+    bus.write(0x40, &[0x06, 0xFF, 0x00]).unwrap();
+    // First read returns what was written
+    let val = read_reg(&mut bus, 0x40, 0x06);
+    assert_eq!(val, 0xFF00);
+}
+
+#[test]
 fn ina230_read_repeats_msb_lsb() {
     let mut bus = SimBusBuilder::new()
         .with_device(Ina230::new(addr()))

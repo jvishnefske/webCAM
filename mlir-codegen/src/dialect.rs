@@ -9,6 +9,7 @@ pub const OP_CONSTANT: &str = "dataflow.constant";
 pub const OP_GAIN: &str = "dataflow.gain";
 pub const OP_ADD: &str = "dataflow.add";
 pub const OP_MUL: &str = "dataflow.mul";
+pub const OP_SUB: &str = "dataflow.subtract";
 pub const OP_CLAMP: &str = "dataflow.clamp";
 pub const OP_ADC_READ: &str = "dataflow.adc_read";
 pub const OP_PWM_WRITE: &str = "dataflow.pwm_write";
@@ -94,6 +95,22 @@ mod tests {
     #[test]
     fn i32_attr_format() {
         assert_eq!(i32_attr(7), "7 : i32");
+    }
+
+    #[test]
+    fn i64_attr_format() {
+        assert_eq!(i64_attr(42), "42 : i64");
+        assert_eq!(i64_attr(-1), "-1 : i64");
+    }
+
+    #[test]
+    fn string_attr_format() {
+        assert_eq!(string_attr("hello"), "\"hello\"");
+    }
+
+    #[test]
+    fn state_arg_returns_static_str() {
+        assert_eq!(state_arg(), "%state");
     }
 
     #[test]

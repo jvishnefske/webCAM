@@ -63,3 +63,56 @@ impl From<std::io::Error> for BackplaneError {
         Self::Transport(e)
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn display_all_variants() {
+        assert_eq!(
+            BackplaneError::InvalidEnvelope.to_string(),
+            "invalid envelope header"
+        );
+        assert_eq!(
+            BackplaneError::EncodeFailed.to_string(),
+            "CBOR encode failed"
+        );
+        assert_eq!(
+            BackplaneError::DecodeFailed.to_string(),
+            "CBOR decode failed"
+        );
+        assert_eq!(
+            BackplaneError::BufferTooSmall.to_string(),
+            "encode buffer too small"
+        );
+        assert_eq!(
+            BackplaneError::Timeout.to_string(),
+            "request timed out"
+        );
+
+        let io_err = std::io::Error::other("test");
+        let transport_err = BackplaneError::Transport(io_err);
+        assert!(transport_err.to_string().contains("transport error"));
+    }
+
+    #[test]
+    fn error_source_transport() {
+        let io_err = std::io::Error::other("inner");
+        let bp_err = BackplaneError::Transport(io_err);
+        assert!(std::error::Error::source(&bp_err).is_some());
+    }
+
+    #[test]
+    fn error_source_non_transport() {
+        assert!(std::error::Error::source(&BackplaneError::Timeout).is_none());
+    }
+
+    #[test]
+    fn from_io_error() {
+        let io_err = std::io::Error::other("broken");
+        let bp_err: BackplaneError = io_err.into();
+        assert!(matches!(bp_err, BackplaneError::Transport(_)));
+    }
+}

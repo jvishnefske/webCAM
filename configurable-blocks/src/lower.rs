@@ -69,7 +69,9 @@ pub fn lower_to_il_text(block: &dyn ConfigurableBlock) -> Result<String, String>
     text.push_str(&format!("block @{} {{\n", block.block_type()));
 
     // Inputs
-    let inputs: Vec<_> = block.declared_channels().into_iter()
+    let inputs: Vec<_> = block
+        .declared_channels()
+        .into_iter()
         .filter(|ch| ch.direction == ChannelDirection::Input)
         .collect();
     if !inputs.is_empty() {
@@ -79,12 +81,17 @@ pub fn lower_to_il_text(block: &dyn ConfigurableBlock) -> Result<String, String>
                 ChannelKind::PubSub => "pubsub",
                 ChannelKind::Hardware => "hw",
             };
-            text.push_str(&format!("  //   {} \"{}\" ({})\n", kind_label, ch.name, "in"));
+            text.push_str(&format!(
+                "  //   {} \"{}\" ({})\n",
+                kind_label, ch.name, "in"
+            ));
         }
     }
 
     // Outputs
-    let outputs: Vec<_> = block.declared_channels().into_iter()
+    let outputs: Vec<_> = block
+        .declared_channels()
+        .into_iter()
         .filter(|ch| ch.direction == ChannelDirection::Output)
         .collect();
     if !outputs.is_empty() {
@@ -94,7 +101,10 @@ pub fn lower_to_il_text(block: &dyn ConfigurableBlock) -> Result<String, String>
                 ChannelKind::PubSub => "pubsub",
                 ChannelKind::Hardware => "hw",
             };
-            text.push_str(&format!("  //   {} \"{}\" ({})\n", kind_label, ch.name, "out"));
+            text.push_str(&format!(
+                "  //   {} \"{}\" ({})\n",
+                kind_label, ch.name, "out"
+            ));
         }
     }
 

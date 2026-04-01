@@ -912,6 +912,102 @@ mod tests {
     }
 
     #[test]
+    fn test_stub_dfu_writer() {
+        let mut stub = StubDfuWriter::new();
+        assert!(stub.erase_dfu().is_err());
+        assert!(stub.write_dfu(0, &[1, 2, 3]).is_err());
+        let mut buf = [0u8; 4];
+        assert!(stub.read_dfu(0, &mut buf).is_err());
+        assert!(stub.mark_updated().is_err());
+        // mark_booted succeeds on StubDfuWriter
+        assert!(stub.mark_booted().is_ok());
+    }
+
+    #[test]
+    fn test_stub_dfu_writer_default() {
+        let stub = StubDfuWriter;
+        // default and new produce the same thing
+        let _stub2 = stub;
+    }
+
+    #[test]
+    fn test_handle_fw_request_invalid_tag() {
+        let mut writer = MockDfuWriter::new();
+        // Craft a CBOR message with an unsupported tag (99)
+        let mut req_buf = [0u8; 64];
+        let buf_len = req_buf.len();
+        let mut w: &mut [u8] = &mut req_buf;
+        let mut enc = minicbor::Encoder::new(&mut w);
+        enc.map(1).unwrap();
+        enc.u32(0).unwrap();
+        enc.u32(99).unwrap();
+        drop(enc);
+        let remaining = w.len();
+        let req_len = buf_len - remaining;
+
+        let mut resp_buf = [0u8; 64];
+        let result = handle_fw_request(
+            FwUpdateState::Idle,
+            &mut writer,
+            &req_buf[..req_len],
+            &mut resp_buf,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fw_chunk_not_from_idle() {
+        let mut writer = MockDfuWriter::new();
+        let mut req_buf = [0u8; 512];
+        let req_len = encode_fw_chunk(&mut req_buf, 0, &[0xAA; 10]).unwrap();
+
+        let mut resp_buf = [0u8; 64];
+        let result = handle_fw_request(
+            FwUpdateState::Idle,
+            &mut writer,
+            &req_buf[..req_len],
+            &mut resp_buf,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fw_finish_not_from_idle() {
+        let mut writer = MockDfuWriter::new();
+        let mut req_buf = [0u8; 64];
+        let req_len = encode_fw_finish(&mut req_buf, 0).unwrap();
+
+        let mut resp_buf = [0u8; 64];
+        let result = handle_fw_request(
+            FwUpdateState::Idle,
+            &mut writer,
+            &req_buf[..req_len],
+            &mut resp_buf,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fw_mark_booted_from_complete() {
+        let mut writer = MockDfuWriter::new();
+        let mut req_buf = [0u8; 64];
+        let req_len = encode_fw_mark_booted(&mut req_buf).unwrap();
+
+        let mut resp_buf = [0u8; 64];
+        let (state, n) = handle_fw_request(
+            FwUpdateState::Complete,
+            &mut writer,
+            &req_buf[..req_len],
+            &mut resp_buf,
+        )
+        .unwrap();
+
+        assert!(writer.marked_booted);
+        assert_eq!(decode_tag(&resp_buf[..n]), 23);
+        assert!(matches!(state, FwUpdateState::Complete));
+    }
+
+    #[test]
     fn test_crc32_known_value() {
         // CRC32 of "123456789" is 0xCBF43926
         let data = b"123456789";

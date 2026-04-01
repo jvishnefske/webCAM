@@ -67,6 +67,12 @@ mod tests {
     }
 
     #[test]
+    fn test_map_channels_default_trait() {
+        let ch = MapChannels::default();
+        assert_eq!(ch.get("x"), 0.0);
+    }
+
+    #[test]
     fn test_map_channels_reader_writer() {
         let mut ch = MapChannels::new();
         let writer: &mut dyn ChannelWriter = &mut ch;

@@ -6,10 +6,10 @@ use std::rc::Rc;
 use leptos::prelude::*;
 
 use crate::backoff;
-use crate::messages::{BusEntry, Request, Response};
-use crate::ws_client::{self, ConnState};
 use crate::components::header::Header;
 use crate::components::tab_bar::TabBar;
+use crate::messages::{BusEntry, Request, Response};
+use crate::ws_client::{self, ConnState};
 
 // ---------------------------------------------------------------------------
 // Tab enum
@@ -103,37 +103,39 @@ pub fn App() -> impl IntoView {
 
     // -- Response handler --
     let handle_response = {
-        move |resp: Response| {
-            match &resp {
-                Response::BusList { buses: b } => set_buses.set(b.clone()),
-                Response::Telemetry { temps: t, power: p, fans: f } => {
-                    set_temps.set(t.clone());
-                    set_power.set(p.clone());
-                    set_fans.set(f.clone());
-                }
-                Response::I2cData { data } => {
-                    let hex: Vec<String> = data.iter().map(|b| format!("{b:02X}")).collect();
-                    set_console_log.update(|log| {
-                        log.push(format!("[RESP] data: {}", hex.join(" ")));
-                    });
-                }
-                Response::WriteOk => {
-                    set_console_log.update(|log| {
-                        log.push("[RESP] Write OK".to_string());
-                    });
-                }
-                Response::Error { message: msg } => {
-                    set_console_log.update(|log| {
-                        log.push(format!("[ERR] {msg}"));
-                    });
-                    set_fw_response.set(Some(resp.clone()));
-                }
-                Response::FwReady { .. }
-                | Response::FwChunkAck { .. }
-                | Response::FwFinishAck
-                | Response::FwMarkBootedAck => {
-                    set_fw_response.set(Some(resp.clone()));
-                }
+        move |resp: Response| match &resp {
+            Response::BusList { buses: b } => set_buses.set(b.clone()),
+            Response::Telemetry {
+                temps: t,
+                power: p,
+                fans: f,
+            } => {
+                set_temps.set(t.clone());
+                set_power.set(p.clone());
+                set_fans.set(f.clone());
+            }
+            Response::I2cData { data } => {
+                let hex: Vec<String> = data.iter().map(|b| format!("{b:02X}")).collect();
+                set_console_log.update(|log| {
+                    log.push(format!("[RESP] data: {}", hex.join(" ")));
+                });
+            }
+            Response::WriteOk => {
+                set_console_log.update(|log| {
+                    log.push("[RESP] Write OK".to_string());
+                });
+            }
+            Response::Error { message: msg } => {
+                set_console_log.update(|log| {
+                    log.push(format!("[ERR] {msg}"));
+                });
+                set_fw_response.set(Some(resp.clone()));
+            }
+            Response::FwReady { .. }
+            | Response::FwChunkAck { .. }
+            | Response::FwFinishAck
+            | Response::FwMarkBootedAck => {
+                set_fw_response.set(Some(resp.clone()));
             }
         }
     };

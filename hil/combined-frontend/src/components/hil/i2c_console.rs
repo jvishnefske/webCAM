@@ -1,9 +1,9 @@
 //! I2C console — manual read/write with log output.
 
-use leptos::prelude::*;
 use crate::app::AppContext;
 use crate::hex;
 use crate::messages::Request;
+use leptos::prelude::*;
 
 #[component]
 pub fn I2cConsole() -> impl IntoView {
@@ -25,15 +25,26 @@ pub fn I2cConsole() -> impl IntoView {
         let bus: u8 = read_bus.get().parse().unwrap_or(0);
         let addr = match hex::parse_hex_u8(&read_addr.get()) {
             Some(a) => a,
-            None => { set_form_error.set("Invalid address".into()); return; }
+            None => {
+                set_form_error.set("Invalid address".into());
+                return;
+            }
         };
         let reg = match hex::parse_hex_u8(&read_reg.get()) {
             Some(r) => r,
-            None => { set_form_error.set("Invalid register".into()); return; }
+            None => {
+                set_form_error.set("Invalid register".into());
+                return;
+            }
         };
         let len: u8 = read_len.get().parse().unwrap_or(1);
         set_form_error.set(String::new());
-        ctx_read.send_logged(Request::I2cRead { bus, addr, reg, len });
+        ctx_read.send_logged(Request::I2cRead {
+            bus,
+            addr,
+            reg,
+            len,
+        });
     };
 
     let ctx_write = ctx.clone();
@@ -41,11 +52,17 @@ pub fn I2cConsole() -> impl IntoView {
         let bus: u8 = write_bus.get().parse().unwrap_or(0);
         let addr = match hex::parse_hex_u8(&write_addr.get()) {
             Some(a) => a,
-            None => { set_form_error.set("Invalid address".into()); return; }
+            None => {
+                set_form_error.set("Invalid address".into());
+                return;
+            }
         };
         let data = match hex::parse_hex_bytes(&write_data.get()) {
             Some(d) => d,
-            None => { set_form_error.set("Invalid hex data".into()); return; }
+            None => {
+                set_form_error.set("Invalid hex data".into());
+                return;
+            }
         };
         set_form_error.set(String::new());
         ctx_write.send_logged(Request::I2cWrite { bus, addr, data });

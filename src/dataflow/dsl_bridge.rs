@@ -440,4 +440,98 @@ mod tests {
         assert_eq!(json["channel"], 0);
         assert_eq!(json["frequency"], 1000);
     }
+
+    #[test]
+    fn parse_target_family_all_variants() {
+        assert_eq!(parse_target_family("host"), Some(TargetFamily::Host));
+        assert_eq!(parse_target_family("rp2040"), Some(TargetFamily::Rp2040));
+        assert_eq!(parse_target_family("stm32f4"), Some(TargetFamily::Stm32f4));
+        assert_eq!(parse_target_family("esp32c3"), Some(TargetFamily::Esp32c3));
+        assert_eq!(
+            parse_target_family("stm32g0b1"),
+            Some(TargetFamily::Stm32g0b1)
+        );
+        assert_eq!(parse_target_family("unknown"), None);
+    }
+
+    #[test]
+    fn inject_defaults_gain() {
+        let mut map = serde_json::Map::new();
+        inject_defaults("gain", &mut map);
+        assert_eq!(map["op"], "Gain");
+        assert!(map.contains_key("param1"));
+        assert!(map.contains_key("param2"));
+    }
+
+    #[test]
+    fn inject_defaults_clamp() {
+        let mut map = serde_json::Map::new();
+        inject_defaults("clamp", &mut map);
+        assert_eq!(map["op"], "Clamp");
+    }
+
+    #[test]
+    fn inject_defaults_adc_source() {
+        let mut map = serde_json::Map::new();
+        inject_defaults("adc_source", &mut map);
+        assert_eq!(map["resolution_bits"], 12);
+    }
+
+    #[test]
+    fn inject_defaults_pwm_sink() {
+        let mut map = serde_json::Map::new();
+        inject_defaults("pwm_sink", &mut map);
+        assert_eq!(map["frequency_hz"], 1000);
+    }
+
+    #[test]
+    fn inject_defaults_no_overwrite() {
+        let mut map = serde_json::Map::new();
+        map.insert("op".into(), serde_json::json!("Custom"));
+        inject_defaults("gain", &mut map);
+        assert_eq!(map["op"], "Custom"); // should not overwrite
+    }
+
+    #[test]
+    fn positional_to_json_plot() {
+        let args = vec![parser::ast::Value::Int(500)];
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("plot", &args)).unwrap();
+        assert_eq!(json["max_samples"], 500);
+    }
+
+    #[test]
+    fn positional_to_json_adc_source() {
+        let args = vec![parser::ast::Value::Int(3)];
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("adc_source", &args)).unwrap();
+        assert_eq!(json["channel"], 3);
+        assert_eq!(json["resolution_bits"], 12);
+    }
+
+    #[test]
+    fn positional_to_json_pwm_sink() {
+        let args = vec![parser::ast::Value::Int(2)];
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("pwm_sink", &args)).unwrap();
+        assert_eq!(json["channel"], 2);
+        assert_eq!(json["frequency_hz"], 1000);
+    }
+
+    #[test]
+    fn config_to_json_empty() {
+        let config = parser::ast::Config::Empty;
+        let json = config_to_json("test", &config);
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn config_to_json_structured() {
+        let config = parser::ast::Config::Structured(vec![
+            ("key".into(), parser::ast::Value::Float(1.5)),
+        ]);
+        let json: serde_json::Value =
+            serde_json::from_str(&config_to_json("test", &config)).unwrap();
+        assert_eq!(json["key"], 1.5);
+    }
 }

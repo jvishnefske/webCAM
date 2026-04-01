@@ -1,4 +1,3 @@
-
 use combined_frontend::app::App;
 use leptos::mount::mount_to_body;
 

@@ -129,6 +129,21 @@ mod tests {
     }
 
     #[test]
+    fn test_null_channels_writer() {
+        let mut nc = NullChannels;
+        // NullChannels::write should be a no-op and not panic
+        ChannelWriter::write(&mut nc, "anything", 42.0);
+        assert_eq!(ChannelReader::read(&nc, "anything"), 0.0);
+    }
+
+    #[test]
+    fn test_null_pubsub_writer() {
+        let mut ps = NullPubSub;
+        PubSubWriter::write(&mut ps, "topic", 99.0);
+        assert_eq!(PubSubReader::read(&ps, "topic"), 0.0);
+    }
+
+    #[test]
     fn test_eval_const() {
         let mut dag = Dag::new();
         dag.constant(42.0).unwrap();

@@ -192,4 +192,237 @@ mod tests {
         assert_eq!(rb.get(0), None);
         assert_eq!(rb.iter().count(), 0);
     }
+
+    // --- Mock Peripherals ---
+
+    struct MockPeripherals {
+        adc_values: [f32; 4],
+        pwm_duties: [f32; 4],
+        gpio_pins: [bool; 8],
+    }
+
+    impl MockPeripherals {
+        fn new() -> Self {
+            Self {
+                adc_values: [0.0; 4],
+                pwm_duties: [0.0; 4],
+                gpio_pins: [false; 8],
+            }
+        }
+    }
+
+    impl Peripherals for MockPeripherals {
+        fn adc_read(&mut self, channel: u8) -> f32 {
+            self.adc_values[channel as usize]
+        }
+        fn pwm_write(&mut self, channel: u8, duty: f32) {
+            self.pwm_duties[channel as usize] = duty;
+        }
+        fn gpio_read(&self, pin: u8) -> bool {
+            self.gpio_pins[pin as usize]
+        }
+        fn gpio_write(&mut self, pin: u8, high: bool) {
+            self.gpio_pins[pin as usize] = high;
+        }
+        fn uart_write(&mut self, _port: u8, _data: &[u8]) {}
+        fn uart_read(&mut self, _port: u8, _buf: &mut [u8]) -> usize {
+            0
+        }
+    }
+
+    // --- Peripherals trait tests ---
+
+    #[test]
+    fn test_peripherals_mock_adc_read() {
+        let mut p = MockPeripherals::new();
+        p.adc_values[0] = 0.5;
+        p.adc_values[2] = 0.75;
+        assert!((p.adc_read(0) - 0.5).abs() < f32::EPSILON);
+        assert!((p.adc_read(1) - 0.0).abs() < f32::EPSILON);
+        assert!((p.adc_read(2) - 0.75).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_peripherals_mock_pwm_write() {
+        let mut p = MockPeripherals::new();
+        p.pwm_write(1, 0.33);
+        p.pwm_write(3, 0.99);
+        assert!((p.pwm_duties[1] - 0.33).abs() < f32::EPSILON);
+        assert!((p.pwm_duties[3] - 0.99).abs() < f32::EPSILON);
+        // Channels not written remain at zero.
+        assert!((p.pwm_duties[0] - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_peripherals_mock_gpio() {
+        let mut p = MockPeripherals::new();
+        assert!(!p.gpio_read(3));
+        p.gpio_write(3, true);
+        assert!(p.gpio_read(3));
+        p.gpio_write(3, false);
+        assert!(!p.gpio_read(3));
+    }
+
+    #[test]
+    fn test_peripherals_default_encoder_read() {
+        let mut p = MockPeripherals::new();
+        assert_eq!(p.encoder_read(0), 0);
+        assert_eq!(p.encoder_read(1), 0);
+    }
+
+    #[test]
+    fn test_peripherals_default_stepper_position() {
+        let p = MockPeripherals::new();
+        assert_eq!(p.stepper_position(0), 0);
+        assert_eq!(p.stepper_position(2), 0);
+    }
+
+    #[test]
+    fn test_peripherals_default_stallguard_read() {
+        let mut p = MockPeripherals::new();
+        assert_eq!(p.stallguard_read(0, 0), 0);
+        assert_eq!(p.stallguard_read(1, 3), 0);
+    }
+
+    #[test]
+    fn test_peripherals_default_display_write() {
+        let mut p = MockPeripherals::new();
+        // display_write has a default no-op implementation -- should not panic
+        p.display_write(0, 0x3C, "line1", "line2");
+    }
+
+    #[test]
+    fn test_peripherals_default_stepper_move() {
+        let mut p = MockPeripherals::new();
+        // stepper_move has a default no-op implementation -- should not panic
+        p.stepper_move(0, 1000);
+    }
+
+    #[test]
+    fn test_peripherals_default_stepper_enable() {
+        let mut p = MockPeripherals::new();
+        // stepper_enable has a default no-op implementation -- should not panic
+        p.stepper_enable(0, true);
+        p.stepper_enable(0, false);
+    }
+
+    #[test]
+    fn test_peripherals_uart_ops() {
+        let mut p = MockPeripherals::new();
+        p.uart_write(0, &[0x01, 0x02]);
+        let mut buf = [0u8; 4];
+        let n = p.uart_read(0, &mut buf);
+        assert_eq!(n, 0);
+    }
+
+    // --- Block trait tests ---
+
+    struct Gain {
+        factor: f32,
+    }
+
+    impl Block for Gain {
+        type Input = f32;
+        type Output = f32;
+
+        fn tick(&mut self, input: Self::Input, _dt: f32) -> Self::Output {
+            input * self.factor
+        }
+    }
+
+    #[test]
+    fn test_block_gain() {
+        let mut g = Gain { factor: 2.5 };
+        let out = g.tick(4.0, 0.01);
+        assert!((out - 10.0).abs() < f32::EPSILON);
+        let out2 = g.tick(0.0, 0.01);
+        assert!((out2 - 0.0).abs() < f32::EPSILON);
+        let out3 = g.tick(-3.0, 0.01);
+        assert!((out3 - -7.5).abs() < f32::EPSILON);
+    }
+
+    struct Integrator {
+        accumulator: f32,
+    }
+
+    impl Block for Integrator {
+        type Input = f32;
+        type Output = f32;
+
+        fn tick(&mut self, input: Self::Input, dt: f32) -> Self::Output {
+            self.accumulator += input * dt;
+            self.accumulator
+        }
+    }
+
+    #[test]
+    fn test_block_integrator() {
+        let mut integ = Integrator { accumulator: 0.0 };
+        // Constant input of 10.0 over 0.1s per tick for 5 ticks = 5.0
+        let dt = 0.1;
+        for _ in 0..5 {
+            integ.tick(10.0, dt);
+        }
+        assert!((integ.accumulator - 5.0).abs() < 1e-5);
+        // One more tick with different input
+        let out = integ.tick(-20.0, 0.1);
+        assert!((out - 3.0).abs() < 1e-5);
+    }
+
+    // --- Additional RingBuffer tests ---
+
+    #[test]
+    fn test_ring_buffer_single_element() {
+        let mut rb = RingBuffer::<1>::new();
+        assert!(rb.is_empty());
+        rb.push(42.0);
+        assert_eq!(rb.len(), 1);
+        assert_eq!(rb.get(0), Some(42.0));
+        // Pushing again overwrites the single slot.
+        rb.push(99.0);
+        assert_eq!(rb.len(), 1);
+        assert_eq!(rb.get(0), Some(99.0));
+        // Old value is gone.
+        assert_eq!(rb.get(1), None);
+    }
+
+    #[test]
+    fn test_ring_buffer_exact_capacity() {
+        let mut rb = RingBuffer::<5>::new();
+        for i in 0..5 {
+            rb.push(i as f32);
+        }
+        assert_eq!(rb.len(), 5);
+        for i in 0..5 {
+            assert_eq!(rb.get(i), Some(i as f32));
+        }
+        assert_eq!(rb.get(5), None);
+    }
+
+    #[test]
+    fn test_ring_buffer_iter_exact_size() {
+        let mut rb = RingBuffer::<4>::new();
+        rb.push(1.0);
+        rb.push(2.0);
+        rb.push(3.0);
+        let mut it = rb.iter();
+        assert_eq!(it.len(), 3);
+        it.next();
+        assert_eq!(it.len(), 2);
+        it.next();
+        assert_eq!(it.len(), 1);
+        it.next();
+        assert_eq!(it.len(), 0);
+        assert!(it.next().is_none());
+    }
+
+    #[test]
+    fn test_ring_buffer_default_trait() {
+        let from_default = RingBuffer::<4>::default();
+        let from_new = RingBuffer::<4>::new();
+        assert_eq!(from_default.len(), from_new.len());
+        assert_eq!(from_default.is_empty(), from_new.is_empty());
+        assert_eq!(from_default.buf, from_new.buf);
+        assert_eq!(from_default.head, from_new.head);
+    }
 }

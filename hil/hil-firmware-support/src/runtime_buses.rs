@@ -205,6 +205,35 @@ mod tests {
     }
 
     #[test]
+    fn runtime_bus_set_remove_device() {
+        let mut buses = RuntimeBusSet::<4, 8>::new();
+        buses.set_bus_count(1).unwrap();
+        buses.add_device(0, 0x48, b"TMP", &[]).unwrap();
+        assert_eq!(buses.device_count(0), 1);
+        buses.remove_device(0, 0x48).unwrap();
+        assert_eq!(buses.device_count(0), 0);
+    }
+
+    #[test]
+    fn runtime_bus_set_set_and_read_registers() {
+        let mut buses = RuntimeBusSet::<4, 8>::new();
+        buses.set_bus_count(1).unwrap();
+        buses.add_device(0, 0x48, b"REG", &[0; 256]).unwrap();
+        buses.set_registers(0, 0x48, 5, &[0xAB, 0xCD]).unwrap();
+        let regs = buses.device_registers(0, 0x48).unwrap();
+        assert_eq!(regs[5], 0xAB);
+        assert_eq!(regs[6], 0xCD);
+    }
+
+    #[test]
+    fn runtime_bus_set_device_registers_out_of_range() {
+        let mut buses = RuntimeBusSet::<4, 8>::new();
+        buses.set_bus_count(1).unwrap();
+        assert!(buses.device_registers(0, 0x99).is_none());
+        assert!(buses.device_registers(99, 0x48).is_none());
+    }
+
+    #[test]
     fn runtime_bus_set_handle_request_list_buses() {
         let mut buses = RuntimeBusSet::<4, 8>::new();
         buses.set_bus_count(2).unwrap();

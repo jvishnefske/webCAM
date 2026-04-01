@@ -13,7 +13,9 @@ struct MapPubSub {
 
 impl MapPubSub {
     fn new() -> Self {
-        Self { topics: HashMap::new() }
+        Self {
+            topics: HashMap::new(),
+        }
     }
 }
 

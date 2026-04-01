@@ -1,8 +1,8 @@
 //! Telemetry panel — temperature, power, and fan readings.
 
-use leptos::prelude::*;
 use crate::app::AppContext;
 use crate::messages::Request;
+use leptos::prelude::*;
 
 fn raw_to_milli_celsius(raw: i32) -> f64 {
     raw as f64 * 62.5 / 1000.0

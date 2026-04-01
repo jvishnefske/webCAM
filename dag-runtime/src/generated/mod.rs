@@ -17,3 +17,17 @@ pub fn lookup(path: &str) -> Option<(&'static [u8], &'static str)> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lookup_returns_none_for_empty_assets() {
+        // With placeholder (empty) assets, all paths return None
+        assert!(lookup("/").is_none());
+        assert!(lookup("/index.html").is_none());
+        assert!(lookup("/dag-editor.js").is_none());
+        assert!(lookup("/unknown").is_none());
+    }
+}

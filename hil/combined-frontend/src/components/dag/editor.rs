@@ -7,8 +7,8 @@ use configurable_blocks::lower;
 use configurable_blocks::registry;
 use configurable_blocks::schema::ChannelDirection;
 
-use super::palette::BlockPalette;
 use super::config_panel::ConfigPanel;
+use super::palette::BlockPalette;
 
 /// Instance of a placed block on the canvas.
 #[derive(Clone)]
@@ -74,14 +74,17 @@ pub fn DagEditorPanel() -> impl IntoView {
         match blks.iter().find(|b| b.id == sel) {
             Some(pb) => {
                 let chs = pb.block.borrow().declared_channels();
-                chs.iter().map(|ch| {
-                    let dir = match ch.direction {
-                        ChannelDirection::Input => "IN",
-                        ChannelDirection::Output => "OUT",
-                    };
-                    let kind = format!("{:?}", ch.kind).to_lowercase();
-                    format!("{} {} [{}]", dir, ch.name, kind)
-                }).collect::<Vec<_>>().join("\n")
+                chs.iter()
+                    .map(|ch| {
+                        let dir = match ch.direction {
+                            ChannelDirection::Input => "IN",
+                            ChannelDirection::Output => "OUT",
+                        };
+                        let kind = format!("{:?}", ch.kind).to_lowercase();
+                        format!("{} {} [{}]", dir, ch.name, kind)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
             }
             None => String::new(),
         }
@@ -96,8 +99,7 @@ pub fn DagEditorPanel() -> impl IntoView {
         match blks.iter().find(|b| b.id == sel) {
             Some(pb) => {
                 let borrow = pb.block.borrow();
-                lower::lower_to_il_text(borrow.as_ref())
-                    .unwrap_or_else(|e| format!("Error: {}", e))
+                lower::lower_to_il_text(borrow.as_ref()).unwrap_or_else(|e| format!("Error: {}", e))
             }
             None => String::new(),
         }
@@ -137,9 +139,9 @@ pub fn DagEditorPanel() -> impl IntoView {
             if let Some(pb) = blks.iter().find(|b| b.id == sel) {
                 let mut partial = serde_json::Map::new();
                 partial.insert(key, value);
-                pb.block.borrow_mut().apply_config(
-                    &serde_json::Value::Object(partial),
-                );
+                pb.block
+                    .borrow_mut()
+                    .apply_config(&serde_json::Value::Object(partial));
             }
         });
     });
@@ -186,7 +188,11 @@ pub fn DagEditorPanel() -> impl IntoView {
         let node_count = combined.len();
 
         // POST to MCU via fetch API
-        set_deploy_status.set(format!("Deploying {} nodes ({} bytes)...", node_count, cbor_bytes.len()));
+        set_deploy_status.set(format!(
+            "Deploying {} nodes ({} bytes)...",
+            node_count,
+            cbor_bytes.len()
+        ));
 
         let status_setter = set_deploy_status;
         wasm_bindgen_futures::spawn_local(async move {
@@ -320,21 +326,25 @@ async fn deploy_to_mcu(cbor_bytes: &[u8]) -> Result<String, String> {
     opts.set_body(&array.into());
 
     let headers = web_sys::Headers::new().map_err(|e| format!("{:?}", e))?;
-    headers.set("Content-Type", "application/cbor").map_err(|e| format!("{:?}", e))?;
+    headers
+        .set("Content-Type", "application/cbor")
+        .map_err(|e| format!("{:?}", e))?;
     opts.set_headers(&headers);
 
     let url = "http://169.254.1.61:8080/api/dag";
-    let request = web_sys::Request::new_with_str_and_init(url, &opts)
-        .map_err(|e| format!("{:?}", e))?;
+    let request =
+        web_sys::Request::new_with_str_and_init(url, &opts).map_err(|e| format!("{:?}", e))?;
 
     let resp_value = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&request))
         .await
         .map_err(|e| format!("{:?}", e))?;
 
-    let resp: web_sys::Response = resp_value.dyn_into().map_err(|_| "not a Response".to_string())?;
-    let text = wasm_bindgen_futures::JsFuture::from(
-        resp.text().map_err(|e| format!("{:?}", e))?
-    ).await.map_err(|e| format!("{:?}", e))?;
+    let resp: web_sys::Response = resp_value
+        .dyn_into()
+        .map_err(|_| "not a Response".to_string())?;
+    let text = wasm_bindgen_futures::JsFuture::from(resp.text().map_err(|e| format!("{:?}", e))?)
+        .await
+        .map_err(|e| format!("{:?}", e))?;
 
     Ok(text.as_string().unwrap_or_default())
 }
@@ -347,17 +357,19 @@ async fn tick_mcu() -> Result<String, String> {
     opts.set_method("POST");
 
     let url = "http://169.254.1.61:8080/api/tick";
-    let request = web_sys::Request::new_with_str_and_init(url, &opts)
-        .map_err(|e| format!("{:?}", e))?;
+    let request =
+        web_sys::Request::new_with_str_and_init(url, &opts).map_err(|e| format!("{:?}", e))?;
 
     let resp_value = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&request))
         .await
         .map_err(|e| format!("{:?}", e))?;
 
-    let resp: web_sys::Response = resp_value.dyn_into().map_err(|_| "not a Response".to_string())?;
-    let text = wasm_bindgen_futures::JsFuture::from(
-        resp.text().map_err(|e| format!("{:?}", e))?
-    ).await.map_err(|e| format!("{:?}", e))?;
+    let resp: web_sys::Response = resp_value
+        .dyn_into()
+        .map_err(|_| "not a Response".to_string())?;
+    let text = wasm_bindgen_futures::JsFuture::from(resp.text().map_err(|e| format!("{:?}", e))?)
+        .await
+        .map_err(|e| format!("{:?}", e))?;
 
     Ok(text.as_string().unwrap_or_default())
 }

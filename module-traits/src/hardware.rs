@@ -1383,6 +1383,164 @@ mod tests {
     }
 
     #[test]
+    fn extract_all_peripheral_block_types() {
+        use alloc::vec;
+        let empty = serde_json::json!({});
+        let ch0 = serde_json::json!({"channel": 0});
+        let port0 = serde_json::json!({"port": 0});
+        let pin0 = serde_json::json!({"pin": 0});
+        let display = serde_json::json!({"i2c_bus": 0, "address": 60});
+        let stepper = serde_json::json!({"uart_port": 0});
+        let stallguard = serde_json::json!({"uart_port": 0, "uart_addr": 1});
+        let blocks: Vec<(u32, &str, &str, &serde_json::Value)> = vec![
+            (1, "adc", "adc_source", &ch0),
+            (2, "pwm", "pwm_sink", &ch0),
+            (3, "gout", "gpio_out", &pin0),
+            (4, "gin", "gpio_in", &pin0),
+            (5, "utx", "uart_tx", &port0),
+            (6, "urx", "uart_rx", &port0),
+            (7, "enc", "encoder", &ch0),
+            (8, "disp", "ssd1306_display", &display),
+            (9, "step", "tmc2209_stepper", &stepper),
+            (10, "sg", "tmc2209_stallguard", &stallguard),
+            (11, "const", "constant", &empty),
+        ];
+        let reqs = extract_requirements(&blocks);
+        // 10 peripheral block types, 1 non-peripheral (constant is ignored)
+        assert_eq!(reqs.requirements.len(), 10);
+    }
+
+    #[test]
+    fn validate_uart_assignment() {
+        let reqs = RequirementSet {
+            requirements: alloc::vec![RequirementEntry {
+                block_id: 1,
+                block_name: String::from("uart"),
+                requirement: PeripheralRequirement::Uart {
+                    logical_port: 0,
+                    direction: UartDirection::Tx,
+                },
+            }],
+        };
+        let caps = rp2040_capabilities();
+        let config = HardwareConfig {
+            family: String::from("Rp2040"),
+            assignments: alloc::vec![PinAssignment::Uart {
+                logical_port: 0,
+                tx_pin: String::from("GP0"),
+                rx_pin: String::from("GP1"),
+                peripheral: String::from("UART0"),
+            }],
+        };
+        assert!(validate_config(&reqs, &caps, &config).is_ok());
+    }
+
+    #[test]
+    fn validate_encoder_assignment() {
+        let reqs = RequirementSet {
+            requirements: alloc::vec![RequirementEntry {
+                block_id: 1,
+                block_name: String::from("enc"),
+                requirement: PeripheralRequirement::Encoder { logical_channel: 0 },
+            }],
+        };
+        let caps = stm32f4_capabilities();
+        let config = HardwareConfig {
+            family: String::from("Stm32f4"),
+            assignments: alloc::vec![PinAssignment::Encoder {
+                logical_channel: 0,
+                pin_a: String::from("PA0"),
+                pin_b: String::from("PA1"),
+                timer: String::from("TIM2"),
+            }],
+        };
+        assert!(validate_config(&reqs, &caps, &config).is_ok());
+    }
+
+    #[test]
+    fn validate_i2c_assignment() {
+        let reqs = RequirementSet {
+            requirements: alloc::vec![RequirementEntry {
+                block_id: 1,
+                block_name: String::from("i2c"),
+                requirement: PeripheralRequirement::I2c { logical_bus: 0, address: 0x3C },
+            }],
+        };
+        let caps = rp2040_capabilities();
+        let config = HardwareConfig {
+            family: String::from("Rp2040"),
+            assignments: alloc::vec![PinAssignment::I2c {
+                logical_bus: 0,
+                sda_pin: String::from("GP0"),
+                scl_pin: String::from("GP1"),
+                peripheral: String::from("I2C0"),
+            }],
+        };
+        assert!(validate_config(&reqs, &caps, &config).is_ok());
+    }
+
+    #[test]
+    fn validate_stepper_assignment() {
+        let reqs = RequirementSet {
+            requirements: alloc::vec![RequirementEntry {
+                block_id: 1,
+                block_name: String::from("step"),
+                requirement: PeripheralRequirement::Stepper { logical_port: 0 },
+            }],
+        };
+        let caps = stm32g0b1_capabilities();
+        let config = HardwareConfig {
+            family: String::from("Stm32g0b1"),
+            assignments: alloc::vec![PinAssignment::Stepper {
+                logical_port: 0,
+                step_pin: String::from("PA0"),
+                dir_pin: String::from("PA1"),
+                enable_pin: String::from("PA2"),
+                uart_peripheral: String::from("USART3"),
+            }],
+        };
+        assert!(validate_config(&reqs, &caps, &config).is_ok());
+    }
+
+    #[test]
+    fn validate_invalid_gpio_direction() {
+        let reqs = RequirementSet { requirements: alloc::vec![] };
+        let mut caps = host_capabilities();
+        // Set a pin that only supports output (not input)
+        caps.gpio_pins = alloc::vec![GpioCapability {
+            pin: String::from("SIM_GPIO0"),
+            can_input: false,
+            can_output: true,
+            has_pull: false,
+        }];
+        let config = HardwareConfig {
+            family: String::from("Host"),
+            assignments: alloc::vec![PinAssignment::Gpio {
+                logical_pin: 0,
+                pin: String::from("SIM_GPIO0"),
+                direction: GpioDirection::Input,
+            }],
+        };
+        let result = validate_config(&reqs, &caps, &config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err()[0].message.contains("input"));
+    }
+
+    #[test]
+    fn esp32c3_capabilities_populated() {
+        let caps = esp32c3_capabilities();
+        assert_eq!(caps.family, "Esp32c3");
+        assert!(!caps.adc_pins.is_empty());
+        assert!(!caps.gpio_pins.is_empty());
+    }
+
+    #[test]
+    fn stm32g0b1_has_stepper_slots() {
+        let caps = stm32g0b1_capabilities();
+        assert!(!caps.stepper_slots.is_empty());
+    }
+
+    #[test]
     fn serde_roundtrip_capabilities() {
         let caps = rp2040_capabilities();
         let json = serde_json::to_string(&caps).unwrap();

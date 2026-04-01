@@ -56,6 +56,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_error_is_std_error() {
+        let e = ParseError {
+            line: 1,
+            column: 1,
+            expected: vec!["token".into()],
+        };
+        let dyn_err: &dyn std::error::Error = &e;
+        assert!(dyn_err.source().is_none());
+    }
+
+    #[test]
     fn parse_error_display() {
         let e = ParseError {
             line: 3,

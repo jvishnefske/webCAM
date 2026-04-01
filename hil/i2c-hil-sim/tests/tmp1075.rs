@@ -184,3 +184,19 @@ fn pointer_persists_across_transactions() {
     bus.read(0x48, &mut buf).unwrap();
     assert_eq!(buf, [0x00, 0xFF]);
 }
+
+#[test]
+fn pointer_accessor() {
+    let dev = Tmp1075::new(addr());
+    assert_eq!(dev.pointer(), 0);
+}
+
+#[test]
+fn registers_accessor() {
+    let dev = Tmp1075::new(addr());
+    let regs = dev.registers();
+    assert_eq!(regs[0], 0x0000); // Temp
+    assert_eq!(regs[1], 0x00FF); // Config
+    assert_eq!(regs[2], 0x4B00); // T_LOW
+    assert_eq!(regs[3], 0x5000); // T_HIGH
+}

@@ -546,7 +546,8 @@ mod tests {
         g.connect(c, 0, gain, 0).unwrap();
         // Replace gain (1 input, 1 output) with a block that has 0 inputs
         // This should prune the channel because to_port 0 >= new n_in=0
-        g.replace_block(gain, Box::new(ConstantBlock::new(5.0))).unwrap();
+        g.replace_block(gain, Box::new(ConstantBlock::new(5.0)))
+            .unwrap();
         let snap = g.snapshot();
         // Channel should be pruned since ConstantBlock has 0 inputs
         assert!(snap.channels.is_empty());
@@ -561,5 +562,68 @@ mod tests {
         let snap = g.snapshot();
         // AdcBlock implements Codegen, so custom_codegen may be Some
         assert_eq!(snap.blocks.len(), 1);
+    }
+
+    #[test]
+    fn has_sim_peripherals_false_initially() {
+        let g = DataflowGraph::new();
+        assert!(!g.has_sim_peripherals());
+    }
+
+    #[test]
+    fn has_sim_peripherals_true_after_set() {
+        let mut g = DataflowGraph::new();
+        g.set_sim_peripherals(crate::dataflow::sim_peripherals::WasmSimPeripherals::new());
+        assert!(g.has_sim_peripherals());
+    }
+
+    #[test]
+    fn get_sim_pwm_without_peripherals() {
+        let g = DataflowGraph::new();
+        // Should return 0.0 when no sim peripherals are set
+        assert!((g.get_sim_pwm(0) - 0.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn set_simulation_mode_toggle() {
+        let mut g = DataflowGraph::new();
+        assert!(!g.simulation_mode);
+        g.set_simulation_mode(true);
+        assert!(g.simulation_mode);
+        g.set_simulation_mode(false);
+        assert!(!g.simulation_mode);
+    }
+
+    #[test]
+    fn connect_errors() {
+        let mut g = DataflowGraph::new();
+        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
+        let f = g.add_block(Box::new(FunctionBlock::gain(1.0)));
+
+        // Source port out of range
+        let result = g.connect(c, 99, f, 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("source port"));
+
+        // Destination port out of range
+        let result = g.connect(c, 0, f, 99);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("destination port"));
+
+        // Duplicate connection to same input
+        g.connect(c, 0, f, 0).unwrap();
+        let result = g.connect(c, 0, f, 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already connected"));
+
+        // Non-existent source block
+        let result = g.connect(BlockId(999), 0, f, 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("source block not found"));
+
+        // Non-existent destination block
+        let result = g.connect(c, 0, BlockId(999), 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("destination block not found"));
     }
 }

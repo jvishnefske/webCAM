@@ -143,6 +143,12 @@ mod tests {
     use dag_core::eval::{NullChannels, NullPubSub};
 
     #[test]
+    fn test_executor_default_trait() {
+        let exec = DagExecutor::default();
+        assert!(!exec.is_loaded());
+    }
+
+    #[test]
     fn test_executor_new() {
         let exec = DagExecutor::new();
         assert!(!exec.is_loaded());

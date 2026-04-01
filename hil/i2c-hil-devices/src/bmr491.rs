@@ -316,6 +316,36 @@ impl Bmr491 {
         self.values[IDX_READ_PIN] = PmBusValue::Word(raw);
     }
 
+    /// Injects STATUS_VOUT bits for testing W1C and computed status.
+    pub fn set_status_vout(&mut self, val: u8) {
+        self.values[IDX_STATUS_VOUT] = PmBusValue::Byte(val);
+    }
+
+    /// Injects STATUS_IOUT bits for testing W1C and computed status.
+    pub fn set_status_iout(&mut self, val: u8) {
+        self.values[IDX_STATUS_IOUT] = PmBusValue::Byte(val);
+    }
+
+    /// Injects STATUS_INPUT bits for testing W1C and computed status.
+    pub fn set_status_input(&mut self, val: u8) {
+        self.values[IDX_STATUS_INPUT] = PmBusValue::Byte(val);
+    }
+
+    /// Injects STATUS_TEMPERATURE bits for testing W1C and computed status.
+    pub fn set_status_temperature(&mut self, val: u8) {
+        self.values[IDX_STATUS_TEMPERATURE] = PmBusValue::Byte(val);
+    }
+
+    /// Injects STATUS_CML bits for testing W1C and computed status.
+    pub fn set_status_cml(&mut self, val: u8) {
+        self.values[IDX_STATUS_CML] = PmBusValue::Byte(val);
+    }
+
+    /// Injects STATUS_MFR_SPECIFIC bits for testing W1C and computed status.
+    pub fn set_status_mfr_specific(&mut self, val: u8) {
+        self.values[IDX_STATUS_MFR_SPECIFIC] = PmBusValue::Byte(val);
+    }
+
     /// Computes STATUS_BYTE from sub-status registers.
     fn compute_status_byte(&self) -> u8 {
         let mut sb: u8 = 0;
