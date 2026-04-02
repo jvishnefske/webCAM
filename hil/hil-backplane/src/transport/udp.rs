@@ -98,8 +98,7 @@ mod tests {
     #[test]
     fn local_addr_returns_bound_address() {
         // Use port 0 to get an ephemeral port (avoids conflicts)
-        let transport =
-            UdpTransport::new(DEFAULT_MULTICAST_ADDR, 0).expect("new should succeed");
+        let transport = UdpTransport::new(DEFAULT_MULTICAST_ADDR, 0).expect("new should succeed");
         let addr = transport.local_addr().expect("local_addr should succeed");
         assert_ne!(addr.port(), 0); // OS should assign a non-zero port
     }

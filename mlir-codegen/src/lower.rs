@@ -1054,7 +1054,12 @@ mod tests {
             },
         ];
         let channels = vec![make_channel(1, 1, 0, 2, 0)];
-        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("dataflow.gpio_read"), "got:\n{mlir}");
         assert!(mlir.contains("dataflow.gpio_write"), "got:\n{mlir}");
@@ -1070,13 +1075,21 @@ mod tests {
             },
             {
                 let mut b = make_block(2, "uart_tx", serde_json::json!({"port": 1}));
-                b.inputs = vec![PortDef { name: "data".to_string(), kind: PortKind::Float }];
+                b.inputs = vec![PortDef {
+                    name: "data".to_string(),
+                    kind: PortKind::Float,
+                }];
                 b.outputs = vec![];
                 b
             },
         ];
         let channels = vec![make_channel(1, 1, 0, 2, 0)];
-        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("dataflow.uart_rx"), "got:\n{mlir}");
         assert!(mlir.contains("dataflow.uart_tx"), "got:\n{mlir}");
@@ -1088,12 +1101,23 @@ mod tests {
             let mut b = make_block(1, "encoder", serde_json::json!({"channel": 0}));
             b.inputs = vec![];
             b.outputs = vec![
-                PortDef { name: "position".to_string(), kind: PortKind::Float },
-                PortDef { name: "velocity".to_string(), kind: PortKind::Float },
+                PortDef {
+                    name: "position".to_string(),
+                    kind: PortKind::Float,
+                },
+                PortDef {
+                    name: "velocity".to_string(),
+                    kind: PortKind::Float,
+                },
             ];
             b
         }];
-        let snap = GraphSnapshot { blocks, channels: vec![], tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot {
+            blocks,
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("dataflow.encoder_read"), "got:\n{mlir}");
     }
@@ -1104,17 +1128,32 @@ mod tests {
             make_block(1, "constant", serde_json::json!({"value": 1.0})),
             make_block(2, "constant", serde_json::json!({"value": 2.0})),
             {
-                let mut b = make_block(3, "ssd1306_display", serde_json::json!({"i2c_bus": 0, "address": 60}));
+                let mut b = make_block(
+                    3,
+                    "ssd1306_display",
+                    serde_json::json!({"i2c_bus": 0, "address": 60}),
+                );
                 b.inputs = vec![
-                    PortDef { name: "line1".to_string(), kind: PortKind::Float },
-                    PortDef { name: "line2".to_string(), kind: PortKind::Float },
+                    PortDef {
+                        name: "line1".to_string(),
+                        kind: PortKind::Float,
+                    },
+                    PortDef {
+                        name: "line2".to_string(),
+                        kind: PortKind::Float,
+                    },
                 ];
                 b.outputs = vec![];
                 b
             },
         ];
         let channels = vec![make_channel(1, 1, 0, 3, 0), make_channel(2, 2, 0, 3, 1)];
-        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("dataflow.display_write"), "got:\n{mlir}");
     }
@@ -1127,14 +1166,25 @@ mod tests {
             {
                 let mut b = make_block(3, "tmc2209_stepper", serde_json::json!({"uart_port": 0}));
                 b.inputs = vec![
-                    PortDef { name: "target".to_string(), kind: PortKind::Float },
-                    PortDef { name: "enable".to_string(), kind: PortKind::Float },
+                    PortDef {
+                        name: "target".to_string(),
+                        kind: PortKind::Float,
+                    },
+                    PortDef {
+                        name: "enable".to_string(),
+                        kind: PortKind::Float,
+                    },
                 ];
                 b
             },
         ];
         let channels = vec![make_channel(1, 1, 0, 3, 0), make_channel(2, 2, 0, 3, 1)];
-        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("dataflow.stepper_move"), "got:\n{mlir}");
         assert!(mlir.contains("dataflow.stepper_enable"), "got:\n{mlir}");
@@ -1144,15 +1194,30 @@ mod tests {
     #[test]
     fn lower_stallguard_block() {
         let blocks = vec![{
-            let mut b = make_block(1, "tmc2209_stallguard", serde_json::json!({"uart_port": 0, "uart_addr": 0, "threshold": 10}));
+            let mut b = make_block(
+                1,
+                "tmc2209_stallguard",
+                serde_json::json!({"uart_port": 0, "uart_addr": 0, "threshold": 10}),
+            );
             b.inputs = vec![];
             b.outputs = vec![
-                PortDef { name: "value".to_string(), kind: PortKind::Float },
-                PortDef { name: "detect".to_string(), kind: PortKind::Float },
+                PortDef {
+                    name: "value".to_string(),
+                    kind: PortKind::Float,
+                },
+                PortDef {
+                    name: "detect".to_string(),
+                    kind: PortKind::Float,
+                },
             ];
             b
         }];
-        let snap = GraphSnapshot { blocks, channels: vec![], tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot {
+            blocks,
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("dataflow.stallguard_read"), "got:\n{mlir}");
     }
@@ -1167,21 +1232,39 @@ mod tests {
             },
             {
                 let mut b = make_block(2, "udp_sink", serde_json::json!({}));
-                b.inputs = vec![PortDef { name: "in".to_string(), kind: PortKind::Float }];
+                b.inputs = vec![PortDef {
+                    name: "in".to_string(),
+                    kind: PortKind::Float,
+                }];
                 b.outputs = vec![];
                 b
             },
         ];
         let channels = vec![make_channel(1, 1, 0, 2, 0)];
-        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("UDP source") || mlir.contains("UDP sink") || mlir.contains("arith.constant"), "got:\n{mlir}");
+        assert!(
+            mlir.contains("UDP source")
+                || mlir.contains("UDP sink")
+                || mlir.contains("arith.constant"),
+            "got:\n{mlir}"
+        );
     }
 
     #[test]
     fn lower_unsupported_block_type() {
         let blocks = vec![make_block(1, "totally_unknown", serde_json::json!({}))];
-        let snap = GraphSnapshot { blocks, channels: vec![], tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot {
+            blocks,
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
         let result = lower_graph(&snap);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unsupported"));

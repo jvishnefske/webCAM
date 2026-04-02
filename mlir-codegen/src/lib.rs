@@ -1,3 +1,4 @@
+#![forbid(unsafe_code)]
 //! MLIR-based code generation backend for the RustCAM dataflow engine.
 //!
 //! This crate replaces the string-interpolation Rust codegen in `emit.rs`

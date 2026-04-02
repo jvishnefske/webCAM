@@ -1463,7 +1463,10 @@ mod tests {
             requirements: alloc::vec![RequirementEntry {
                 block_id: 1,
                 block_name: String::from("i2c"),
-                requirement: PeripheralRequirement::I2c { logical_bus: 0, address: 0x3C },
+                requirement: PeripheralRequirement::I2c {
+                    logical_bus: 0,
+                    address: 0x3C
+                },
             }],
         };
         let caps = rp2040_capabilities();
@@ -1504,7 +1507,9 @@ mod tests {
 
     #[test]
     fn validate_invalid_gpio_direction() {
-        let reqs = RequirementSet { requirements: alloc::vec![] };
+        let reqs = RequirementSet {
+            requirements: alloc::vec![],
+        };
         let mut caps = host_capabilities();
         // Set a pin that only supports output (not input)
         caps.gpio_pins = alloc::vec![GpioCapability {

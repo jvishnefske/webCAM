@@ -87,10 +87,7 @@ mod tests {
             BackplaneError::BufferTooSmall.to_string(),
             "encode buffer too small"
         );
-        assert_eq!(
-            BackplaneError::Timeout.to_string(),
-            "request timed out"
-        );
+        assert_eq!(BackplaneError::Timeout.to_string(), "request timed out");
 
         let io_err = std::io::Error::other("test");
         let transport_err = BackplaneError::Transport(io_err);

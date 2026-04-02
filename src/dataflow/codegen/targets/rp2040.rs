@@ -220,7 +220,6 @@ fn generate_main_rs(binding: &Binding, dt: f64) -> String {
         writeln!(out, "    _marker: (),").unwrap();
     }
     writeln!(out, "}};").unwrap();
-    out.push_str(&super::generate_hw_ffi_stubs("HW"));
 
     out
 }

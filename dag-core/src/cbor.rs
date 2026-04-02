@@ -393,7 +393,14 @@ mod tests {
         {
             let mut e = minicbor::Encoder::new(&mut buf);
             e.array(1).unwrap();
-            e.array(3).unwrap().u8(3).unwrap().u16(5).unwrap().u16(6).unwrap();
+            e.array(3)
+                .unwrap()
+                .u8(3)
+                .unwrap()
+                .u16(5)
+                .unwrap()
+                .u16(6)
+                .unwrap();
         }
 
         let result = decode_dag(&buf);
@@ -413,7 +420,14 @@ mod tests {
         {
             let mut e = minicbor::Encoder::new(&mut buf);
             e.array(1).unwrap();
-            e.array(3).unwrap().u8(3).unwrap().u16(5).unwrap().u16(6).unwrap();
+            e.array(3)
+                .unwrap()
+                .u8(3)
+                .unwrap()
+                .u16(5)
+                .unwrap()
+                .u16(6)
+                .unwrap();
         }
 
         let result = minicbor::decode::<Dag>(&buf);

@@ -11,17 +11,26 @@ use super::config_panel::ConfigPanel;
 use super::palette::BlockPalette;
 
 /// Instance of a placed block on the canvas.
+///
+/// Stores block type + config as serializable data (Send+Sync safe).
+/// The trait object is reconstructed from the registry when needed.
 #[derive(Clone)]
 struct PlacedBlock {
     id: usize,
-    block: std::rc::Rc<std::cell::RefCell<Box<dyn lower::ConfigurableBlock>>>,
+    block_type: String,
+    config: serde_json::Value,
     x: f64,
     y: f64,
 }
 
-// SAFETY: WASM is single-threaded.
-unsafe impl Send for PlacedBlock {}
-unsafe impl Sync for PlacedBlock {}
+impl PlacedBlock {
+    /// Reconstruct the ConfigurableBlock trait object from the registry.
+    fn reconstruct(&self) -> Option<Box<dyn lower::ConfigurableBlock>> {
+        let mut block = registry::create_block(&self.block_type)?;
+        block.apply_config(&self.config);
+        Some(block)
+    }
+}
 
 #[component]
 pub fn DagEditorPanel() -> impl IntoView {
@@ -37,8 +46,8 @@ pub fn DagEditorPanel() -> impl IntoView {
         let sel = selected_id.get()?;
         let blks = blocks.get();
         let pb = blks.iter().find(|b| b.id == sel)?;
-        let name = pb.block.borrow().display_name().to_string();
-        Some(name)
+        let block = pb.reconstruct()?;
+        Some(block.display_name().to_string())
     });
 
     let config_fields = Signal::derive(move || {
@@ -48,7 +57,7 @@ pub fn DagEditorPanel() -> impl IntoView {
         };
         let blks = blocks.get();
         match blks.iter().find(|b| b.id == sel) {
-            Some(pb) => pb.block.borrow().config_schema(),
+            Some(pb) => pb.reconstruct().map(|b| b.config_schema()).unwrap_or_default(),
             None => Vec::new(),
         }
     });
@@ -60,7 +69,7 @@ pub fn DagEditorPanel() -> impl IntoView {
         };
         let blks = blocks.get();
         match blks.iter().find(|b| b.id == sel) {
-            Some(pb) => pb.block.borrow().config_json(),
+            Some(pb) => pb.config.clone(),
             None => serde_json::Value::Object(Default::default()),
         }
     });
@@ -72,20 +81,23 @@ pub fn DagEditorPanel() -> impl IntoView {
         };
         let blks = blocks.get();
         match blks.iter().find(|b| b.id == sel) {
-            Some(pb) => {
-                let chs = pb.block.borrow().declared_channels();
-                chs.iter()
-                    .map(|ch| {
-                        let dir = match ch.direction {
-                            ChannelDirection::Input => "IN",
-                            ChannelDirection::Output => "OUT",
-                        };
-                        let kind = format!("{:?}", ch.kind).to_lowercase();
-                        format!("{} {} [{}]", dir, ch.name, kind)
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            }
+            Some(pb) => match pb.reconstruct() {
+                Some(block) => {
+                    let chs = block.declared_channels();
+                    chs.iter()
+                        .map(|ch| {
+                            let dir = match ch.direction {
+                                ChannelDirection::Input => "IN",
+                                ChannelDirection::Output => "OUT",
+                            };
+                            let kind = format!("{:?}", ch.kind).to_lowercase();
+                            format!("{} {} [{}]", dir, ch.name, kind)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+                None => String::new(),
+            },
             None => String::new(),
         }
     });
@@ -97,10 +109,11 @@ pub fn DagEditorPanel() -> impl IntoView {
         };
         let blks = blocks.get();
         match blks.iter().find(|b| b.id == sel) {
-            Some(pb) => {
-                let borrow = pb.block.borrow();
-                lower::lower_to_il_text(borrow.as_ref()).unwrap_or_else(|e| format!("Error: {}", e))
-            }
+            Some(pb) => match pb.reconstruct() {
+                Some(block) => lower::lower_to_il_text(block.as_ref())
+                    .unwrap_or_else(|e| format!("Error: {}", e)),
+                None => String::new(),
+            },
             None => String::new(),
         }
     });
@@ -113,14 +126,15 @@ pub fn DagEditorPanel() -> impl IntoView {
         if let Some(block) = registry::create_block(&block_type) {
             let id = next_id.get();
             set_next_id.set(id + 1);
-            // Place blocks in a grid pattern
             let count = blocks.get().len();
             let x = 30.0 + (count % 3) as f64 * 220.0;
             let y = 30.0 + (count / 3) as f64 * 120.0;
+            let config = block.config_json();
             set_blocks.update(|v| {
                 v.push(PlacedBlock {
                     id,
-                    block: std::rc::Rc::new(std::cell::RefCell::new(block)),
+                    block_type: block_type.clone(),
+                    config,
                     x,
                     y,
                 });
@@ -136,12 +150,11 @@ pub fn DagEditorPanel() -> impl IntoView {
             None => return,
         };
         set_blocks.update(|blks| {
-            if let Some(pb) = blks.iter().find(|b| b.id == sel) {
-                let mut partial = serde_json::Map::new();
-                partial.insert(key, value);
-                pb.block
-                    .borrow_mut()
-                    .apply_config(&serde_json::Value::Object(partial));
+            if let Some(pb) = blks.iter_mut().find(|b| b.id == sel) {
+                // Update the stored config JSON directly
+                if let serde_json::Value::Object(ref mut map) = pb.config {
+                    map.insert(key, value);
+                }
             }
         });
     });
@@ -165,8 +178,14 @@ pub fn DagEditorPanel() -> impl IntoView {
         // Merge all blocks into a single DAG
         let mut combined = dag_core::op::Dag::new();
         for pb in blks.iter() {
-            let borrow = pb.block.borrow();
-            let result = match borrow.as_ref().lower() {
+            let block = match pb.reconstruct() {
+                Some(b) => b,
+                None => {
+                    set_deploy_status.set(format!("Unknown block type: {}", pb.block_type));
+                    return;
+                }
+            };
+            let result = match block.lower() {
                 Ok(r) => r,
                 Err(e) => {
                     set_deploy_status.set(format!("Lower error: {:?}", e));
@@ -234,10 +253,11 @@ pub fn DagEditorPanel() -> impl IntoView {
                             let id = pb.id;
                             let x = pb.x;
                             let y = pb.y;
-                            let name = pb.block.borrow().display_name().to_string();
-                            let bt = pb.block.borrow().block_type().to_string();
+                            let block = pb.reconstruct();
+                            let name = block.as_ref().map(|b| b.display_name().to_string()).unwrap_or_else(|| pb.block_type.clone());
+                            let bt = pb.block_type.clone();
                             let is_selected = move || selected_id.get() == Some(id);
-                            let channels = pb.block.borrow().declared_channels();
+                            let channels = block.as_ref().map(|b| b.declared_channels()).unwrap_or_default();
                             let in_count = channels.iter()
                                 .filter(|c| c.direction == ChannelDirection::Input).count();
                             let out_count = channels.iter()

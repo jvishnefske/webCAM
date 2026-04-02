@@ -53,6 +53,11 @@ export function available_profiles(): string;
 export function dataflow_add_block(graph_id: number, block_type: string, config_json: string): number;
 
 /**
+ * Add a simulated I2C device on the given bus at the given 7-bit address.
+ */
+export function dataflow_add_i2c_device(graph_id: number, bus: number, addr: number, name: string): void;
+
+/**
  * Advance the graph by wall-clock elapsed seconds (realtime mode).
  * Returns snapshot JSON.
  */
@@ -78,6 +83,11 @@ export function dataflow_codegen(graph_id: number, dt: number): string;
 export function dataflow_codegen_multi(graph_id: number, dt: number, targets_json: string): string;
 
 /**
+ * Configure a simulated serial port. Parity: 0=None, 1=Odd, 2=Even.
+ */
+export function dataflow_configure_serial(graph_id: number, port: number, baud: number, data_bits: number, parity: number, stop_bits: number): void;
+
+/**
  * Connect an output port to an input port. Returns channel id.
  */
 export function dataflow_connect(graph_id: number, from_block: number, from_port: number, to_block: number, to_port: number): number;
@@ -98,6 +108,11 @@ export function dataflow_disconnect(graph_id: number, channel_id: number): void;
 export function dataflow_get_sim_pwm(graph_id: number, channel: number): number;
 
 /**
+ * Read the 256-byte register map of a simulated I2C device (as JSON array).
+ */
+export function dataflow_i2c_device_registers(graph_id: number, bus: number, addr: number): any;
+
+/**
  * Create a new dataflow graph. Returns its id.
  */
 export function dataflow_new(dt: number): number;
@@ -108,10 +123,20 @@ export function dataflow_new(dt: number): number;
 export function dataflow_remove_block(graph_id: number, block_id: number): void;
 
 /**
+ * Remove a simulated I2C device.
+ */
+export function dataflow_remove_i2c_device(graph_id: number, bus: number, addr: number): void;
+
+/**
  * Run a fixed number of ticks (non-realtime batch mode).
  * Returns snapshot JSON.
  */
 export function dataflow_run(graph_id: number, steps: number, dt: number): string;
+
+/**
+ * List all configured serial ports as JSON.
+ */
+export function dataflow_serial_ports(graph_id: number): any;
 
 /**
  * Set a simulated ADC channel voltage.
@@ -133,6 +158,16 @@ export function dataflow_set_speed(graph_id: number, speed: number): void;
  * Get a snapshot of the graph without ticking.
  */
 export function dataflow_snapshot(graph_id: number): string;
+
+/**
+ * Drain data from a simulated TCP send buffer (as JSON array).
+ */
+export function dataflow_tcp_drain(graph_id: number, socket_id: number): any;
+
+/**
+ * Inject data into a simulated TCP receive buffer.
+ */
+export function dataflow_tcp_inject(graph_id: number, socket_id: number, data: Uint8Array): void;
 
 /**
  * Update a block's config by replacing it in-place (preserving channels where ports still match).
@@ -277,21 +312,28 @@ export interface InitOutput {
     readonly daghandle_to_cbor: (a: number) => [number, number];
     readonly daghandle_to_json: (a: number) => [number, number, number, number];
     readonly dataflow_add_block: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
+    readonly dataflow_add_i2c_device: (a: number, b: number, c: number, d: number, e: number) => [number, number];
     readonly dataflow_advance: (a: number, b: number) => [number, number, number, number];
     readonly dataflow_block_types: () => [number, number];
     readonly dataflow_codegen: (a: number, b: number) => [number, number, number, number];
     readonly dataflow_codegen_multi: (a: number, b: number, c: number, d: number) => [number, number, number, number];
+    readonly dataflow_configure_serial: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly dataflow_connect: (a: number, b: number, c: number, d: number, e: number) => [number, number, number];
     readonly dataflow_destroy: (a: number) => void;
     readonly dataflow_disconnect: (a: number, b: number) => [number, number];
     readonly dataflow_get_sim_pwm: (a: number, b: number) => [number, number, number];
+    readonly dataflow_i2c_device_registers: (a: number, b: number, c: number) => [number, number, number];
     readonly dataflow_new: (a: number) => number;
     readonly dataflow_remove_block: (a: number, b: number) => [number, number];
+    readonly dataflow_remove_i2c_device: (a: number, b: number, c: number) => [number, number];
     readonly dataflow_run: (a: number, b: number, c: number) => [number, number, number, number];
+    readonly dataflow_serial_ports: (a: number) => [number, number, number];
     readonly dataflow_set_sim_adc: (a: number, b: number, c: number) => [number, number];
     readonly dataflow_set_simulation_mode: (a: number, b: number) => [number, number];
     readonly dataflow_set_speed: (a: number, b: number) => [number, number];
     readonly dataflow_snapshot: (a: number) => [number, number, number, number];
+    readonly dataflow_tcp_drain: (a: number, b: number) => [number, number, number];
+    readonly dataflow_tcp_inject: (a: number, b: number, c: number, d: number) => [number, number];
     readonly dataflow_update_block: (a: number, b: number, c: number, d: number, e: number, f: number) => [number, number];
     readonly default_config: (a: number, b: number) => [number, number];
     readonly preview_stl: (a: number, b: number, c: number, d: number) => [number, number, number, number];
