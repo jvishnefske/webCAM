@@ -663,3 +663,31 @@ body {
         grid-template-columns: 1fr;
     }
 }
+
+/* Evaluation results strip */
+.dag-eval-results {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: rgba(78, 204, 163, 0.08);
+    border: 1px solid var(--success);
+    border-radius: 4px;
+    margin-bottom: 0.5rem;
+    font-family: monospace;
+    font-size: 0.85rem;
+}
+
+.dag-eval-entry {
+    display: inline-flex;
+    gap: 0.25rem;
+}
+
+.dag-eval-name {
+    color: var(--text-secondary);
+}
+
+.dag-eval-value {
+    color: var(--success);
+    font-weight: 600;
+}
