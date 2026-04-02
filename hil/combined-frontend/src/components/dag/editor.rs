@@ -167,6 +167,70 @@ pub fn DagEditorPanel() -> impl IntoView {
         }
     };
 
+    // Evaluate: lower all blocks, merge DAGs, run in browser WASM
+    let (eval_results, set_eval_results) = signal(Vec::<(String, f64)>::new());
+
+    let on_evaluate = move |_| {
+        let blks = blocks.get();
+        if blks.is_empty() {
+            set_deploy_status.set("No blocks to evaluate".into());
+            return;
+        }
+
+        let mut combined = dag_core::op::Dag::new();
+        for pb in blks.iter() {
+            let block = match pb.reconstruct() {
+                Some(b) => b,
+                None => {
+                    set_deploy_status.set(format!("Unknown block type: {}", pb.block_type));
+                    return;
+                }
+            };
+            let result = match block.lower() {
+                Ok(r) => r,
+                Err(e) => {
+                    set_deploy_status.set(format!("Lower error: {:?}", e));
+                    return;
+                }
+            };
+            let offset = combined.len() as u16;
+            for op in result.dag.nodes() {
+                let adjusted = offset_op(op, offset);
+                if let Err(e) = combined.add_op(adjusted) {
+                    set_deploy_status.set(format!("Merge error: {:?}", e));
+                    return;
+                }
+            }
+        }
+
+        // Evaluate in browser — pure Rust, no MCU needed
+        let mut values = vec![0.0_f64; combined.len()];
+        let result = combined.evaluate(
+            &dag_core::eval::NullChannels,
+            &dag_core::eval::NullPubSub,
+            &mut values,
+        );
+
+        // Collect outputs and publishes
+        let mut results = Vec::new();
+        for (topic, val) in &result.publishes {
+            results.push((topic.clone(), *val));
+        }
+        for (name, val) in &result.outputs {
+            results.push((format!("out:{name}"), *val));
+        }
+        // Show all node values if no outputs/publishes
+        if results.is_empty() {
+            for (i, v) in values.iter().enumerate() {
+                results.push((format!("node[{i}]"), *v));
+            }
+        }
+
+        set_eval_results.set(results.clone());
+        let summary: Vec<String> = results.iter().map(|(k, v)| format!("{k}={v:.4}")).collect();
+        set_deploy_status.set(format!("Evaluated {} nodes: {}", combined.len(), summary.join(", ")));
+    };
+
     // Deploy: lower all blocks, merge DAGs, CBOR encode, POST to MCU
     let on_deploy = move |_| {
         let blks = blocks.get();
@@ -242,11 +306,32 @@ pub fn DagEditorPanel() -> impl IntoView {
             // Center: canvas
             <div class="dag-canvas-container">
                 <div class="dag-toolbar">
-                    <button class="btn btn-primary" on:click=on_deploy>"Deploy to MCU"</button>
+                    <button class="btn btn-primary" on:click=on_evaluate>"Evaluate"</button>
+                    <button class="btn btn-secondary" on:click=on_deploy>"Deploy to MCU"</button>
                     <button class="btn btn-secondary" on:click=on_tick>"Tick"</button>
                     <button class="btn btn-danger" on:click=on_delete>"Delete Block"</button>
                     <span class="dag-status">{move || deploy_status.get()}</span>
                 </div>
+                // Evaluation results
+                {move || {
+                    let results = eval_results.get();
+                    if results.is_empty() {
+                        view! { <div></div> }.into_any()
+                    } else {
+                        view! {
+                            <div class="dag-eval-results">
+                                {results.iter().map(|(name, val)| {
+                                    view! {
+                                        <span class="dag-eval-entry">
+                                            <span class="dag-eval-name">{name.clone()}</span>
+                                            <span class="dag-eval-value">{format!("{val:.4}")}</span>
+                                        </span>
+                                    }
+                                }).collect_view()}
+                            </div>
+                        }.into_any()
+                    }
+                }}
                 <svg class="dag-canvas" viewBox="0 0 700 400">
                     {move || {
                         blocks.get().iter().map(|pb| {
