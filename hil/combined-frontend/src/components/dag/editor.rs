@@ -10,6 +10,7 @@ use configurable_blocks::schema::ChannelDirection;
 use crate::types::BlockSet;
 
 use super::config_panel::ConfigPanel;
+use super::monitor::MonitorPanel;
 use super::palette::BlockPalette;
 
 /// Instance of a placed block on the canvas.
@@ -186,68 +187,115 @@ pub fn DagEditorPanel() -> impl IntoView {
         }
     };
 
-    // Evaluate: lower all blocks, merge DAGs, run in browser WASM
-    let (eval_results, set_eval_results) = signal(Vec::<(String, f64)>::new());
+    // Simulation state (persists pubsub values across ticks)
+    let (sim_topics, set_sim_topics) = signal(std::collections::BTreeMap::<String, f64>::new());
+    let (sim_tick_count, set_sim_tick_count) = signal(0_u64);
+    let (sim_running, set_sim_running) = signal(false);
 
-    let on_evaluate = move |_| {
+    // Helper: build merged DAG from current blocks
+    let build_dag = move || -> Result<dag_core::op::Dag, String> {
         let blks = blocks.get();
         if blks.is_empty() {
-            set_deploy_status.set("No blocks to evaluate".into());
-            return;
+            return Err("No blocks".into());
         }
-
         let mut combined = dag_core::op::Dag::new();
         for pb in blks.iter() {
-            let block = match pb.reconstruct() {
-                Some(b) => b,
-                None => {
-                    set_deploy_status.set(format!("Unknown block type: {}", pb.block_type));
-                    return;
-                }
-            };
-            let result = match block.lower() {
-                Ok(r) => r,
-                Err(e) => {
-                    set_deploy_status.set(format!("Lower error: {:?}", e));
-                    return;
-                }
-            };
+            let block = pb.reconstruct()
+                .ok_or_else(|| format!("Unknown block type: {}", pb.block_type))?;
+            let result = block.lower()
+                .map_err(|e| format!("Lower error: {:?}", e))?;
             let offset = combined.len() as u16;
             for op in result.dag.nodes() {
                 let adjusted = offset_op(op, offset);
-                if let Err(e) = combined.add_op(adjusted) {
-                    set_deploy_status.set(format!("Merge error: {:?}", e));
-                    return;
+                combined.add_op(adjusted)
+                    .map_err(|e| format!("Merge error: {:?}", e))?;
+            }
+        }
+        Ok(combined)
+    };
+
+    // SimState is stored in a thread_local RefCell (not Send, can't be in signal)
+    use std::cell::RefCell;
+    thread_local! {
+        static SIM: RefCell<Option<dag_core::eval::SimState>> = const { RefCell::new(None) };
+    }
+
+    // Step: single tick
+    let on_step = move |_| {
+        let dag = match build_dag() {
+            Ok(d) => d,
+            Err(e) => { set_deploy_status.set(e); return; }
+        };
+        SIM.with(|cell| {
+            let mut sim = cell.borrow_mut();
+            if sim.is_none() || sim.as_ref().is_some_and(|s| s.tick_count() == 0) {
+                *sim = Some(dag_core::eval::SimState::new(dag.len()));
+            }
+            if let Some(ref mut s) = *sim {
+                s.tick(&dag);
+                set_sim_topics.set(s.topics().clone());
+                set_sim_tick_count.set(s.tick_count());
+                set_deploy_status.set(format!("Tick {} ({} topics)", s.tick_count(), s.topics().len()));
+            }
+        });
+    };
+
+    // Reset
+    let on_reset = move |_| {
+        SIM.with(|cell| {
+            if let Some(ref mut s) = *cell.borrow_mut() {
+                s.reset();
+                set_sim_topics.set(std::collections::BTreeMap::new());
+                set_sim_tick_count.set(0);
+            }
+        });
+        set_sim_running.set(false);
+        set_deploy_status.set("Reset".into());
+    };
+
+    // Play/Pause toggle
+    let on_play_pause = move |_| {
+        let running = sim_running.get();
+        if running {
+            set_sim_running.set(false);
+            set_deploy_status.set("Paused".into());
+        } else {
+            // Rebuild DAG and start ticking
+            let dag = match build_dag() {
+                Ok(d) => d,
+                Err(e) => { set_deploy_status.set(e); return; }
+            };
+            SIM.with(|cell| {
+                let mut sim = cell.borrow_mut();
+                if sim.is_none() {
+                    *sim = Some(dag_core::eval::SimState::new(dag.len()));
                 }
-            }
-        }
+            });
+            set_sim_running.set(true);
+            set_deploy_status.set("Running...".into());
 
-        // Evaluate in browser — pure Rust, no MCU needed
-        let mut values = vec![0.0_f64; combined.len()];
-        let result = combined.evaluate(
-            &dag_core::eval::NullChannels,
-            &dag_core::eval::NullPubSub,
-            &mut values,
-        );
-
-        // Collect outputs and publishes
-        let mut results = Vec::new();
-        for (topic, val) in &result.publishes {
-            results.push((topic.clone(), *val));
+            // Start tick loop via gloo_timers (100ms = 10Hz)
+            let set_topics = set_sim_topics;
+            let set_tick = set_sim_tick_count;
+            let set_status = set_deploy_status;
+            let set_running = set_sim_running;
+            gloo_timers::callback::Interval::new(100, move || {
+                if !sim_running.get_untracked() {
+                    return; // paused — interval keeps firing but we skip
+                }
+                let dag = match build_dag() {
+                    Ok(d) => d,
+                    Err(_) => return,
+                };
+                SIM.with(|cell| {
+                    if let Some(ref mut s) = *cell.borrow_mut() {
+                        s.tick(&dag);
+                        set_topics.set(s.topics().clone());
+                        set_tick.set(s.tick_count());
+                    }
+                });
+            }).forget();
         }
-        for (name, val) in &result.outputs {
-            results.push((format!("out:{name}"), *val));
-        }
-        // Show all node values if no outputs/publishes
-        if results.is_empty() {
-            for (i, v) in values.iter().enumerate() {
-                results.push((format!("node[{i}]"), *v));
-            }
-        }
-
-        set_eval_results.set(results.clone());
-        let summary: Vec<String> = results.iter().map(|(k, v)| format!("{k}={v:.4}")).collect();
-        set_deploy_status.set(format!("Evaluated {} nodes: {}", combined.len(), summary.join(", ")));
     };
 
     // Deploy: lower all blocks, merge DAGs, CBOR encode, POST to MCU
