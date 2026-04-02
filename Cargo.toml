@@ -38,6 +38,7 @@ default-members = [
     "parser",
     "mlir-codegen",
     "configurable-blocks",
+    "hil/native-server",
 ]
 
 [workspace.package]
