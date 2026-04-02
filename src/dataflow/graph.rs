@@ -101,6 +101,24 @@ impl DataflowGraph {
         }
     }
 
+    /// Access sim peripherals immutably, returning an error if not available.
+    pub fn sim_peripherals_ref(
+        &self,
+    ) -> Result<&crate::dataflow::sim_peripherals::WasmSimPeripherals, String> {
+        self.sim_peripherals
+            .as_ref()
+            .ok_or_else(|| "simulation mode not enabled".to_string())
+    }
+
+    /// Access sim peripherals mutably, returning an error if not available.
+    pub fn sim_peripherals_mut(
+        &mut self,
+    ) -> Result<&mut crate::dataflow::sim_peripherals::WasmSimPeripherals, String> {
+        self.sim_peripherals
+            .as_mut()
+            .ok_or_else(|| "simulation mode not enabled".to_string())
+    }
+
     /// Read the last PWM duty value for a channel from sim peripherals.
     pub fn get_sim_pwm(&self, channel: u8) -> f64 {
         if let Some(ref p) = self.sim_peripherals {
