@@ -82,6 +82,9 @@ serve-native: wasm-dataflow ## Build WASM + run native server with mock HAL
 hil-e2e: ## Run E2E tests against live Pico2 (requires flashed device)
 	./tests/pico2_e2e.sh
 
+hil-e2e: ## Run E2E tests against live Pico2 (requires flashed device)
+	./tests/pico2_e2e.sh
+
 clean: ## Remove build artifacts
 	cargo clean
 	rm -rf www-cam/pkg www-cam/dist www-cam/node_modules
