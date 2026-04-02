@@ -13,6 +13,7 @@
 //! the result — all as a single configurable block that lowers to ~20 DAG ops.
 
 pub mod blocks;
+pub mod codegen;
 pub mod lower;
 pub mod registry;
 pub mod schema;
