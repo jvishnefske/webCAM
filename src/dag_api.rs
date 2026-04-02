@@ -464,7 +464,7 @@ mod tests {
         let _ = h.evaluate_node(c1);
         let _ = h.to_cbor();
         let _ = h.to_json().unwrap();
-        
+
         // Test default
         let h2 = DagHandle::default();
         assert!(h2.is_empty());

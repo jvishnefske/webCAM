@@ -527,9 +527,8 @@ mod tests {
 
     #[test]
     fn config_to_json_structured() {
-        let config = parser::ast::Config::Structured(vec![
-            ("key".into(), parser::ast::Value::Float(1.5)),
-        ]);
+        let config =
+            parser::ast::Config::Structured(vec![("key".into(), parser::ast::Value::Float(1.5))]);
         let json: serde_json::Value =
             serde_json::from_str(&config_to_json("test", &config)).unwrap();
         assert_eq!(json["key"], 1.5);

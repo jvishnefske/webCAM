@@ -162,10 +162,10 @@ pub fn generate_workspace(
 /// - `logic/csrc/peripherals.h` — C header for hw_* externs
 /// - `logic/csrc/logic.c` — C source (from mlir-translate or fallback)
 /// - `logic/build.rs` — cc crate build script
-/// - `logic/src/ffi.rs` — `#[repr(C)] State` struct + FFI bridge
+/// - `logic/src/ffi.rs` — State struct (pure Rust, no FFI)
 /// - `logic/src/lib.rs` — re-exports ffi module
 ///
-/// Target crates are generated with `extern "C"` hw_* function implementations.
+/// Target crates are generated with safe Rust peripheral trait implementations.
 #[cfg(feature = "mlir")]
 pub fn generate_workspace_mlir(
     snap: &GraphSnapshot,

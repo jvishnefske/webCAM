@@ -190,7 +190,7 @@ pub fn generate_mlir_logic_files(
         generate_logic_cargo_toml_mlir(),
     ));
 
-    // Emit ffi.rs with #[repr(C)] State struct
+    // Emit ffi.rs with safe State struct (no repr(C), no extern)
     let state_fields = collect_state_fields(snap);
     let ffi_rs = peripherals::generate_ffi_rs(&state_fields);
     files.push(("logic/src/ffi.rs".to_string(), ffi_rs));

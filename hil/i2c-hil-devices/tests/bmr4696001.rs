@@ -431,7 +431,11 @@ fn computed_status_byte_temperature_bit() {
 
     let mut buf = [0u8; 1];
     bus.write_read(ADDR, &[0x78], &mut buf).unwrap();
-    assert_ne!(buf[0] & (1 << 2), 0, "TEMPERATURE should set STATUS_BYTE bit 2");
+    assert_ne!(
+        buf[0] & (1 << 2),
+        0,
+        "TEMPERATURE should set STATUS_BYTE bit 2"
+    );
 }
 
 #[test]
@@ -468,7 +472,11 @@ fn computed_status_word_iout_aggregation() {
     let mut buf = [0u8; 2];
     bus.write_read(ADDR, &[0x79], &mut buf).unwrap();
     let word = u16::from_le_bytes(buf);
-    assert_ne!(word & (1 << 14), 0, "STATUS_IOUT should set STATUS_WORD bit 14");
+    assert_ne!(
+        word & (1 << 14),
+        0,
+        "STATUS_IOUT should set STATUS_WORD bit 14"
+    );
 }
 
 #[test]
@@ -481,7 +489,11 @@ fn computed_status_word_input_aggregation() {
     let mut buf = [0u8; 2];
     bus.write_read(ADDR, &[0x79], &mut buf).unwrap();
     let word = u16::from_le_bytes(buf);
-    assert_ne!(word & (1 << 13), 0, "STATUS_INPUT should set STATUS_WORD bit 13");
+    assert_ne!(
+        word & (1 << 13),
+        0,
+        "STATUS_INPUT should set STATUS_WORD bit 13"
+    );
 }
 
 #[test]
@@ -494,5 +506,9 @@ fn computed_status_word_mfr_aggregation() {
     let mut buf = [0u8; 2];
     bus.write_read(ADDR, &[0x79], &mut buf).unwrap();
     let word = u16::from_le_bytes(buf);
-    assert_ne!(word & (1 << 12), 0, "STATUS_MFR should set STATUS_WORD bit 12");
+    assert_ne!(
+        word & (1 << 12),
+        0,
+        "STATUS_MFR should set STATUS_WORD bit 12"
+    );
 }

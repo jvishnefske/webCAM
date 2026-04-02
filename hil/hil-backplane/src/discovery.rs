@@ -283,7 +283,8 @@ mod tests {
         e.u32(99).unwrap().str("ignored").unwrap();
         drop(e);
 
-        let decoded: NodeAnnounce = minicbor::decode(&buf).expect("decode should skip unknown keys");
+        let decoded: NodeAnnounce =
+            minicbor::decode(&buf).expect("decode should skip unknown keys");
         assert_eq!(decoded.node_id, NodeId::new(1));
         assert_eq!(decoded.name.as_str(), "test");
     }

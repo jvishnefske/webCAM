@@ -1112,7 +1112,11 @@ mod tests {
 
     #[test]
     fn stallguard_block_fn() {
-        let sg = BlockFn::StallGuard { port: 0, addr: 0, threshold: 10.0 };
+        let sg = BlockFn::StallGuard {
+            port: 0,
+            addr: 0,
+            threshold: 10.0,
+        };
         assert_eq!(sg.n_outputs(), 2);
         let mut out = [0.0, 0.0];
         sg.call(&[], &mut out, &mut NullHardware);
@@ -1145,9 +1149,15 @@ mod tests {
             ("uart_rx", serde_json::json!({"port": 0})),
             ("uart_tx", serde_json::json!({"port": 1})),
             ("encoder", serde_json::json!({"channel": 0})),
-            ("ssd1306_display", serde_json::json!({"i2c_bus": 0, "address": 60})),
+            (
+                "ssd1306_display",
+                serde_json::json!({"i2c_bus": 0, "address": 60}),
+            ),
             ("tmc2209_stepper", serde_json::json!({"uart_port": 0})),
-            ("tmc2209_stallguard", serde_json::json!({"uart_port": 0, "uart_addr": 0, "threshold": 5})),
+            (
+                "tmc2209_stallguard",
+                serde_json::json!({"uart_port": 0, "uart_addr": 0, "threshold": 5}),
+            ),
             ("pubsub_source", serde_json::json!({"topic": "test"})),
             ("pubsub_sink", serde_json::json!({"topic": "test"})),
             ("json_encode", serde_json::json!({})),

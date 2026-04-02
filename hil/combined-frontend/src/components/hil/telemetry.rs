@@ -26,9 +26,10 @@ pub fn TelemetryPanel() -> impl IntoView {
     let ctx = use_context::<AppContext>().unwrap();
 
     // Poll telemetry every 2 seconds
-    let send = ctx.send.clone();
+    // Poll telemetry every 2 seconds via request queue
+    let request_tx = ctx.request_tx;
     gloo_timers::callback::Interval::new(2_000, move || {
-        send.call(Request::ReadAllTelemetry);
+        request_tx.update(|q| q.push(Request::ReadAllTelemetry));
     })
     .forget();
 

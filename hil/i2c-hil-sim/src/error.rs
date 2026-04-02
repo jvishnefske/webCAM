@@ -74,7 +74,10 @@ mod tests {
 
     #[test]
     fn display_device_error() {
-        assert_eq!(format!("{}", BusError::DeviceError), "device processing error");
+        assert_eq!(
+            format!("{}", BusError::DeviceError),
+            "device processing error"
+        );
     }
 
     #[test]
@@ -87,9 +90,6 @@ mod tests {
             BusError::DataNak.kind(),
             ErrorKind::NoAcknowledge(NoAcknowledgeSource::Data)
         ));
-        assert!(matches!(
-            BusError::DeviceError.kind(),
-            ErrorKind::Other
-        ));
+        assert!(matches!(BusError::DeviceError.kind(), ErrorKind::Other));
     }
 }

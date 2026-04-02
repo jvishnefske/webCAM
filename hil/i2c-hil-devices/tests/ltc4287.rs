@@ -931,7 +931,11 @@ fn status_word_other_aggregation_bit() {
 
     let sw = read_word_le(&mut bus, 0x44, 0x79);
     let high = (sw >> 8) as u8;
-    assert_ne!(high & (1 << 1), 0, "STATUS_OTHER should set STATUS_WORD bit 9");
+    assert_ne!(
+        high & (1 << 1),
+        0,
+        "STATUS_OTHER should set STATUS_WORD bit 9"
+    );
 }
 
 // --- STATUS_WORD: INPUT aggregation (bit 13) ---
@@ -945,7 +949,11 @@ fn status_word_input_aggregation_bit() {
 
     let sw = read_word_le(&mut bus, 0x44, 0x79);
     let high = (sw >> 8) as u8;
-    assert_ne!(high & (1 << 5), 0, "STATUS_INPUT should set STATUS_WORD bit 13");
+    assert_ne!(
+        high & (1 << 5),
+        0,
+        "STATUS_INPUT should set STATUS_WORD bit 13"
+    );
 }
 
 // --- STATUS_WORD: MFR aggregation (bit 12) ---
@@ -959,7 +967,11 @@ fn status_word_mfr_aggregation_bit() {
 
     let sw = read_word_le(&mut bus, 0x44, 0x79);
     let high = (sw >> 8) as u8;
-    assert_ne!(high & (1 << 4), 0, "STATUS_MFR should set STATUS_WORD bit 12");
+    assert_ne!(
+        high & (1 << 4),
+        0,
+        "STATUS_MFR should set STATUS_WORD bit 12"
+    );
 }
 
 // --- STATUS_WORD: POWER_GOOD via status_vout bit 3 ---
@@ -973,7 +985,11 @@ fn status_word_power_good_via_vout_bit3() {
 
     let sw = read_word_le(&mut bus, 0x44, 0x79);
     let high = (sw >> 8) as u8;
-    assert_ne!(high & (1 << 3), 0, "POWER_GOOD# should be set via status_vout bit 3");
+    assert_ne!(
+        high & (1 << 3),
+        0,
+        "POWER_GOOD# should be set via status_vout bit 3"
+    );
 }
 
 // --- Extended prefix config2 write ---

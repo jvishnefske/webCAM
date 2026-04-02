@@ -185,7 +185,6 @@ fn generate_main_rs(dt: f64) -> String {
         "static mut HW: HwPeripherals = HwPeripherals {{ _marker: () }};"
     )
     .unwrap();
-    out.push_str(&super::generate_hw_ffi_stubs("HW"));
 
     out
 }

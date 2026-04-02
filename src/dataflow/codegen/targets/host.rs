@@ -106,7 +106,6 @@ fn generate_main_rs(dt: f64) -> String {
     writeln!(out, "}}").unwrap();
 
     // Append C-FFI hw_* stubs
-    out.push_str(&super::generate_hw_ffi_stubs("HW"));
 
     out
 }
