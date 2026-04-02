@@ -5,6 +5,7 @@ import { $, $btn, $input } from '../dom.js';
 import { DataflowManager } from './graph.js';
 import { DataflowEditor } from './editor.js';
 import { drawPlot } from './plot.js';
+import { DEFAULT_CONFIGS } from './palette.js';
 import { createZip } from './zip.js';
 import { HilClient } from './hil-client.js';
 import { renderPinTable } from './pin-table.js';
@@ -231,6 +232,9 @@ export function initDataflow(): void {
   // Set up target selection checkboxes
   setupTargetCheckboxes();
 
+  // Sidebar block palette
+  setupSidebarPalette();
+
   // HIL connection + tabs
   setupHilConnection();
   setupDfRightTabs();
@@ -425,6 +429,50 @@ function formatValue(val: Value | null): string {
     case 'Bytes': return `[${val.data.length} bytes]`;
     case 'Series': return `[${val.data.length} samples]`;
   }
+}
+
+// ── Sidebar block palette ─────────────────────────────────────────
+
+function setupSidebarPalette(): void {
+  const containerEl = document.getElementById('df-sidebar-palette');
+  const filterInput = document.getElementById('df-palette-filter') as HTMLInputElement | null;
+  if (!containerEl) return;
+  const container = containerEl;
+
+  const blockTypes = DataflowManager.blockTypes();
+
+  function render(filter: string): void {
+    container.textContent = '';
+    const lower = filter.toLowerCase();
+    let lastCat = '';
+
+    for (const bt of blockTypes) {
+      if (filter && !bt.name.toLowerCase().includes(lower) && !bt.block_type.toLowerCase().includes(lower)) {
+        continue;
+      }
+      if (bt.category !== lastCat) {
+        lastCat = bt.category;
+        const header = document.createElement('div');
+        header.className = 'text-[11px] text-text-dim uppercase mt-2 first:mt-0';
+        header.textContent = bt.category;
+        container.appendChild(header);
+      }
+      const item = document.createElement('button');
+      item.className = 'block w-full text-left text-xs px-2 py-1 rounded cursor-pointer bg-transparent border-none text-text hover:bg-border transition-colors';
+      item.textContent = bt.name;
+      item.addEventListener('click', () => {
+        if (!mgr || !editor) return;
+        const config = DEFAULT_CONFIGS[bt.block_type] ?? {};
+        mgr.addBlock(bt.block_type, config, 200, 200);
+        editor.updateSnapshot();
+        editor.onChange?.();
+      });
+      container.appendChild(item);
+    }
+  }
+
+  render('');
+  filterInput?.addEventListener('input', () => render(filterInput.value));
 }
 
 const TARGET_OPTIONS = [
