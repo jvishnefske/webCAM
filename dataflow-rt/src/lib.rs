@@ -39,6 +39,54 @@ pub trait Peripherals {
     fn stallguard_read(&mut self, _port: u8, _addr: u8) -> u16 {
         0
     }
+    /// Connect a virtual TCP socket.
+    #[allow(clippy::result_unit_err)]
+    fn tcp_connect(&mut self, _id: u8, _addr: &str, _port: u16) -> Result<(), ()> {
+        Err(())
+    }
+    /// Send data on a connected TCP socket.
+    #[allow(clippy::result_unit_err)]
+    fn tcp_send(&mut self, _id: u8, _data: &[u8]) -> Result<usize, ()> {
+        Err(())
+    }
+    /// Receive data from a connected TCP socket.
+    #[allow(clippy::result_unit_err)]
+    fn tcp_recv(&mut self, _id: u8, _buf: &mut [u8]) -> Result<usize, ()> {
+        Err(())
+    }
+    /// Close a TCP socket.
+    fn tcp_close(&mut self, _id: u8) {}
+    /// Send a UDP datagram.
+    #[allow(clippy::result_unit_err)]
+    fn udp_send(&mut self, _id: u8, _addr: &str, _port: u16, _data: &[u8]) -> Result<usize, ()> {
+        Err(())
+    }
+    /// Receive a UDP datagram.
+    #[allow(clippy::result_unit_err)]
+    fn udp_recv(&mut self, _id: u8, _buf: &mut [u8]) -> Result<usize, ()> {
+        Err(())
+    }
+    /// Write bytes to an I2C device on the given bus.
+    #[allow(clippy::result_unit_err)]
+    fn i2c_write(&mut self, _bus: u8, _addr: u8, _data: &[u8]) -> Result<(), ()> {
+        Err(())
+    }
+    /// Read bytes from an I2C device on the given bus.
+    #[allow(clippy::result_unit_err)]
+    fn i2c_read(&mut self, _bus: u8, _addr: u8, _buf: &mut [u8]) -> Result<(), ()> {
+        Err(())
+    }
+    /// Write then read (combined transaction) on an I2C bus.
+    #[allow(clippy::result_unit_err)]
+    fn i2c_write_read(
+        &mut self,
+        _bus: u8,
+        _addr: u8,
+        _write: &[u8],
+        _read: &mut [u8],
+    ) -> Result<(), ()> {
+        Err(())
+    }
 }
 
 /// A processing node in a dataflow graph.
@@ -304,6 +352,64 @@ mod tests {
         // stepper_enable has a default no-op implementation -- should not panic
         p.stepper_enable(0, true);
         p.stepper_enable(0, false);
+    }
+
+    #[test]
+    fn test_peripherals_tcp_connect_default_err() {
+        let mut p = MockPeripherals::new();
+        assert!(p.tcp_connect(0, "127.0.0.1", 8080).is_err());
+    }
+
+    #[test]
+    fn test_peripherals_tcp_send_default_err() {
+        let mut p = MockPeripherals::new();
+        assert!(p.tcp_send(0, b"hello").is_err());
+    }
+
+    #[test]
+    fn test_peripherals_tcp_recv_default_err() {
+        let mut p = MockPeripherals::new();
+        let mut buf = [0u8; 16];
+        assert!(p.tcp_recv(0, &mut buf).is_err());
+    }
+
+    #[test]
+    fn test_peripherals_tcp_close_default_noop() {
+        let mut p = MockPeripherals::new();
+        p.tcp_close(0); // should not panic
+    }
+
+    #[test]
+    fn test_peripherals_udp_send_default_err() {
+        let mut p = MockPeripherals::new();
+        assert!(p.udp_send(0, "127.0.0.1", 9000, b"data").is_err());
+    }
+
+    #[test]
+    fn test_peripherals_udp_recv_default_err() {
+        let mut p = MockPeripherals::new();
+        let mut buf = [0u8; 16];
+        assert!(p.udp_recv(0, &mut buf).is_err());
+    }
+
+    #[test]
+    fn test_peripherals_i2c_write_default_err() {
+        let mut p = MockPeripherals::new();
+        assert!(p.i2c_write(0, 0x50, &[0x00, 0x42]).is_err());
+    }
+
+    #[test]
+    fn test_peripherals_i2c_read_default_err() {
+        let mut p = MockPeripherals::new();
+        let mut buf = [0u8; 4];
+        assert!(p.i2c_read(0, 0x50, &mut buf).is_err());
+    }
+
+    #[test]
+    fn test_peripherals_i2c_write_read_default_err() {
+        let mut p = MockPeripherals::new();
+        let mut buf = [0u8; 4];
+        assert!(p.i2c_write_read(0, 0x50, &[0x00], &mut buf).is_err());
     }
 
     #[test]

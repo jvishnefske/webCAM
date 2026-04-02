@@ -2,224 +2,216 @@ version = 1
 status = "complete"
 
 [project]
-name = "webcam-cadcam-mvp"
-description = "CAD/CAM MVP with machine tool profiles (CNC mill, laser cutter), porting useful Rust code from cnc-sender, all running in WASM"
+name = "native-server-mock-hal"
+description = "Native webserver serving frontend with I2C/serial/socket HAL traits mocked in WASM simulation environment"
 worktree_base = ".worktrees"
 
 # ============================================================================
-# Phase 1: Port cnc-sender Foundation Types (parallel, no deps)
+# Phase 1: Trait extensions + server skeleton (fully parallel)
 # ============================================================================
 
 [[tasks]]
 id = "task-001"
-title = "Port type-safe unit system from cnc-sender"
+title = "Add I2C methods to SimPeripherals and Peripherals traits"
 acceptance = """
-- src/units.rs with Distance<Mm>/Distance<Inch>, FeedRate<U>, SpindleSpeed phantom types
-- Ported from ../cnc-sender/crates/cnc-types/src/units.rs
-- Compile-time unit safety prevents mixing mm and inch values
-- Conversion methods: Distance<Mm>::to_inches(), Distance<Inch>::to_mm()
-- Existing CamConfig/CutParams fields annotated or wrapped with typed units
-- All existing tests pass, new unit tests for conversions and Display
-- Builds for both native and wasm32-unknown-unknown targets
+- SimPeripherals trait (module-traits/src/sim.rs) gains:
+    i2c_write(&mut self, bus: u8, addr: u8, data: &[u8]) -> Result<(), ()>
+    i2c_read(&mut self, bus: u8, addr: u8, buf: &mut [u8]) -> Result<(), ()>
+    i2c_write_read(&mut self, bus: u8, addr: u8, write: &[u8], read: &mut [u8]) -> Result<(), ()>
+  All three have default impls returning Err(())
+- Peripherals trait (dataflow-rt/src/lib.rs) gains matching i2c_* methods with default Err(()) impls
+- Existing tests still pass (cargo test -p module-traits -p dataflow-rt)
+- No breaking changes: all new methods have defaults
 """
 deps = []
 status = "complete"
-spec_file = "specs/task-001.md"
 
 [[tasks]]
 id = "task-002"
-title = "Port G-code parser and validator from cnc-sender"
+title = "Add socket primitives to SimPeripherals and Peripherals traits"
 acceptance = """
-- src/gcode_parser.rs ported from ../cnc-sender/crates/cnc-gcode/src/parser.rs
-- parse_line() returns GCodeCommand enum (G0/G1/G2/G3, G20/G21, G90/G91, M3/M4/M5, M7-M9, S, F)
-- Comment stripping (semicolon and parenthetical)
-- src/gcode_validator.rs ported from ../cnc-sender/crates/cnc-gcode/src/validator.rs
-- ValidationConfig with configurable max feed, max spindle, travel bounds
-- Unit tests covering all supported G-codes and edge cases
-- WASM-compatible (no std::io, no std::fs)
+- SimPeripherals trait gains:
+    tcp_connect(&mut self, id: u8, addr: &str, port: u16) -> Result<(), ()>
+    tcp_send(&mut self, id: u8, data: &[u8]) -> Result<usize, ()>
+    tcp_recv(&mut self, id: u8, buf: &mut [u8]) -> Result<usize, ()>
+    tcp_close(&mut self, id: u8)
+    udp_send(&mut self, id: u8, addr: &str, port: u16, data: &[u8]) -> Result<usize, ()>
+    udp_recv(&mut self, id: u8, buf: &mut [u8]) -> Result<usize, ()>
+  All with default impls returning Err(()) or no-op
+- Peripherals trait gains matching methods with defaults
+- Existing tests still pass
 """
 deps = []
 status = "complete"
-spec_file = "specs/task-002.md"
-
-# ============================================================================
-# Phase 2: Machine Profile System
-# ============================================================================
 
 [[tasks]]
 id = "task-003"
-title = "Define MachineProfile and MachineType configuration"
+title = "Create native-server crate with axum and static file serving"
 acceptance = """
-- src/machine.rs with MachineType enum: CncMill, LaserCutter
-- MachineProfile struct: name, machine_type, capabilities, output_config
-- MachineCapabilities: available_strategies vec, has_spindle, has_laser_power, has_z_axis, max_feed_rate, max_spindle_rpm, max_laser_power
-- OutputConfig: preamble lines, postamble lines, unit_mode (G20/G21), distance_mode (G90/G91)
-- Serde Serialize/Deserialize for JSON config passing through WASM boundary
-- Default profiles: MachineProfile::cnc_mill(), MachineProfile::laser_cutter()
-- Unit tests for serialization roundtrip and default construction
+- New crate at hil/native-server/ with Cargo.toml
+- Dependencies: axum, tokio (rt-multi-thread, macros), tower-http (fs)
+- Added to workspace members in root Cargo.toml (NOT default-members)
+- Added to WORKSPACE_EXCLUDES in Makefile (like other HIL crates)
+- Serves www/ directory on configurable port (default 3000)
+- Serves www/pkg/*.wasm with correct Content-Type
+- CLI: cargo run -p native-server [-- --port 3000 --www-dir www/]
+- cargo build -p native-server succeeds
+- Basic test: server starts and responds 200 on GET /
 """
 deps = []
 status = "complete"
-spec_file = "specs/task-003.md"
+
+# ============================================================================
+# Phase 2: Implementations (parallel, each depends on one Phase 1 task)
+# ============================================================================
 
 [[tasks]]
 id = "task-004"
-title = "Implement CNC mill profile with existing strategies"
+title = "Implement I2C mock in WasmSimPeripherals using RuntimeBus"
 acceptance = """
-- CNC mill profile wraps existing behavior: spindle, Z-axis, all current strategies
-- CamConfig gains optional machine_type field (defaults to CncMill for backward compat)
-- Mill output config: G21 G90, M3 S{rpm}, optional M8 coolant, M5 M9 M30 end
-- process_stl/process_svg with machine_type='cnc_mill' produces identical output to current
-- Integration test: same STL input → identical G-code with and without explicit profile
+- WasmSimPeripherals (src/dataflow/sim_peripherals.rs) implements new I2C methods
+- Internally uses i2c-hil-sim RuntimeBus instances (one per logical bus)
+- i2c_write routes to RuntimeBus::write on correct bus
+- i2c_read uses RuntimeBus pointer-based read protocol
+- i2c_write_read does write-then-read transaction
+- WasmSimPeripherals gains:
+    add_i2c_device(bus: u8, addr: u8, name: &str) — adds RuntimeDevice
+    remove_i2c_device(bus: u8, addr: u8) — removes device
+    i2c_device_registers(bus: u8, addr: u8) -> Option<[u8; 256]>
+- rustcam crate Cargo.toml adds i2c-hil-sim dependency
+- 5+ tests: write/read roundtrip, multi-bus, device add/remove, error on missing device
+- cargo test passes (default members)
 """
-deps = ["task-003"]
+deps = ["task-001"]
 status = "complete"
-spec_file = "specs/task-004.md"
 
 [[tasks]]
 id = "task-005"
-title = "Implement laser cutter profile"
+title = "Implement socket mock in WasmSimPeripherals"
 acceptance = """
-- Laser profile: power (0-1000 S-value), dynamic power mode (M4), no Z-axis moves
-- Laser-specific CamConfig fields: laser_power, passes, air_assist bool
-- Laser output config: G21 G90, M4 S0 (dynamic power on), S{power} during cuts, M5 M30 end
-- Profile rejects 3D strategies (zigzag_surface, slice) with clear error message
-- Supports 2D strategies: contour, pocket (reused as engrave fill)
-- Rapid moves use S0 (power off) + G0 instead of Z retract
-- Unit tests for laser G-code output format
+- WasmSimPeripherals implements new socket methods
+- Internal state: HashMap<u8, VirtualSocket> with per-socket buffers
+- tcp_connect creates a loopback socket entry (connected state)
+- tcp_send/tcp_recv operate on ring buffers
+- tcp_close removes socket
+- udp_send/udp_recv work statelessly via per-id buffers
+- WasmSimPeripherals gains:
+    inject_tcp_data(id: u8, data: &[u8]) — push data into recv buffer (for testing)
+    drain_tcp_data(id: u8) -> Vec<u8> — drain send buffer (for testing)
+- 5+ tests: connect/send/recv roundtrip, close clears state, UDP stateless
+- cargo test passes
 """
-deps = ["task-003"]
+deps = ["task-002"]
 status = "complete"
-spec_file = "specs/task-005.md"
 
 [[tasks]]
 id = "task-006"
-title = "Profile-aware G-code emitter"
+title = "Implement DAG HTTP API in native server"
 acceptance = """
-- Refactored src/gcode.rs accepts MachineProfile for output formatting
-- emit_gcode(toolpath, profile) → String with correct preamble/postamble
-- CNC mill: G21 G90, M3 S{rpm}, rapids use safe_z retract, M5 M9 M30 end
-- Laser: G21 G90, M4 S0, rapids use S0 + G0 (no Z), S{power} during cuts, M5 M30 end
-- Existing gcode::emit() function delegates to profile-aware version with CncMill default
-- Tests comparing same toolpath output under both profiles
+- Axum routes matching Pico2 API contract:
+    POST /api/dag — accept CBOR body, load into DagExecutor
+    POST /api/tick — evaluate one tick, return JSON result
+    GET /api/status — return {loaded, nodes, ticks}
+    GET /api/pubsub — return all topic values as JSON
+    GET /api/channels — return {inputs: [...], outputs: [...]}
+    POST /api/debug — toggle debug mode
+- Server state: Arc<Mutex<ServerState>> containing:
+    DagExecutor + MapChannels + SimplePubSub (from dag-runtime)
+- Depends on dag-runtime with std+json features
+- 6+ tests using axum::test (one per endpoint)
+- API responses match Pico2 JSON schema exactly
 """
-deps = ["task-004", "task-005"]
+deps = ["task-003"]
 status = "complete"
-spec_file = "specs/task-006.md"
-
-# ============================================================================
-# Phase 3: Laser-Specific CAM Strategies
-# ============================================================================
 
 [[tasks]]
 id = "task-007"
-title = "Implement laser cut strategy (2D contour with power)"
+title = "Enhance UART/serial mock with baud rate and framing config"
 acceptance = """
-- LaserCutStrategy follows SVG contour paths with laser power metadata
-- Multi-pass support: repeat path N times (configurable passes parameter)
-- Lead-in overcut: small extension past path start for clean edge closure
-- ToolpathMove gains optional power: Option<f64> field for laser S-value
-- Generates flat (Z=0) toolpath with power on during cuts, power off during rapids
-- Unit tests: rectangle path → expected G-code with M4/S values
+- WasmSimPeripherals gains serial port configuration:
+    configure_serial(port: u8, baud: u32, data_bits: u8, parity: Parity, stop_bits: u8)
+- New SerialConfig struct in sim_peripherals.rs
+- Existing uart_write/uart_read behavior unchanged (backward compatible)
+- Serial config stored per-port, accessible via get_serial_config(port) -> Option<SerialConfig>
+- When configured, uart_write/uart_read can optionally enforce framing (future use)
+- WasmSimPeripherals gains:
+    serial_ports() -> Vec<(u8, SerialConfig)> — list configured ports
+- 3+ tests: configure, read back config, default behavior unchanged
+- cargo test passes
 """
-deps = ["task-005"]
+deps = []
 status = "complete"
-spec_file = "specs/task-007.md"
+
+# ============================================================================
+# Phase 3: Server integration + WASM API (depends on Phase 2)
+# ============================================================================
 
 [[tasks]]
 id = "task-008"
-title = "Implement laser engrave strategy (raster fill)"
+title = "Implement WebSocket CBOR I2C dispatch in native server"
 acceptance = """
-- LaserEngraveStrategy: scanline fill of closed SVG paths
-- Bidirectional scanning (serpentine pattern, alternating row direction)
-- Configurable line spacing in mm (maps to DPI: spacing = 25.4/DPI)
-- Power level configurable per-job (uniform fill for MVP)
-- Efficient toolpath: minimizes laser-off travel between scanlines
-- Unit tests: filled 10x10mm rectangle at 0.1mm spacing → 100 scanlines
+- Axum WebSocket endpoint at /ws
+- Accepts same CBOR protocol as Pico2 (hil-firmware-support/ws_dispatch.rs):
+    TAG_I2C_READ (1), TAG_I2C_WRITE (2), TAG_LIST_BUSES (3),
+    TAG_ADD_DEVICE (30), TAG_REMOVE_DEVICE (31), TAG_GET_CONFIG (35)
+- Server-side I2cBusSet backed by i2c-hil-sim RuntimeBus array
+- Shares RuntimeBus state with SimPeripherals (if both used)
+- native-server Cargo.toml adds: tokio-tungstenite or axum WebSocket, minicbor
+- 4+ tests: list buses, add device, i2c read/write roundtrip via WS
 """
-deps = ["task-005"]
+deps = ["task-004", "task-006"]
 status = "complete"
-spec_file = "specs/task-008.md"
-
-# ============================================================================
-# Phase 4: WASM API & UI Integration
-# ============================================================================
 
 [[tasks]]
 id = "task-009"
-title = "Update WASM API for machine profile selection"
+title = "Add WASM API exports for I2C, serial, and socket simulation control"
 acceptance = """
-- process_stl/process_svg config JSON accepts machine_type field
-- Omitting machine_type defaults to 'cnc_mill' (backward compatible)
-- New WASM export: available_profiles() → JSON [{name, machine_type, capabilities}]
-- New WASM export: default_config(machine_type) → JSON default config for that profile
-- preview functions respect profile (laser preview: no Z, power as metadata)
-- All existing www/index.html usage works without changes
+- New wasm-bindgen exports in src/lib.rs:
+    dataflow_add_i2c_device(graph_id, bus, addr, name) -> Result
+    dataflow_remove_i2c_device(graph_id, bus, addr) -> Result
+    dataflow_i2c_device_registers(graph_id, bus, addr) -> Result<JsValue>
+    dataflow_configure_serial(graph_id, port, baud, data_bits, parity, stop_bits) -> Result
+    dataflow_serial_ports(graph_id) -> Result<JsValue>
+    dataflow_tcp_inject(graph_id, socket_id, data: &[u8]) -> Result
+    dataflow_tcp_drain(graph_id, socket_id) -> Result<JsValue>
+- All delegate to WasmSimPeripherals methods on the graph's sim state
+- Return errors if simulation mode not enabled
+- 6+ wasm-bindgen-test or unit tests
+- cargo test passes
 """
-deps = ["task-006"]
+deps = ["task-004", "task-005", "task-007"]
 status = "complete"
-spec_file = "specs/task-009.md"
+
+# ============================================================================
+# Phase 4: Integration testing + developer experience
+# ============================================================================
 
 [[tasks]]
 id = "task-010"
-title = "Add machine profile selector to web UI"
+title = "Integration tests for API parity and mock HAL roundtrips"
 acceptance = """
-- Machine type dropdown at top of parameter panel: 'CNC Mill', 'Laser Cutter'
-- Selecting profile shows/hides relevant parameter sections dynamically
-- CNC mill shows: spindle speed, plunge rate, step-down, safe-Z, tool type, coolant
-- Laser shows: power (0-100%), cut speed, passes, line spacing (for engrave), air assist
-- Strategy dropdown filtered to only valid strategies for selected profile
-- Profile persists in localStorage across page reloads
+- Test suite in hil/native-server/tests/ or as integration tests:
+    1. Deploy CBOR DAG via POST /api/dag, tick, verify output matches dag-runtime
+    2. Add I2C device via WebSocket, read registers via HTTP, verify match
+    3. Full roundtrip: deploy DAG with I2C input block, add device, tick, verify I2C read flows through
+    4. Verify JSON response schemas match Pico2 exactly (status, channels, pubsub)
+    5. WebSocket reconnection doesn't lose I2C bus state
+- All tests pass with cargo test -p native-server
 """
-deps = ["task-009"]
+deps = ["task-008", "task-009"]
 status = "complete"
-spec_file = "specs/task-010.md"
 
 [[tasks]]
 id = "task-011"
-title = "Profile-aware canvas preview rendering"
+title = "Makefile serve-native target and dev workflow"
 acceptance = """
-- CNC preview: existing Z-height color gradient (blue=safe, red=deep cut)
-- Laser preview: cut paths as red lines (opacity = power level), travel as gray dashed
-- Laser engrave preview: filled scanlines visible with power-based opacity
-- Preview updates immediately when switching profiles
-- Legend/key shows color meaning per profile type
+- New Makefile targets:
+    serve-native: wasm-pack build + cargo run -p native-server
+    dev: wasm-pack build + native-server with file watching (cargo-watch or similar)
+- native-server auto-detects www/ directory relative to workspace root
+- Frontend hil-client.ts works with both native-server (localhost:3000) and Pico2 (169.254.1.61:8080) — same CBOR protocol, different base URL
+- Running `make serve-native` starts server, opens browser at localhost:3000
+- README or CLAUDE.md updated with native-server usage
 """
-deps = ["task-009"]
+deps = ["task-010"]
 status = "complete"
-spec_file = "specs/task-011.md"
-
-# ============================================================================
-# Phase 5: Integration & Validation
-# ============================================================================
-
-[[tasks]]
-id = "task-012"
-title = "End-to-end integration tests for both profiles"
-acceptance = """
-- Test: SVG rectangle → CNC mill contour → G-code with M3, Z moves, F rates
-- Test: SVG rectangle → laser cut → G-code with M4, S values, no Z moves
-- Test: SVG filled shape → laser engrave → G-code with scanlines and S values
-- Test: STL mesh → CNC zigzag surface → valid G-code (laser rejects STL gracefully)
-- Test: config JSON roundtrip for each profile type
-- Test: WASM build succeeds, exports available_profiles and default_config
-- All pass in `make verify`
-"""
-deps = ["task-007", "task-008", "task-009"]
-status = "complete"
-spec_file = "specs/task-012.md"
-
-[[tasks]]
-id = "task-013"
-title = "Post-generation G-code validation using ported parser"
-acceptance = """
-- Generated G-code piped through validator before returning to caller
-- Validator checks per profile: feed rate presence on G1, valid S range, expected axes
-- Laser: warns on any Z move (except focus), S within max_laser_power
-- CNC: warns on missing plunge rate for Z moves, S within max_spindle_rpm
-- Warnings returned as JSON array alongside G-code string (non-blocking)
-- Unit tests for each validation rule
-"""
-deps = ["task-002", "task-012"]
-status = "complete"
-spec_file = "specs/task-013.md"
