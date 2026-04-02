@@ -18,7 +18,6 @@ WORKSPACE_EXCLUDES = \
 	--exclude pico-bootloader \
 	--exclude combined-frontend \
 	--exclude hil-frontend \
-	--exclude native-server \
 	--exclude board-support-pi-zero \
 	--exclude gs-usb-device \
 	--exclude vprbrd-usb-gpio \
