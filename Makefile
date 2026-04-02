@@ -64,6 +64,9 @@ serve-native: wasm ## Build WASM + run native server with mock HAL
 	@echo "Starting native-server at http://localhost:3000"
 	cargo run -p native-server -- --www-dir www --port 3000
 
+hil-e2e: ## Run E2E tests against live Pico2 (requires flashed device)
+	./tests/pico2_e2e.sh
+
 clean: ## Remove build artifacts
 	cargo clean
 	rm -rf www/pkg www/dist www/node_modules rustcam.zip
