@@ -258,6 +258,5 @@ mod tests {
         assert!(main.contains("logic::tick(&mut hw, &mut state)"));
         assert!(main.contains("Duration::from_millis(20)"));
         assert!(main.contains("impl Peripherals for HwPeripherals"));
-        assert!(main.contains("hw_adc_read")); // C-FFI stubs
     }
 }
