@@ -44,39 +44,21 @@ pub struct AppContext {
     // Tab
     pub active_tab: ReadSignal<Tab>,
     pub set_active_tab: WriteSignal<Tab>,
-    // Send function (Rc because signals require Send+Sync)
-    pub send: SendWrapper,
+    // Request queue — components push requests here, app drains and sends
+    pub request_tx: WriteSignal<Vec<Request>>,
 }
-
-/// Wrapper to make the send function Send+Sync for Leptos signals.
-/// Safe because WASM is single-threaded.
-#[derive(Clone)]
-pub struct SendWrapper {
-    inner: Rc<dyn Fn(Request)>,
-}
-
-impl SendWrapper {
-    fn new(f: impl Fn(Request) + 'static) -> Self {
-        Self { inner: Rc::new(f) }
-    }
-
-    pub fn call(&self, req: Request) {
-        (self.inner)(req);
-    }
-}
-
-// SAFETY: WASM is single-threaded.
-unsafe impl Send for SendWrapper {}
-unsafe impl Sync for SendWrapper {}
 
 impl AppContext {
-    /// Send a request and log it to the console.
+    /// Queue a request for sending over WebSocket.
+    pub fn send(&self, req: Request) {
+        self.request_tx.update(|q| q.push(req));
+    }
+
+    /// Queue a request and log it to the console.
     pub fn send_logged(&self, req: Request) {
         let label = format!("[REQ] {:?}", req);
-        self.set_console_log.update(|log| {
-            log.push(label);
-        });
-        self.send.call(req);
+        self.set_console_log.update(|log| log.push(label));
+        self.send(req);
     }
 }
 
@@ -96,47 +78,54 @@ pub fn App() -> impl IntoView {
     let (fw_response, set_fw_response) = signal(None::<Response>);
     let (active_tab, set_active_tab) = signal(Tab::Buses);
 
-    // -- Send function --
-    let send = SendWrapper::new(move |req: Request| {
-        let _ = ws_client::send_request(&req);
+    // -- Request queue (safe: Vec<Request> is Send+Sync) --
+    let (request_rx, request_tx) = signal(Vec::<Request>::new());
+
+    // Drain the request queue and send via WebSocket
+    Effect::new(move |_| {
+        let pending = request_rx.get();
+        if !pending.is_empty() {
+            for req in &pending {
+                let _ = ws_client::send_request(req);
+            }
+            request_tx.set(Vec::new());
+        }
     });
 
     // -- Response handler --
-    let handle_response = {
-        move |resp: Response| match &resp {
-            Response::BusList { buses: b } => set_buses.set(b.clone()),
-            Response::Telemetry {
-                temps: t,
-                power: p,
-                fans: f,
-            } => {
-                set_temps.set(t.clone());
-                set_power.set(p.clone());
-                set_fans.set(f.clone());
-            }
-            Response::I2cData { data } => {
-                let hex: Vec<String> = data.iter().map(|b| format!("{b:02X}")).collect();
-                set_console_log.update(|log| {
-                    log.push(format!("[RESP] data: {}", hex.join(" ")));
-                });
-            }
-            Response::WriteOk => {
-                set_console_log.update(|log| {
-                    log.push("[RESP] Write OK".to_string());
-                });
-            }
-            Response::Error { message: msg } => {
-                set_console_log.update(|log| {
-                    log.push(format!("[ERR] {msg}"));
-                });
-                set_fw_response.set(Some(resp.clone()));
-            }
-            Response::FwReady { .. }
-            | Response::FwChunkAck { .. }
-            | Response::FwFinishAck
-            | Response::FwMarkBootedAck => {
-                set_fw_response.set(Some(resp.clone()));
-            }
+    let handle_response = move |resp: Response| match &resp {
+        Response::BusList { buses: b } => set_buses.set(b.clone()),
+        Response::Telemetry {
+            temps: t,
+            power: p,
+            fans: f,
+        } => {
+            set_temps.set(t.clone());
+            set_power.set(p.clone());
+            set_fans.set(f.clone());
+        }
+        Response::I2cData { data } => {
+            let hex: Vec<String> = data.iter().map(|b| format!("{b:02X}")).collect();
+            set_console_log.update(|log| {
+                log.push(format!("[RESP] data: {}", hex.join(" ")));
+            });
+        }
+        Response::WriteOk => {
+            set_console_log.update(|log| {
+                log.push("[RESP] Write OK".to_string());
+            });
+        }
+        Response::Error { message: msg } => {
+            set_console_log.update(|log| {
+                log.push(format!("[ERR] {msg}"));
+            });
+            set_fw_response.set(Some(resp.clone()));
+        }
+        Response::FwReady { .. }
+        | Response::FwChunkAck { .. }
+        | Response::FwFinishAck
+        | Response::FwMarkBootedAck => {
+            set_fw_response.set(Some(resp.clone()));
         }
     };
 
@@ -148,7 +137,6 @@ pub fn App() -> impl IntoView {
     let connect_fn: Rc<dyn Fn()> = {
         let do_connect = Rc::clone(&do_connect);
         let backoff_ms = Rc::clone(&backoff_ms);
-        let handle_response = handle_response.clone();
         Rc::new(move || {
             let do_connect = Rc::clone(&do_connect);
             let backoff_ms_rc = Rc::clone(&backoff_ms);
@@ -166,7 +154,7 @@ pub fn App() -> impl IntoView {
             ws_client::connect(
                 "ws://169.254.1.61:8080",
                 set_conn_state,
-                handle_response.clone(),
+                handle_response,
                 on_close,
             );
         })
@@ -189,7 +177,7 @@ pub fn App() -> impl IntoView {
         fw_response,
         active_tab,
         set_active_tab,
-        send,
+        request_tx,
     };
     provide_context(ctx);
 

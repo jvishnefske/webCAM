@@ -100,11 +100,7 @@ mod tests {
             .iter()
             .find(|(cat, _)| *cat == BlockCategory::Control);
         assert!(control.is_some());
-        assert!(control
-            .unwrap()
-            .1
-            .iter()
-            .any(|d| d.block_type == "pid"));
+        assert!(control.unwrap().1.iter().any(|d| d.block_type == "pid"));
     }
 
     #[test]

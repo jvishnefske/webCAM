@@ -4,7 +4,7 @@
 //! served from the Pico2 MCU's HTTP server. Shares `module-traits` and
 //! `dag-core` types directly in Rust — no TypeScript mirror types.
 
-// Note: unsafe impl Send/Sync for SendWrapper in app.rs (WASM is single-threaded)
+#![forbid(unsafe_code)]
 
 #[cfg(target_arch = "wasm32")]
 pub mod app;
