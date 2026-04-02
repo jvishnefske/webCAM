@@ -24,6 +24,7 @@ members = [
     "hil/pico-bootloader",
     "hil/hil-frontend",
     "hil/combined-frontend",
+    "hil/native-server",
     "mlir-codegen",
     "configurable-blocks",
 ]
@@ -98,6 +99,8 @@ js-sys = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dag-core = { workspace = true, features = ["std"] }
+i2c-hil-sim.workspace = true
+embedded-hal.workspace = true
 mlir-codegen = { path = "mlir-codegen", optional = true }
 
 [dev-dependencies]

@@ -1233,6 +1233,161 @@ pub fn dataflow_get_sim_pwm(graph_id: u32, channel: u8) -> Result<f64, JsValue> 
     })
 }
 
+// ── I2C simulation WASM API ─────────────────────────────────────────
+
+/// Add a simulated I2C device on the given bus at the given 7-bit address.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn dataflow_add_i2c_device(
+    graph_id: u32,
+    bus: u8,
+    addr: u8,
+    name: &str,
+) -> Result<(), JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        let sim = graph
+            .sim_peripherals_mut()
+            .map_err(|e| JsValue::from_str(&e))?;
+        sim.add_i2c_device(bus, addr, name);
+        Ok(())
+    })
+}
+
+/// Remove a simulated I2C device.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn dataflow_remove_i2c_device(graph_id: u32, bus: u8, addr: u8) -> Result<(), JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        let sim = graph
+            .sim_peripherals_mut()
+            .map_err(|e| JsValue::from_str(&e))?;
+        sim.remove_i2c_device(bus, addr);
+        Ok(())
+    })
+}
+
+/// Read the 256-byte register map of a simulated I2C device (as JSON array).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn dataflow_i2c_device_registers(
+    graph_id: u32,
+    bus: u8,
+    addr: u8,
+) -> Result<JsValue, JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let graphs = g.borrow();
+        let graph = graphs
+            .get(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        let sim = graph
+            .sim_peripherals_ref()
+            .map_err(|e| JsValue::from_str(&e))?;
+        match sim.i2c_device_registers(bus, addr) {
+            Some(regs) => {
+                let json = serde_json::to_string(&regs[..])
+                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
+                Ok(JsValue::from_str(&json))
+            }
+            None => Err(JsValue::from_str("I2C device not found")),
+        }
+    })
+}
+
+// ── Serial simulation WASM API ──────────────────────────────────────
+
+/// Configure a simulated serial port. Parity: 0=None, 1=Odd, 2=Even.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn dataflow_configure_serial(
+    graph_id: u32,
+    port: u8,
+    baud: u32,
+    data_bits: u8,
+    parity: u8,
+    stop_bits: u8,
+) -> Result<(), JsValue> {
+    let parity = dataflow::sim_peripherals::Parity::from_u8(parity)
+        .map_err(|e| JsValue::from_str(&e))?;
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        let sim = graph
+            .sim_peripherals_mut()
+            .map_err(|e| JsValue::from_str(&e))?;
+        sim.configure_serial(port, baud, data_bits, parity, stop_bits);
+        Ok(())
+    })
+}
+
+/// List all configured serial ports as JSON.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn dataflow_serial_ports(graph_id: u32) -> Result<JsValue, JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let graphs = g.borrow();
+        let graph = graphs
+            .get(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        let sim = graph
+            .sim_peripherals_ref()
+            .map_err(|e| JsValue::from_str(&e))?;
+        let ports = sim.serial_ports();
+        let configs: Vec<&dataflow::sim_peripherals::SerialConfig> =
+            ports.iter().map(|(_, cfg)| cfg).collect();
+        let json =
+            serde_json::to_string(&configs).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(JsValue::from_str(&json))
+    })
+}
+
+// ── TCP socket simulation WASM API ──────────────────────────────────
+
+/// Inject data into a simulated TCP receive buffer.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn dataflow_tcp_inject(graph_id: u32, socket_id: u8, data: &[u8]) -> Result<(), JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        let sim = graph
+            .sim_peripherals_mut()
+            .map_err(|e| JsValue::from_str(&e))?;
+        sim.inject_tcp_data(socket_id, data);
+        Ok(())
+    })
+}
+
+/// Drain data from a simulated TCP send buffer (as JSON array).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn dataflow_tcp_drain(graph_id: u32, socket_id: u8) -> Result<JsValue, JsValue> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+        let sim = graph
+            .sim_peripherals_mut()
+            .map_err(|e| JsValue::from_str(&e))?;
+        let data = sim.drain_tcp_data(socket_id);
+        let json =
+            serde_json::to_string(&data).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(JsValue::from_str(&json))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1997,5 +2152,71 @@ endsolid test"
         let tps = build_toolpaths_svg(&polylines, &config);
         let json = flatten_moves_string(&tps);
         assert!(json.len() > 2); // more than "[]"
+    }
+
+    // ── I2C / Serial / TCP simulation tests (via DataflowGraph directly) ──
+
+    #[test]
+    fn test_graph_sim_peripherals_i2c() {
+        let mut graph = dataflow::DataflowGraph::new();
+        assert!(graph.sim_peripherals_mut().is_err());
+        graph.set_sim_peripherals(dataflow::sim_peripherals::WasmSimPeripherals::new());
+        let sim = graph.sim_peripherals_mut().unwrap();
+        sim.add_i2c_device(0, 0x50, "eeprom");
+        let regs = sim.i2c_device_registers(0, 0x50).unwrap();
+        assert_eq!(regs.len(), 256);
+        sim.remove_i2c_device(0, 0x50);
+        assert!(sim.i2c_device_registers(0, 0x50).is_none());
+    }
+
+    #[test]
+    fn test_graph_sim_peripherals_serial() {
+        let mut graph = dataflow::DataflowGraph::new();
+        graph.set_sim_peripherals(dataflow::sim_peripherals::WasmSimPeripherals::new());
+        let sim = graph.sim_peripherals_mut().unwrap();
+        sim.configure_serial(0, 115_200, 8, dataflow::sim_peripherals::Parity::None, 1);
+        sim.configure_serial(2, 9600, 8, dataflow::sim_peripherals::Parity::Even, 1);
+        let ports = sim.serial_ports();
+        assert_eq!(ports.len(), 2);
+        assert_eq!(ports[0].1.baud, 115_200);
+        assert_eq!(ports[1].1.baud, 9600);
+    }
+
+    #[test]
+    fn test_parity_from_u8() {
+        use dataflow::sim_peripherals::Parity;
+        assert_eq!(Parity::from_u8(0).unwrap(), Parity::None);
+        assert_eq!(Parity::from_u8(1).unwrap(), Parity::Odd);
+        assert_eq!(Parity::from_u8(2).unwrap(), Parity::Even);
+        assert!(Parity::from_u8(3).is_err());
+        assert!(Parity::from_u8(255).is_err());
+    }
+
+    #[test]
+    fn test_graph_sim_peripherals_tcp() {
+        let mut graph = dataflow::DataflowGraph::new();
+        graph.set_sim_peripherals(dataflow::sim_peripherals::WasmSimPeripherals::new());
+        let sim = graph.sim_peripherals_mut().unwrap();
+        sim.inject_tcp_data(0, b"hello");
+        let drained = sim.drain_tcp_data(0);
+        assert!(drained.is_empty()); // drain reads tx, inject goes to rx
+    }
+
+    #[test]
+    fn test_graph_sim_ref_without_mode() {
+        let graph = dataflow::DataflowGraph::new();
+        assert!(graph.sim_peripherals_ref().is_err());
+    }
+
+    #[test]
+    fn test_serial_config_serializes() {
+        let config = dataflow::sim_peripherals::SerialConfig {
+            baud: 9600,
+            data_bits: 8,
+            parity: dataflow::sim_peripherals::Parity::None,
+            stop_bits: 1,
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        assert!(json.contains("9600"));
     }
 }

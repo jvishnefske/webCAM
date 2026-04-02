@@ -18,6 +18,7 @@ WORKSPACE_EXCLUDES = \
 	--exclude pico-bootloader \
 	--exclude combined-frontend \
 	--exclude hil-frontend \
+	--exclude native-server \
 	--exclude board-support-pi-zero \
 	--exclude gs-usb-device \
 	--exclude vprbrd-usb-gpio \
@@ -43,15 +44,26 @@ wasm: ## Build WASM + JS bindings (requires wasm-pack)
 ts: ## Build and test TypeScript frontend (matches CI)
 	cd www && npm ci && npm run typecheck && npm run test && npm run build
 
+verify: ## Build, test, lint, format-check (swiss-cheese gate)
+	cargo build --workspace $(WORKSPACE_EXCLUDES) --all-targets
+	cargo test --workspace $(WORKSPACE_EXCLUDES)
+	cargo clippy --workspace $(WORKSPACE_EXCLUDES) --all-targets -- -D warnings
+	cargo fmt --check
+
 ci: lint test wasm ts ## Run full CI pipeline locally
 
 release: wasm ts ## Package www/ for deployment (matches CI)
 	cd www && zip -r ../rustcam.zip .
 	@echo "Release artifact: rustcam.zip"
 
-serve: wasm ts ## Build and serve locally
+serve: wasm ts ## Build and serve locally (python)
 	@echo "Serving at http://localhost:8080"
 	@cd www && python3 -m http.server 8080
+
+serve-native: wasm ## Build WASM + run native server with mock HAL
+	cargo build -p native-server
+	@echo "Starting native-server at http://localhost:3000"
+	cargo run -p native-server -- --www-dir www --port 3000
 
 clean: ## Remove build artifacts
 	cargo clean
