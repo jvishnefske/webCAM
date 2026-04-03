@@ -13,14 +13,14 @@ use crate::dataflow::block::PortKind;
 // ---------------------------------------------------------------------------
 
 /// Position of a widget on the panel canvas.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Position {
     pub x: f64,
     pub y: f64,
 }
 
 /// Size of a widget on the panel canvas.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Size {
     pub width: f64,
     pub height: f64,
@@ -31,14 +31,14 @@ pub struct Size {
 // ---------------------------------------------------------------------------
 
 /// Direction of data flow between a widget and a pubsub topic.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ChannelDirection {
     Input,
     Output,
 }
 
 /// Binds a widget port to a pubsub topic.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChannelBinding {
     pub topic: String,
     pub direction: ChannelDirection,
@@ -50,7 +50,7 @@ pub struct ChannelBinding {
 // ---------------------------------------------------------------------------
 
 /// The type of UI control a widget represents.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum WidgetKind {
     /// Boolean on/off — publishes Float(0.0 / 1.0).
@@ -68,7 +68,7 @@ pub enum WidgetKind {
 }
 
 /// A single UI control element on a panel.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Widget {
     pub id: u32,
     pub kind: WidgetKind,
@@ -83,7 +83,7 @@ pub struct Widget {
 // ---------------------------------------------------------------------------
 
 /// Top-level panel configuration — a named collection of widgets.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PanelModel {
     pub name: String,
     pub widgets: Vec<Widget>,
@@ -114,6 +114,14 @@ impl PanelModel {
         let before = self.widgets.len();
         self.widgets.retain(|w| w.id != widget_id);
         self.widgets.len() < before
+    }
+
+    pub fn get_widget(&self, widget_id: u32) -> Option<&Widget> {
+        self.widgets.iter().find(|w| w.id == widget_id)
+    }
+
+    pub fn get_widget_mut(&mut self, widget_id: u32) -> Option<&mut Widget> {
+        self.widgets.iter_mut().find(|w| w.id == widget_id)
     }
 }
 
