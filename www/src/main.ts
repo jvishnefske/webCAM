@@ -10,13 +10,14 @@ import {
 } from './sketch.js';
 import { drawConstraintOverlay } from './constraints.js';
 import { initDataflow, resizeDataflow, activateDataflow } from './dataflow/index.js';
+import { initPanel, activatePanel } from './dataflow/panel-editor.js';
 
 // ── Wire cross-module callbacks ──────────────────────────────────────
 
 cam.setResizeSim(resizeSim);
 cam.setLoadSim(loadSim);
 
-type AppMode = 'cam' | 'sketch' | 'dataflow';
+type AppMode = 'cam' | 'sketch' | 'dataflow' | 'panel';
 
 // ── Mode switcher ────────────────────────────────────────────────────
 
@@ -27,12 +28,14 @@ function setMode(mode: AppMode): void {
   $('cam-sidebar-content').classList.toggle('hidden', mode !== 'cam');
   $('sketch-sidebar-content').classList.toggle('hidden', mode !== 'sketch');
   $('dataflow-sidebar-content').classList.toggle('hidden', mode !== 'dataflow');
+  $('panel-sidebar-content').classList.toggle('hidden', mode !== 'panel');
   document.getElementById('preview-canvas')!.classList.toggle('hidden', mode !== 'cam');
   $('preview-header').classList.toggle('hidden', mode !== 'cam');
   $('sketch-canvas-wrap').style.display = mode === 'sketch' ? 'flex' : 'none';
   const app = document.querySelector('.app')!;
   app.classList.toggle('sketch-mode', mode === 'sketch');
   app.classList.toggle('dataflow-mode', mode === 'dataflow');
+  app.classList.toggle('panel-mode', mode === 'panel');
   if (mode === 'sketch') {
     // Double-rAF ensures grid layout is applied before measuring canvas
     requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -41,6 +44,8 @@ function setMode(mode: AppMode): void {
     }));
   } else if (mode === 'dataflow') {
     activateDataflow();
+  } else if (mode === 'panel') {
+    activatePanel();
   } else {
     cam.tryPreview();
   }
@@ -92,6 +97,7 @@ async function boot(): Promise<void> {
     await init();
     cam.setWasmReady(true);
     initDataflow();
+    initPanel();
     $('status').textContent = 'WASM loaded — drop a file to begin.';
     $('status').className = 'text-xs mt-2 min-h-4 text-success';
   } catch (e) {
