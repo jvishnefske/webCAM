@@ -38,11 +38,13 @@ function renderToggle(
 
   const track = document.createElement('div');
   track.className = 'w-10 h-5 bg-border rounded-full transition-colors duration-200';
+  track.dataset.role = 'track';
   toggle.appendChild(track);
 
   const dot = document.createElement('div');
   dot.className =
     'absolute left-0.5 top-0.5 w-4 h-4 bg-text rounded-full transition-transform duration-200 translate-x-0';
+  dot.dataset.role = 'dot';
   toggle.appendChild(dot);
 
   wrapper.appendChild(toggle);
@@ -119,6 +121,8 @@ function renderGauge(
   const barFill = document.createElement('div');
   barFill.className = 'h-full bg-accent rounded-full transition-all duration-150';
   barFill.dataset.role = 'bar';
+  barFill.dataset.min = String(kind.min);
+  barFill.dataset.max = String(kind.max);
   barFill.style.width = '0%';
   barBg.appendChild(barFill);
 
@@ -270,10 +274,8 @@ export function updatePanelValues(
     // Update gauge bar fill
     const barEl = card.querySelector<HTMLDivElement>('[data-role="bar"]');
     if (barEl && typeof value === 'number') {
-      // Read min/max from the range input sibling if present, otherwise 0-100
-      const rangeInput = card.querySelector<HTMLInputElement>('input[type="range"]');
-      const min = rangeInput ? parseFloat(rangeInput.min) : 0;
-      const max = rangeInput ? parseFloat(rangeInput.max) : 100;
+      const min = parseFloat(barEl.dataset.min ?? '0');
+      const max = parseFloat(barEl.dataset.max ?? '100');
       const pct = Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100));
       barEl.style.width = `${pct}%`;
     }
@@ -293,8 +295,8 @@ export function updatePanelValues(
       if (checkbox.checked !== checked) {
         checkbox.checked = checked;
         // Sync visual track/dot
-        const track = card.querySelector<HTMLDivElement>('.rounded-full.w-10');
-        const dot = card.querySelector<HTMLDivElement>('.rounded-full.w-4');
+        const track = card.querySelector<HTMLDivElement>('[data-role="track"]');
+        const dot = card.querySelector<HTMLDivElement>('[data-role="dot"]');
         if (track) {
           track.classList.toggle('bg-accent', checked);
           track.classList.toggle('bg-border', !checked);
