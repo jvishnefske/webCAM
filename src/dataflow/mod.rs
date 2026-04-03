@@ -10,10 +10,12 @@ pub mod channel;
 pub mod codegen;
 pub mod dsl_bridge;
 pub mod graph;
+pub mod panel;
 pub mod scheduler;
 pub mod sim_peripherals;
 
 pub use block::{BlockId, Module, PortDef, PortKind, Tick, Value};
 pub use channel::{Channel, ChannelId};
 pub use graph::DataflowGraph;
+pub use panel::PanelModel;
 pub use scheduler::Scheduler;
