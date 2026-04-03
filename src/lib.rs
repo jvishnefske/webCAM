@@ -1395,6 +1395,9 @@ thread_local! {
     #[allow(clippy::missing_const_for_thread_local)]
     static PANELS: RefCell<std::collections::HashMap<u32, dataflow::panel::PanelModel>> =
         RefCell::new(std::collections::HashMap::new());
+    #[allow(clippy::missing_const_for_thread_local)]
+    static PANEL_RUNTIMES: RefCell<std::collections::HashMap<u32, dataflow::panel::PanelRuntime>> =
+        RefCell::new(std::collections::HashMap::new());
     static PANEL_NEXT_ID: RefCell<u32> = const { RefCell::new(1) };
 }
 
@@ -1409,6 +1412,10 @@ pub fn panel_new(name: &str) -> u32 {
             p.borrow_mut()
                 .insert(id, dataflow::panel::PanelModel::new(name));
         });
+        PANEL_RUNTIMES.with(|r| {
+            r.borrow_mut()
+                .insert(id, dataflow::panel::PanelRuntime::new());
+        });
         id
     })
 }
@@ -1419,6 +1426,9 @@ pub fn panel_new(name: &str) -> u32 {
 pub fn panel_destroy(panel_id: u32) {
     PANELS.with(|p| {
         p.borrow_mut().remove(&panel_id);
+    });
+    PANEL_RUNTIMES.with(|r| {
+        r.borrow_mut().remove(&panel_id);
     });
 }
 
@@ -1432,6 +1442,10 @@ pub fn panel_load(json: &str) -> Result<u32, JsValue> {
         let id = *next.borrow();
         *next.borrow_mut() = id + 1;
         PANELS.with(|p| p.borrow_mut().insert(id, panel));
+        PANEL_RUNTIMES.with(|r| {
+            r.borrow_mut()
+                .insert(id, dataflow::panel::PanelRuntime::new());
+        });
         Ok(id)
     })
 }
@@ -1509,6 +1523,77 @@ pub fn panel_update_widget(
 #[wasm_bindgen]
 pub fn panel_snapshot(panel_id: u32) -> Result<String, JsValue> {
     panel_save(panel_id)
+}
+
+/// Set a topic value from widget interaction.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn panel_set_topic(panel_id: u32, topic: &str, value: f64) -> Result<(), JsValue> {
+    PANEL_RUNTIMES.with(|r| {
+        let mut runtimes = r.borrow_mut();
+        let rt = runtimes
+            .get_mut(&panel_id)
+            .ok_or_else(|| JsValue::from_str("panel runtime not found"))?;
+        rt.set_value(topic, value);
+        Ok(())
+    })
+}
+
+/// Get all current topic values as JSON: {"topic": value, ...}
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn panel_get_values(panel_id: u32) -> Result<String, JsValue> {
+    PANEL_RUNTIMES.with(|r| {
+        let runtimes = r.borrow();
+        let rt = runtimes
+            .get(&panel_id)
+            .ok_or_else(|| JsValue::from_str("panel runtime not found"))?;
+        serde_json::to_string(rt.values()).map_err(|e| JsValue::from_str(&e.to_string()))
+    })
+}
+
+/// Merge external values (from HIL pubsub poll) into input topics.
+/// `values_json` is a JSON object: {"topic": value, ...}
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn panel_merge_values(panel_id: u32, values_json: &str) -> Result<(), JsValue> {
+    let external: std::collections::HashMap<String, f64> =
+        serde_json::from_str(values_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    PANELS.with(|p| {
+        let panels = p.borrow();
+        let panel = panels
+            .get(&panel_id)
+            .ok_or_else(|| JsValue::from_str("panel not found"))?;
+        PANEL_RUNTIMES.with(|r| {
+            let mut runtimes = r.borrow_mut();
+            let rt = runtimes
+                .get_mut(&panel_id)
+                .ok_or_else(|| JsValue::from_str("panel runtime not found"))?;
+            rt.merge_input_values(panel, &external);
+            Ok(())
+        })
+    })
+}
+
+/// Collect output topic values (for publishing to HIL).
+/// Returns JSON: {"topic": value, ...}
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn panel_collect_outputs(panel_id: u32) -> Result<String, JsValue> {
+    PANELS.with(|p| {
+        let panels = p.borrow();
+        let panel = panels
+            .get(&panel_id)
+            .ok_or_else(|| JsValue::from_str("panel not found"))?;
+        PANEL_RUNTIMES.with(|r| {
+            let runtimes = r.borrow();
+            let rt = runtimes
+                .get(&panel_id)
+                .ok_or_else(|| JsValue::from_str("panel runtime not found"))?;
+            let outputs = rt.collect_output_values(panel);
+            serde_json::to_string(&outputs).map_err(|e| JsValue::from_str(&e.to_string()))
+        })
+    })
 }
 
 #[cfg(test)]
