@@ -20,7 +20,7 @@ use std::fmt::Write;
 use dag_core::cbor;
 use dag_core::op::Dag;
 use module_traits::deployment::{
-    DeploymentManifest, TaskBinding, TaskTrigger, ChannelTransport,
+    DeploymentManifest, TaskBinding, TaskTrigger,
 };
 use module_traits::inventory::{CpuCore, McuDef, MemoryKind};
 
@@ -216,7 +216,7 @@ fn gen_main_rs(
 
     // Embed the DAG as a CBOR constant
     let cbor_bytes = cbor::encode_dag(dag);
-    write!(out, "/// CBOR-encoded DAG ({} nodes, {} bytes)\n", dag.len(), cbor_bytes.len()).unwrap();
+    writeln!(out, "/// CBOR-encoded DAG ({} nodes, {} bytes)", dag.len(), cbor_bytes.len()).unwrap();
     write!(out, "const DAG_CBOR: &[u8] = &[").unwrap();
     for (i, byte) in cbor_bytes.iter().enumerate() {
         if i % 16 == 0 {
@@ -315,7 +315,6 @@ fn gen_main_rs(
 mod tests {
     use super::*;
     use module_traits::deployment::*;
-    use module_traits::inventory;
 
     fn simple_manifest() -> DeploymentManifest {
         DeploymentManifest {
