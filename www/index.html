@@ -5,19 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <title>Wasm Engineered Browser Computer-Aided Manufacturing</title>
 <link rel="stylesheet" href="./dist/styles.css"/>
-<style>
-/* Base layout — grid-template values too complex for inline Tailwind */
-.app {
-  display: grid;
-  grid-template-columns: 320px 1fr 1fr;
-  grid-template-rows: 1fr;
-  height: calc(100vh - 49px);
-}
-/* Canvas elements fill their container */
-canvas { flex: 1; width: 100%; height: 100%; display: block; }
-/* Range inputs: transparent bg, no border */
-input[type="range"] { padding: 2px 0; border: none; background: transparent; }
-</style>
 </head>
 <body class="font-sans bg-bg text-text min-h-screen box-border m-0 p-0">
 
@@ -28,6 +15,7 @@ input[type="range"] { padding: 2px 0; border: none; background: transparent; }
     <button class="active bg-transparent border-none text-text-dim text-[13px] font-semibold px-4 py-1.5 rounded cursor-pointer transition-colors duration-150 [&.active]:bg-accent [&.active]:text-white" data-mode="cam">CAM</button>
     <button class="bg-transparent border-none text-text-dim text-[13px] font-semibold px-4 py-1.5 rounded cursor-pointer transition-colors duration-150 [&.active]:bg-accent [&.active]:text-white" data-mode="sketch">2D Sketch</button>
     <button class="bg-transparent border-none text-text-dim text-[13px] font-semibold px-4 py-1.5 rounded cursor-pointer transition-colors duration-150 [&.active]:bg-accent [&.active]:text-white" data-mode="dataflow">Dataflow</button>
+    <button class="bg-transparent border-none text-text-dim text-[13px] font-semibold px-4 py-1.5 rounded cursor-pointer transition-colors duration-150 [&.active]:bg-accent [&.active]:text-white" data-mode="panel">Panel</button>
   </div>
 </header>
 
@@ -180,63 +168,116 @@ input[type="range"] { padding: 2px 0; border: none; background: transparent; }
     </div><!-- sketch-sidebar-content -->
 
     <div id="dataflow-sidebar-content" class="hidden">
-      <section class="mb-5">
-        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Project</h2>
-        <div id="df-project-name" class="text-xs font-semibold text-text mb-2 truncate">Untitled</div>
-        <div class="flex gap-1 mb-2">
+      <!-- Project bar -->
+      <section class="mb-4">
+        <div class="flex items-center gap-2 mb-2">
+          <span id="df-project-name" class="text-xs font-semibold text-text truncate flex-1">Untitled</span>
+          <button class="btn btn-secondary btn-sm" id="df-projects" title="Projects">Projects</button>
+        </div>
+        <div class="flex gap-1">
           <button class="btn btn-secondary btn-sm flex-1" id="df-new">New</button>
           <button class="btn btn-secondary btn-sm flex-1" id="df-save-as">Save As</button>
-          <button class="btn btn-secondary btn-sm flex-1" id="df-projects">Projects</button>
         </div>
       </section>
-      <section class="mb-5">
-        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Dataflow Simulator</h2>
-        <p class="text-xs text-text-dim mb-2">
-          Double-click canvas to add blocks.<br>
-          Drag between ports to connect.<br>
-          Right-click a block to remove it.
+
+      <!-- Block palette — primary interaction -->
+      <section class="mb-4">
+        <h2 class="df-section-head">Blocks</h2>
+        <input type="text" id="df-palette-filter" placeholder="Search blocks..." class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-xs mb-2 focus:outline-none focus:border-accent"/>
+        <div id="df-sidebar-palette" class="max-h-[220px] overflow-y-auto border border-border rounded bg-bg"></div>
+        <p class="text-[10px] text-text-dim mt-1.5 leading-snug">
+          Click to add &middot; Double-click canvas &middot; Drag ports to wire
         </p>
       </section>
-      <section id="df-hil-section" class="mb-5">
-        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">HIL Connection</h2>
-        <div class="flex gap-1 mb-2">
-          <input id="hil-ws-url" type="text" value="ws://169.254.1.1:8080" class="flex-1 bg-bg border border-border text-text px-2 py-1 rounded text-xs focus:outline-none focus:border-accent"/>
-          <button class="btn btn-primary btn-sm" id="hil-connect">Connect</button>
+
+      <!-- Inspector -->
+      <section class="mb-4">
+        <h2 class="df-section-head">Inspector</h2>
+        <div id="df-block-info" class="text-xs min-h-[40px]">
+          <span class="text-text-dim text-[11px]">Select a block or edge</span>
         </div>
-        <div id="hil-status" class="text-xs text-text-dim mb-2">Disconnected</div>
-        <button class="btn btn-secondary btn-sm w-full" id="hil-deploy" disabled>Deploy to MCU</button>
-        <div id="hil-deploy-status" class="text-xs mt-1 min-h-4"></div>
       </section>
-      <section class="mb-5">
-        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Transport</h2>
+
+      <!-- Transport -->
+      <section class="mb-4">
+        <h2 class="df-section-head">Transport</h2>
         <div class="flex gap-1 mb-2">
           <button class="btn btn-primary btn-sm flex-1" id="df-play">Play</button>
           <button class="btn btn-secondary btn-sm flex-1" id="df-reset">Reset</button>
         </div>
-        <label class="block text-[13px] text-text-dim mb-1">Time step (s)</label>
-        <input type="number" id="df-dt" value="0.01" step="0.001" min="0.0001" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
-        <label class="block text-[13px] text-text-dim mb-1">Speed multiplier</label>
-        <input type="number" id="df-speed" value="1" step="0.5" min="0" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
-      </section>
-      <section class="mb-5">
-        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Batch (Non-realtime)</h2>
-        <label class="block text-[13px] text-text-dim mb-1">Steps</label>
-        <input type="number" id="df-batch-steps" value="100" step="10" min="1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
-        <button class="btn btn-secondary w-full mt-1" id="df-batch">Run Batch</button>
-      </section>
-      <section class="mb-5">
-        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Export</h2>
-        <div id="df-target-select" class="mb-3"></div>
-        <button class="btn btn-secondary w-full" id="df-export-rust">Generate &amp; Download</button>
-        <div class="text-xs mt-2 min-h-4" id="df-export-status"></div>
-      </section>
-      <section class="mb-5">
-        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Selected Block</h2>
-        <div id="df-block-info" class="text-xs min-h-[40px]">
-          <span class="text-text-dim">Select a block to view details</span>
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[11px] text-text-dim mb-0.5">Time step (s)</label>
+            <input type="number" id="df-dt" value="0.01" step="0.001" min="0.0001" class="w-full bg-bg border border-border text-text px-2 py-1 rounded text-xs focus:outline-none focus:border-accent"/>
+          </div>
+          <div>
+            <label class="block text-[11px] text-text-dim mb-0.5">Speed</label>
+            <input type="number" id="df-speed" value="1" step="0.5" min="0" class="w-full bg-bg border border-border text-text px-2 py-1 rounded text-xs focus:outline-none focus:border-accent"/>
+          </div>
         </div>
       </section>
+
+      <!-- Batch -->
+      <section class="mb-4">
+        <h2 class="df-section-head">Batch</h2>
+        <div class="flex gap-1 items-end">
+          <div class="flex-1">
+            <label class="block text-[11px] text-text-dim mb-0.5">Steps</label>
+            <input type="number" id="df-batch-steps" value="100" step="10" min="1" class="w-full bg-bg border border-border text-text px-2 py-1 rounded text-xs focus:outline-none focus:border-accent"/>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="df-batch">Run</button>
+        </div>
+      </section>
+
+      <!-- Export -->
+      <section class="mb-4">
+        <h2 class="df-section-head">Export</h2>
+        <div id="df-target-select" class="mb-2"></div>
+        <button class="btn btn-secondary btn-sm w-full" id="df-export-rust">Generate &amp; Download</button>
+        <div class="text-xs mt-1 min-h-4" id="df-export-status"></div>
+      </section>
+
+      <!-- HIL Connection -->
+      <section id="df-hil-section" class="mb-4">
+        <h2 class="df-section-head">HIL Connection</h2>
+        <div class="flex gap-1 mb-1">
+          <input id="hil-ws-url" type="text" value="ws://169.254.1.1:8080" class="flex-1 bg-bg border border-border text-text px-2 py-1 rounded text-xs focus:outline-none focus:border-accent"/>
+          <button class="btn btn-primary btn-sm" id="hil-connect">Connect</button>
+        </div>
+        <div id="hil-status" class="text-[11px] text-text-dim mb-1">Disconnected</div>
+        <button class="btn btn-secondary btn-sm w-full" id="hil-deploy" disabled>Deploy to MCU</button>
+        <div id="hil-deploy-status" class="text-xs mt-1 min-h-4"></div>
+      </section>
     </div><!-- dataflow-sidebar-content -->
+
+    <div id="panel-sidebar-content" class="hidden">
+      <!-- Panel name + save/load -->
+      <section class="mb-4">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Panel</h2>
+        <div class="flex items-center gap-2 mb-2">
+          <input type="text" id="panel-name" value="My Panel" class="flex-1 bg-bg border border-border text-text px-2 py-1.5 rounded text-xs focus:outline-none focus:border-accent"/>
+        </div>
+        <div class="flex gap-1">
+          <button class="btn btn-secondary btn-sm flex-1" id="panel-new">New</button>
+          <button class="btn btn-secondary btn-sm flex-1" id="panel-save">Save</button>
+          <button class="btn btn-secondary btn-sm flex-1" id="panel-load">Load</button>
+        </div>
+      </section>
+
+      <!-- Add Widget palette -->
+      <section class="mb-4">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Add Widget</h2>
+        <div id="panel-widget-palette" class="flex flex-col gap-1"></div>
+      </section>
+
+      <!-- Widget Inspector -->
+      <section class="mb-4">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Inspector</h2>
+        <div id="panel-inspector" class="text-xs">
+          <span class="text-text-dim text-[11px]">Select a widget to configure</span>
+        </div>
+      </section>
+    </div><!-- panel-sidebar-content -->
   </div>
 
   <!-- Preview canvas -->
@@ -289,6 +330,11 @@ input[type="range"] { padding: 2px 0; border: none; background: transparent; }
     <div class="df-controls flex gap-1.5 items-center px-3 py-2 border-t border-border bg-surface text-xs">
       <span id="df-time-info" class="font-mono text-text-dim">t=0.000</span>
     </div>
+  </div>
+
+  <!-- Panel workspace -->
+  <div id="panel-canvas-wrap" class="flex-1 relative hidden">
+    <div id="panel-workspace" class="p-6 flex flex-wrap gap-4 content-start overflow-auto h-full"></div>
   </div>
 
   <!-- Dataflow right pane (tabbed: Plot / Pins / I2C) -->
