@@ -4,6 +4,10 @@ import { PanelManager } from './panel-manager.js';
 import { renderPanel } from './panel-view.js';
 import type { WidgetKind, ChannelBinding } from './panel-types.js';
 
+function nanOr(value: number, fallback: number): number {
+  return isNaN(value) ? fallback : value;
+}
+
 let panelMgr: PanelManager | null = null;
 let selectedWidgetId: number | null = null;
 
@@ -195,15 +199,15 @@ function showInspector(widgetId: number): void {
     if (widget.kind.type === 'Slider') {
       updatedKind = {
         type: 'Slider',
-        min: parseFloat(kindInputs['min'].value) || 0,
-        max: parseFloat(kindInputs['max'].value) || 100,
-        step: parseFloat(kindInputs['step'].value) || 1,
+        min: nanOr(parseFloat(kindInputs['min'].value), 0),
+        max: nanOr(parseFloat(kindInputs['max'].value), 100),
+        step: nanOr(parseFloat(kindInputs['step'].value), 1),
       };
     } else if (widget.kind.type === 'Gauge') {
       updatedKind = {
         type: 'Gauge',
-        min: parseFloat(kindInputs['min'].value) || 0,
-        max: parseFloat(kindInputs['max'].value) || 100,
+        min: nanOr(parseFloat(kindInputs['min'].value), 0),
+        max: nanOr(parseFloat(kindInputs['max'].value), 100),
       };
     }
 
