@@ -213,6 +213,46 @@ export function process_svg(svg_text: string, config_json: string): string;
 export function process_svg_progress(svg_text: string, config_json: string, on_progress: Function): string;
 
 /**
+ * Create a new empty panel. Returns its id.
+ */
+export function panel_new(name: string): number;
+
+/**
+ * Destroy a panel, removing it from storage.
+ */
+export function panel_destroy(panel_id: number): void;
+
+/**
+ * Deserialize a PanelModel from JSON, store it, and return its id.
+ */
+export function panel_load(json: string): number;
+
+/**
+ * Serialize a panel to JSON.
+ */
+export function panel_save(panel_id: number): string;
+
+/**
+ * Add a widget to a panel from JSON config. Returns the assigned widget id.
+ */
+export function panel_add_widget(panel_id: number, config_json: string): number;
+
+/**
+ * Remove a widget from a panel. Returns whether it was found.
+ */
+export function panel_remove_widget(panel_id: number, widget_id: number): boolean;
+
+/**
+ * Update a widget's config in-place (id is preserved).
+ */
+export function panel_update_widget(panel_id: number, widget_id: number, config_json: string): void;
+
+/**
+ * JSON snapshot of the full panel.
+ */
+export function panel_snapshot(panel_id: number): string;
+
+/**
  * Return flat move list as JSON for the tool simulation.
  * Each move: `{ x, y, z, rapid }`.
  */
