@@ -4,6 +4,8 @@
 //! to pubsub topics.  The model is saved/loaded as JSON and is independent
 //! of the dataflow graph.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::dataflow::block::PortKind;
@@ -122,6 +124,70 @@ impl PanelModel {
 
     pub fn get_widget_mut(&mut self, widget_id: u32) -> Option<&mut Widget> {
         self.widgets.iter_mut().find(|w| w.id == widget_id)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PanelRuntime
+// ---------------------------------------------------------------------------
+
+/// Runtime state for a control panel — maps topics to their current values.
+///
+/// This is separate from the PanelModel configuration. The runtime holds
+/// live values that flow between widgets and pubsub topics.
+#[derive(Debug, Clone, Default)]
+pub struct PanelRuntime {
+    /// Current value for each topic.
+    values: HashMap<String, f64>,
+}
+
+impl PanelRuntime {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Set a topic value (from widget interaction or external source).
+    pub fn set_value(&mut self, topic: &str, value: f64) {
+        self.values.insert(topic.to_string(), value);
+    }
+
+    /// Get the current value of a topic.
+    pub fn get_value(&self, topic: &str) -> Option<f64> {
+        self.values.get(topic).copied()
+    }
+
+    /// Get all topic values as a snapshot.
+    pub fn values(&self) -> &HashMap<String, f64> {
+        &self.values
+    }
+
+    /// Merge external values (e.g., from HIL pubsub poll) into the runtime.
+    /// Only updates topics that have Input-direction bindings in the panel.
+    pub fn merge_input_values(&mut self, panel: &PanelModel, external: &HashMap<String, f64>) {
+        for widget in &panel.widgets {
+            for binding in &widget.channels {
+                if binding.direction == ChannelDirection::Input {
+                    if let Some(&val) = external.get(&binding.topic) {
+                        self.values.insert(binding.topic.clone(), val);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Collect output topic values (topics bound to Output-direction widgets).
+    pub fn collect_output_values(&self, panel: &PanelModel) -> HashMap<String, f64> {
+        let mut out = HashMap::new();
+        for widget in &panel.widgets {
+            for binding in &widget.channels {
+                if binding.direction == ChannelDirection::Output {
+                    if let Some(&val) = self.values.get(&binding.topic) {
+                        out.insert(binding.topic.clone(), val);
+                    }
+                }
+            }
+        }
+        out
     }
 }
 
@@ -333,5 +399,66 @@ mod tests {
         let panel = PanelModel::new("blank");
         assert_eq!(panel.name, "blank");
         assert!(panel.widgets.is_empty());
+    }
+
+    // -- PanelRuntime tests --
+
+    #[test]
+    fn runtime_set_and_get_value() {
+        let mut rt = PanelRuntime::new();
+        rt.set_value("motor/speed", 42.0);
+        assert_eq!(rt.get_value("motor/speed"), Some(42.0));
+        assert_eq!(rt.get_value("nonexistent"), None);
+    }
+
+    #[test]
+    fn runtime_merge_input_values() {
+        let mut panel = PanelModel::new("test");
+        let mut w = make_widget(WidgetKind::Gauge { min: 0.0, max: 100.0 }, "Temp");
+        w.channels.push(ChannelBinding {
+            topic: "sensor/temp".to_string(),
+            direction: ChannelDirection::Input,
+            port_kind: PortKind::Float,
+        });
+        panel.add_widget(w);
+
+        let mut w2 = make_widget(WidgetKind::Toggle, "Switch");
+        w2.channels.push(ChannelBinding {
+            topic: "motor/enable".to_string(),
+            direction: ChannelDirection::Output,
+            port_kind: PortKind::Float,
+        });
+        panel.add_widget(w2);
+
+        let mut rt = PanelRuntime::new();
+        let mut external = HashMap::new();
+        external.insert("sensor/temp".to_string(), 55.0);
+        external.insert("motor/enable".to_string(), 1.0); // should be ignored (Output)
+        external.insert("unbound/topic".to_string(), 99.0); // should be ignored
+
+        rt.merge_input_values(&panel, &external);
+        assert_eq!(rt.get_value("sensor/temp"), Some(55.0));
+        assert_eq!(rt.get_value("motor/enable"), None); // not merged (Output)
+        assert_eq!(rt.get_value("unbound/topic"), None); // not merged (unbound)
+    }
+
+    #[test]
+    fn runtime_collect_output_values() {
+        let mut panel = PanelModel::new("test");
+        let mut w = make_widget(WidgetKind::Toggle, "Switch");
+        w.channels.push(ChannelBinding {
+            topic: "motor/enable".to_string(),
+            direction: ChannelDirection::Output,
+            port_kind: PortKind::Float,
+        });
+        panel.add_widget(w);
+
+        let mut rt = PanelRuntime::new();
+        rt.set_value("motor/enable", 1.0);
+        rt.set_value("sensor/temp", 55.0); // not an output topic
+
+        let outputs = rt.collect_output_values(&panel);
+        assert_eq!(outputs.get("motor/enable"), Some(&1.0));
+        assert!(!outputs.contains_key("sensor/temp")); // not an output
     }
 }
