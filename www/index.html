@@ -277,6 +277,16 @@
           <span class="text-text-dim text-[11px]">Select a widget to configure</span>
         </div>
       </section>
+
+      <!-- HIL Connection for Panel -->
+      <section class="mb-4">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Live Connection</h2>
+        <div class="flex gap-1 mb-1">
+          <input id="panel-hil-url" type="text" value="ws://169.254.1.1:8080" class="flex-1 bg-bg border border-border text-text px-2 py-1 rounded text-xs focus:outline-none focus:border-accent"/>
+          <button class="btn btn-primary btn-sm" id="panel-hil-connect">Connect</button>
+        </div>
+        <div id="panel-hil-status" class="text-[11px] text-text-dim">Disconnected</div>
+      </section>
     </div><!-- panel-sidebar-content -->
   </div>
 
