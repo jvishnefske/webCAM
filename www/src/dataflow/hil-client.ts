@@ -69,6 +69,11 @@ export class HilClient {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
+  /** Raw WebSocket reference (for telemetry attach). Null if not connected. */
+  get socket(): WebSocket | null {
+    return this.ws;
+  }
+
   connect(url: string): void {
     this.url = url;
     this.shouldReconnect = true;
