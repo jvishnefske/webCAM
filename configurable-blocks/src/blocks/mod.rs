@@ -1,5 +1,6 @@
 //! Built-in configurable blocks.
 
+pub mod basic;
 pub mod pid;
 
 use crate::lower::ConfigurableBlock;
@@ -18,12 +19,13 @@ pub struct BlockEntry {
 /// All registered configurable block types.
 pub fn registry() -> Vec<BlockEntry> {
     vec![
+        // Math
         BlockEntry {
-            block_type: "pid",
-            display_name: "PID Controller",
-            category: BlockCategory::Control,
-            description: "Proportional-Integral-Derivative controller with configurable gains, pubsub I/O, and output clamping",
-            create: || Box::new(pid::PidBlock::default()),
+            block_type: "constant",
+            display_name: "Constant",
+            category: BlockCategory::Math,
+            description: "Output a fixed value, optionally publish to a topic",
+            create: || Box::new(basic::ConstantBlock::default()),
         },
         BlockEntry {
             block_type: "gain",
@@ -31,6 +33,50 @@ pub fn registry() -> Vec<BlockEntry> {
             category: BlockCategory::Math,
             description: "Multiply input by a constant factor",
             create: || Box::new(pid::SimpleGainBlock::default()),
+        },
+        BlockEntry {
+            block_type: "add",
+            display_name: "Add",
+            category: BlockCategory::Math,
+            description: "Add two pubsub inputs and publish the sum",
+            create: || Box::new(basic::AddBlock::default()),
+        },
+        BlockEntry {
+            block_type: "multiply",
+            display_name: "Multiply",
+            category: BlockCategory::Math,
+            description: "Multiply two pubsub inputs and publish the product",
+            create: || Box::new(basic::MultiplyBlock::default()),
+        },
+        BlockEntry {
+            block_type: "clamp",
+            display_name: "Clamp",
+            category: BlockCategory::Math,
+            description: "Clamp input to a min/max range",
+            create: || Box::new(basic::ClampBlock::default()),
+        },
+        // Control
+        BlockEntry {
+            block_type: "pid",
+            display_name: "PID Controller",
+            category: BlockCategory::Control,
+            description: "PID controller with configurable gains, pubsub I/O, and output clamping",
+            create: || Box::new(pid::PidBlock::default()),
+        },
+        // PubSub
+        BlockEntry {
+            block_type: "subscribe",
+            display_name: "Subscribe",
+            category: BlockCategory::PubSub,
+            description: "Subscribe to a pubsub topic (data source)",
+            create: || Box::new(basic::SubscribeBlock::default()),
+        },
+        BlockEntry {
+            block_type: "publish",
+            display_name: "Publish",
+            category: BlockCategory::PubSub,
+            description: "Publish a value to a pubsub topic (data sink)",
+            create: || Box::new(basic::PublishBlock::default()),
         },
         BlockEntry {
             block_type: "pubsub_bridge",
