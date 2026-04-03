@@ -1388,6 +1388,137 @@ pub fn dataflow_tcp_drain(graph_id: u32, socket_id: u8) -> Result<JsValue, JsVal
     })
 }
 
+// ── Control Panel WASM API ─────────────────────────────────────
+
+#[cfg(target_arch = "wasm32")]
+thread_local! {
+    #[allow(clippy::missing_const_for_thread_local)]
+    static PANELS: RefCell<std::collections::HashMap<u32, dataflow::panel::PanelModel>> =
+        RefCell::new(std::collections::HashMap::new());
+    static PANEL_NEXT_ID: RefCell<u32> = const { RefCell::new(1) };
+}
+
+/// Create a new empty panel. Returns its id.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn panel_new(name: &str) -> u32 {
+    PANEL_NEXT_ID.with(|next| {
+        let id = *next.borrow();
+        *next.borrow_mut() = id + 1;
+        PANELS.with(|p| {
+            p.borrow_mut()
+                .insert(id, dataflow::panel::PanelModel::new(name));
+        });
+        id
+    })
+}
+
+/// Destroy a panel, removing it from storage.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn panel_destroy(panel_id: u32) {
+    PANELS.with(|p| {
+        p.borrow_mut().remove(&panel_id);
+    });
+}
+
+/// Deserialize a PanelModel from JSON, store it, and return its id.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn panel_load(json: &str) -> Result<u32, JsValue> {
+    let panel: dataflow::panel::PanelModel =
+        serde_json::from_str(json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    PANEL_NEXT_ID.with(|next| {
+        let id = *next.borrow();
+        *next.borrow_mut() = id + 1;
+        PANELS.with(|p| p.borrow_mut().insert(id, panel));
+        Ok(id)
+    })
+}
+
+/// Serialize a panel to JSON.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn panel_save(panel_id: u32) -> Result<String, JsValue> {
+    PANELS.with(|p| {
+        let panels = p.borrow();
+        let panel = panels
+            .get(&panel_id)
+            .ok_or_else(|| JsValue::from_str("panel not found"))?;
+        serde_json::to_string(panel).map_err(|e| JsValue::from_str(&e.to_string()))
+    })
+}
+
+/// Add a widget to a panel from JSON config (widget with id: 0).
+/// Returns the assigned widget id.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn panel_add_widget(panel_id: u32, config_json: &str) -> Result<u32, JsValue> {
+    let widget: dataflow::panel::Widget =
+        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    PANELS.with(|p| {
+        let mut panels = p.borrow_mut();
+        let panel = panels
+            .get_mut(&panel_id)
+            .ok_or_else(|| JsValue::from_str("panel not found"))?;
+        Ok(panel.add_widget(widget))
+    })
+}
+
+/// Remove a widget from a panel. Returns whether it was found.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn panel_remove_widget(panel_id: u32, widget_id: u32) -> Result<bool, JsValue> {
+    PANELS.with(|p| {
+        let mut panels = p.borrow_mut();
+        let panel = panels
+            .get_mut(&panel_id)
+            .ok_or_else(|| JsValue::from_str("panel not found"))?;
+        Ok(panel.remove_widget(widget_id))
+    })
+}
+
+/// Update a widget's kind/label/position/size/channels from JSON config.
+/// The original widget id is preserved.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn panel_update_widget(
+    panel_id: u32,
+    widget_id: u32,
+    config_json: &str,
+) -> Result<(), JsValue> {
+    let new: dataflow::panel::Widget =
+        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    PANELS.with(|p| {
+        let mut panels = p.borrow_mut();
+        let panel = panels
+            .get_mut(&panel_id)
+            .ok_or_else(|| JsValue::from_str("panel not found"))?;
+        let widget = panel
+            .get_widget_mut(widget_id)
+            .ok_or_else(|| JsValue::from_str("widget not found"))?;
+        widget.kind = new.kind;
+        widget.label = new.label;
+        widget.position = new.position;
+        widget.size = new.size;
+        widget.channels = new.channels;
+        Ok(())
+    })
+}
+
+/// JSON snapshot of the full panel (same as panel_save, for live viewing).
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn panel_snapshot(panel_id: u32) -> Result<String, JsValue> {
+    PANELS.with(|p| {
+        let panels = p.borrow();
+        let panel = panels
+            .get(&panel_id)
+            .ok_or_else(|| JsValue::from_str("panel not found"))?;
+        serde_json::to_string(panel).map_err(|e| JsValue::from_str(&e.to_string()))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
