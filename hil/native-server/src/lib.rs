@@ -13,11 +13,13 @@
 //! | WS     | /ws            | CBOR-encoded I2C bus management |
 
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::Query;
 use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::routing::{any, get, post};
@@ -35,6 +37,15 @@ const BUS_COUNT: usize = 10;
 /// Maximum devices per bus.
 const MAX_DEVICES_PER_BUS: usize = 8;
 
+/// A logged telemetry event from the frontend.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct TelemetryEntry {
+    pub seq: u32,
+    pub timestamp_ms: f64,
+    pub tag: u8,
+    pub payload: serde_json::Value,
+}
+
 /// Shared server state holding the DAG executor and I/O state.
 pub struct ServerState {
     pub executor: DagExecutor,
@@ -48,6 +59,9 @@ pub struct ServerState {
     pub pubsub_snapshot: HashMap<String, f64>,
     /// Simulated I2C buses for WebSocket dispatch.
     pub i2c_buses: Vec<RuntimeBus<MAX_DEVICES_PER_BUS>>,
+    /// Ring buffer of telemetry events from the frontend (last 256).
+    pub telemetry_log: VecDeque<TelemetryEntry>,
+    telemetry_seq: u32,
 }
 
 impl ServerState {
@@ -62,6 +76,8 @@ impl ServerState {
             known_outputs: Vec::new(),
             pubsub_snapshot: HashMap::new(),
             i2c_buses: (0..BUS_COUNT).map(|_| RuntimeBus::new()).collect(),
+            telemetry_log: VecDeque::new(),
+            telemetry_seq: 0,
         }
     }
 }
@@ -85,6 +101,7 @@ pub fn app(www_dir: &Path) -> Router {
         .route("/api/pubsub", get(get_pubsub))
         .route("/api/channels", get(get_channels))
         .route("/api/debug", post(post_debug))
+        .route("/api/telemetry", get(get_telemetry))
         .route("/ws", any(ws_handler))
         .with_state(state)
         .fallback_service(ServeDir::new(www_dir))
@@ -211,6 +228,10 @@ pub fn dispatch_cbor(state: &SharedState, data: &[u8]) -> Option<Vec<u8>> {
         31 => handle_remove_device(state, data),
         1 => handle_i2c_read(state, data),
         2 => handle_i2c_write(state, data),
+        50..=56 => {
+            handle_telemetry(state, tag, data);
+            None
+        }
         _ => {
             let mut buf = Vec::new();
             let mut enc = minicbor::Encoder::new(&mut buf);
@@ -332,6 +353,104 @@ fn handle_i2c_write(state: &SharedState, data: &[u8]) -> Option<Vec<u8>> {
         Ok(()) => encode_tag_ok(2),
         Err(_) => encode_error("i2c write failed"),
     }
+}
+
+fn handle_telemetry(state: &SharedState, tag: u32, data: &[u8]) {
+    let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+    let payload = parse_telemetry_payload(tag, data);
+
+    let (actual_tag, seq, ts) = if tag == 56 {
+        let s = payload.get("seq").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+        let t = payload.get("timestampMs").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let inner_tag = payload.get("innerTag").and_then(|v| v.as_u64()).unwrap_or(56) as u8;
+        (inner_tag, s, t)
+    } else {
+        let seq = st.telemetry_seq;
+        st.telemetry_seq += 1;
+        (tag as u8, seq, 0.0)
+    };
+
+    let entry = TelemetryEntry { seq, timestamp_ms: ts, tag: actual_tag, payload };
+    if st.telemetry_log.len() >= 256 {
+        st.telemetry_log.pop_front();
+    }
+    st.telemetry_log.push_back(entry);
+}
+
+fn parse_telemetry_payload(tag: u32, data: &[u8]) -> serde_json::Value {
+    let mut dec = minicbor::Decoder::new(data);
+    let mut map = serde_json::Map::new();
+
+    let n = match dec.map() {
+        Ok(Some(n)) => n,
+        _ => return serde_json::Value::Object(map),
+    };
+
+    for _ in 0..n {
+        let key = match dec.u32() {
+            Ok(k) => k,
+            _ => break,
+        };
+        if key == 0 {
+            let _ = dec.u32();
+            continue;
+        }
+        let field_name = match (tag, key) {
+            (50, 1) | (51, 1) | (52, 1) => "blockId",
+            (50, 2) | (52, 2) => "blockType",
+            (50, 3) | (52, 3) => "config",
+            (50, 4) => "x",
+            (50, 5) => "y",
+            (53, 1) => "fromBlock",
+            (53, 2) => "fromPort",
+            (53, 3) => "toBlock",
+            (53, 4) => "toPort",
+            (53, 5) | (54, 1) => "channelId",
+            (56, 1) => "seq",
+            (56, 2) => "timestampMs",
+            (56, 3) => "inner",
+            _ => "unknown",
+        };
+        match dec.datatype() {
+            Ok(minicbor::data::Type::U8 | minicbor::data::Type::U16 | minicbor::data::Type::U32) => {
+                if let Ok(v) = dec.u32() {
+                    map.insert(field_name.to_string(), serde_json::json!(v));
+                }
+            }
+            Ok(minicbor::data::Type::F32 | minicbor::data::Type::F64) => {
+                if let Ok(v) = dec.f64() {
+                    map.insert(field_name.to_string(), serde_json::json!(v));
+                }
+            }
+            Ok(minicbor::data::Type::String) => {
+                if let Ok(v) = dec.str() {
+                    map.insert(field_name.to_string(), serde_json::json!(v));
+                }
+            }
+            _ => break,
+        }
+    }
+    serde_json::Value::Object(map)
+}
+
+#[derive(serde::Deserialize)]
+struct TelemetryQuery {
+    since: Option<u32>,
+}
+
+/// GET /api/telemetry -- return recent telemetry events as JSON array.
+async fn get_telemetry(
+    State(state): State<SharedState>,
+    Query(query): Query<TelemetryQuery>,
+) -> Json<serde_json::Value> {
+    let s = state.lock().unwrap_or_else(|e| e.into_inner());
+    let since = query.since.unwrap_or(0);
+    let entries: Vec<&TelemetryEntry> = s
+        .telemetry_log
+        .iter()
+        .filter(|e| e.seq >= since)
+        .collect();
+    Json(serde_json::json!(entries))
 }
 
 #[cfg(test)]
@@ -646,5 +765,55 @@ mod tests {
     fn test_server_state_has_10_buses() {
         let state = ServerState::new();
         assert_eq!(state.i2c_buses.len(), BUS_COUNT);
+    }
+
+    fn encode_telemetry_block_added(block_id: u32, block_type: &str) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut buf);
+        enc.map(3).unwrap();
+        enc.u32(0).unwrap().u32(50).unwrap();
+        enc.u32(1).unwrap().u32(block_id).unwrap();
+        enc.u32(2).unwrap().str(block_type).unwrap();
+        buf
+    }
+
+    #[test]
+    fn test_telemetry_block_added_logged() {
+        let state = make_state();
+        let req = encode_telemetry_block_added(7, "constant");
+        let resp = dispatch_cbor(&state, &req);
+        assert!(resp.is_none());
+        let st = state.lock().unwrap();
+        assert_eq!(st.telemetry_log.len(), 1);
+        assert_eq!(st.telemetry_log[0].tag, 50);
+        assert_eq!(st.telemetry_log[0].payload["blockId"], 7);
+        assert_eq!(st.telemetry_log[0].payload["blockType"], "constant");
+    }
+
+    #[test]
+    fn test_telemetry_graph_reset() {
+        let state = make_state();
+        let mut buf = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut buf);
+        enc.map(1).unwrap();
+        enc.u32(0).unwrap().u32(55).unwrap();
+        let resp = dispatch_cbor(&state, &buf);
+        assert!(resp.is_none());
+        let st = state.lock().unwrap();
+        assert_eq!(st.telemetry_log.len(), 1);
+        assert_eq!(st.telemetry_log[0].tag, 55);
+    }
+
+    #[tokio::test]
+    async fn test_get_telemetry_empty() {
+        let dir = temp_site("index.html", b"test");
+        let router = app(dir.path());
+        let req = axum::http::Request::builder()
+            .uri("/api/telemetry")
+            .body(Body::empty())
+            .expect("request");
+        let resp = router.oneshot(req).await.expect("failed");
+        let body = json_body(resp).await;
+        assert!(body.as_array().unwrap().is_empty());
     }
 }
