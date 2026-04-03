@@ -332,15 +332,93 @@ function buildPalette(): void {
   }
 }
 
+function loadPanel(name: string): void {
+  const json = localStorage.getItem('panel:' + name);
+  if (!json) return;
+  const nameInput = document.getElementById('panel-name') as HTMLInputElement;
+  if (panelMgr) panelMgr.destroy();
+  panelMgr = PanelManager.load(json);
+  nameInput.value = name;
+  clearInspector();
+  rerender();
+  refreshPanelList();
+}
+
+function refreshPanelList(): void {
+  const container = document.getElementById('panel-list');
+  if (!container) return;
+  container.textContent = '';
+
+  const nameInput = document.getElementById('panel-name') as HTMLInputElement;
+  const currentName = nameInput?.value.trim() ?? '';
+
+  const panelKeys: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('panel:')) {
+      panelKeys.push(key.slice('panel:'.length));
+    }
+  }
+  panelKeys.sort();
+
+  if (panelKeys.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'text-[11px] text-text-dim px-2 py-2';
+    empty.textContent = 'No saved panels';
+    container.appendChild(empty);
+    return;
+  }
+
+  for (const panelName of panelKeys) {
+    const item = document.createElement('div');
+    item.className = 'flex items-center justify-between px-2 py-1.5 text-xs cursor-pointer transition-colors';
+    item.style.borderLeft = '2px solid transparent';
+
+    if (panelName === currentName) {
+      item.style.borderLeftColor = 'var(--color-accent)';
+      item.style.background = 'var(--color-surface)';
+    }
+
+    item.addEventListener('mouseenter', () => {
+      if (panelName !== currentName) {
+        item.style.background = 'var(--color-border)';
+      }
+    });
+    item.addEventListener('mouseleave', () => {
+      if (panelName !== currentName) {
+        item.style.background = 'transparent';
+      }
+    });
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = panelName;
+    nameSpan.className = 'truncate flex-1';
+    nameSpan.addEventListener('click', () => loadPanel(panelName));
+    item.appendChild(nameSpan);
+
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '\u00d7';
+    delBtn.className = 'text-text-dim hover:text-danger text-sm leading-none ml-2';
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      localStorage.removeItem('panel:' + panelName);
+      refreshPanelList();
+    });
+    item.appendChild(delBtn);
+
+    container.appendChild(item);
+  }
+}
+
 export function initPanel(): void {
   const nameInput = document.getElementById('panel-name') as HTMLInputElement;
   const newBtn = document.getElementById('panel-new') as HTMLButtonElement;
   const saveBtn = document.getElementById('panel-save') as HTMLButtonElement;
-  const loadBtn = document.getElementById('panel-load') as HTMLButtonElement;
 
   panelMgr = new PanelManager('My Panel');
   buildPalette();
   rerender();
+  refreshPanelList();
 
   // Click on workspace background to deselect
   const workspace = getWorkspace();
@@ -358,6 +436,7 @@ export function initPanel(): void {
     nameInput.value = 'My Panel';
     clearInspector();
     rerender();
+    refreshPanelList();
   });
 
   // Save panel
@@ -365,22 +444,12 @@ export function initPanel(): void {
     if (!panelMgr) return;
     const name = nameInput.value.trim() || 'My Panel';
     localStorage.setItem('panel:' + name, panelMgr.save());
-  });
+    refreshPanelList();
 
-  // Load panel
-  loadBtn.addEventListener('click', () => {
-    const name = prompt('Panel name to load:');
-    if (!name || !name.trim()) return;
-    const json = localStorage.getItem('panel:' + name.trim());
-    if (!json) {
-      alert('No saved panel found with name: ' + name.trim());
-      return;
-    }
-    if (panelMgr) panelMgr.destroy();
-    panelMgr = PanelManager.load(json);
-    nameInput.value = name.trim();
-    clearInspector();
-    rerender();
+    // Brief "Saved!" feedback
+    const origText = saveBtn.textContent;
+    saveBtn.textContent = 'Saved!';
+    setTimeout(() => { saveBtn.textContent = origText; }, 1500);
   });
 
   // HIL Connection
