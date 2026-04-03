@@ -1497,11 +1497,9 @@ pub fn panel_update_widget(
         let widget = panel
             .get_widget_mut(widget_id)
             .ok_or_else(|| JsValue::from_str("widget not found"))?;
-        widget.kind = new.kind;
-        widget.label = new.label;
-        widget.position = new.position;
-        widget.size = new.size;
-        widget.channels = new.channels;
+        let preserved_id = widget.id;
+        *widget = new;
+        widget.id = preserved_id;
         Ok(())
     })
 }
@@ -1510,13 +1508,7 @@ pub fn panel_update_widget(
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn panel_snapshot(panel_id: u32) -> Result<String, JsValue> {
-    PANELS.with(|p| {
-        let panels = p.borrow();
-        let panel = panels
-            .get(&panel_id)
-            .ok_or_else(|| JsValue::from_str("panel not found"))?;
-        serde_json::to_string(panel).map_err(|e| JsValue::from_str(&e.to_string()))
-    })
+    panel_save(panel_id)
 }
 
 #[cfg(test)]
