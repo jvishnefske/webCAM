@@ -161,13 +161,13 @@ function renderButton(
     'bg-accent text-white px-4 py-1.5 rounded text-[13px] font-semibold ' +
     'cursor-pointer transition-colors duration-150 hover:bg-accent-dim active:opacity-80';
   btn.textContent = widget.label;
-  btn.addEventListener('mousedown', () => {
+  btn.addEventListener('pointerdown', () => {
     onInteraction(widget.id, 1.0);
   });
-  btn.addEventListener('mouseup', () => {
+  btn.addEventListener('pointerup', () => {
     onInteraction(widget.id, 0.0);
   });
-  btn.addEventListener('mouseleave', () => {
+  btn.addEventListener('pointerleave', () => {
     onInteraction(widget.id, 0.0);
   });
   wrapper.appendChild(btn);
@@ -204,8 +204,8 @@ export function renderPanel(
   mgr: PanelManager,
   onWidgetInteraction: InteractionCallback,
 ): void {
-  container.textContent = '';
   const model = mgr.snapshot();
+  container.textContent = '';
 
   const title = document.createElement('h2');
   title.className = 'text-[13px] uppercase tracking-wider text-text-dim mb-3';

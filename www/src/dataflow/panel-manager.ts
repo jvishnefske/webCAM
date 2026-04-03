@@ -6,6 +6,12 @@ import {
 } from '../../pkg/rustcam.js';
 import type { PanelModel, Widget } from './panel-types.js';
 
+/**
+ * WASM wrapper for the control panel model.
+ *
+ * Methods that interact with the WASM backend may throw if the panel ID
+ * is invalid or JSON is malformed.  Callers should handle exceptions.
+ */
 export class PanelManager {
   panelId: number;
 
