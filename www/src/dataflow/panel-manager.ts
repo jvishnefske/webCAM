@@ -3,6 +3,7 @@
 import {
   panel_new, panel_destroy, panel_load, panel_save,
   panel_add_widget, panel_remove_widget, panel_update_widget, panel_snapshot,
+  panel_set_topic, panel_get_values, panel_merge_values, panel_collect_outputs,
 } from '../../pkg/rustcam.js';
 import type { PanelModel, Widget } from './panel-types.js';
 
@@ -55,5 +56,25 @@ export class PanelManager {
   /** Get a live snapshot of the panel model. */
   snapshot(): PanelModel {
     return JSON.parse(panel_snapshot(this.panelId));
+  }
+
+  /** Set a single topic value in the panel's pubsub store. */
+  setTopic(topic: string, value: number): void {
+    panel_set_topic(this.panelId, topic, value);
+  }
+
+  /** Get all topic values as a record. */
+  getValues(): Record<string, number> {
+    return JSON.parse(panel_get_values(this.panelId));
+  }
+
+  /** Merge external topic values into the panel's pubsub store. */
+  mergeValues(values: Record<string, number>): void {
+    panel_merge_values(this.panelId, JSON.stringify(values));
+  }
+
+  /** Collect output topic values written by widgets. */
+  collectOutputs(): Record<string, number> {
+    return JSON.parse(panel_collect_outputs(this.panelId));
   }
 }

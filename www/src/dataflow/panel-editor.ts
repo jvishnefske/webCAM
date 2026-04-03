@@ -1,7 +1,8 @@
 /** Panel editor: orchestrates panel mode UI. */
 
 import { PanelManager } from './panel-manager.js';
-import { renderPanel } from './panel-view.js';
+import { renderPanel, updatePanelValues } from './panel-view.js';
+import { HilClient } from './hil-client.js';
 import type { WidgetKind, ChannelBinding } from './panel-types.js';
 
 function nanOr(value: number, fallback: number): number {
@@ -10,6 +11,8 @@ function nanOr(value: number, fallback: number): number {
 
 let panelMgr: PanelManager | null = null;
 let selectedWidgetId: number | null = null;
+let hilClient: HilClient | null = null;
+let syncIntervalId: ReturnType<typeof setInterval> | null = null;
 
 // Default widget configs for the palette
 const WIDGET_DEFAULTS: Record<string, { kind: WidgetKind; defaultChannels: ChannelBinding[] }> = {
@@ -75,8 +78,18 @@ function rerender(): void {
 }
 
 function onWidgetInteraction(widgetId: number, value: number | string): void {
-  console.log('Widget', widgetId, 'value:', value);
-  // Future: publish to pubsub topic
+  if (!panelMgr) return;
+  const model = panelMgr.snapshot();
+  const widget = model.widgets.find(w => w.id === widgetId);
+  if (!widget) return;
+
+  // Write value to all output topics bound to this widget
+  const numValue = typeof value === 'string' ? parseFloat(value) || 0 : value;
+  for (const ch of widget.channels) {
+    if (ch.direction === 'Output') {
+      panelMgr.setTopic(ch.topic, numValue);
+    }
+  }
 }
 
 function selectWidget(widgetId: number): void {
@@ -245,6 +258,48 @@ function showInspector(widgetId: number): void {
   inspector.appendChild(deleteBtn);
 }
 
+function startPubsubSync(): void {
+  if (syncIntervalId) return;
+  syncIntervalId = setInterval(async () => {
+    if (!panelMgr || !hilClient?.connected) return;
+    try {
+      // Pull input values from HIL
+      const pubsubValues = await hilClient.getPubsub();
+      panelMgr.mergeValues(pubsubValues);
+
+      // Push output values to HIL (via HTTP, since there's no WS publish)
+      // For now, outputs are stored in WASM runtime — a future POST /api/pubsub
+      // endpoint on the MCU would complete the loop.
+      // const outputs = panelMgr.collectOutputs();
+
+      // Update widget displays with current values
+      const allValues = panelMgr.getValues();
+      const model = panelMgr.snapshot();
+      const valueMap = new Map<number, number | string>();
+      for (const widget of model.widgets) {
+        for (const ch of widget.channels) {
+          if (ch.direction === 'Input' && ch.topic in allValues) {
+            valueMap.set(widget.id, allValues[ch.topic]);
+          }
+        }
+      }
+      if (valueMap.size > 0) {
+        const workspace = getWorkspace();
+        updatePanelValues(workspace, valueMap);
+      }
+    } catch {
+      // Ignore transient fetch errors
+    }
+  }, 200); // 5Hz poll
+}
+
+function stopPubsubSync(): void {
+  if (syncIntervalId) {
+    clearInterval(syncIntervalId);
+    syncIntervalId = null;
+  }
+}
+
 function buildPalette(): void {
   const palette = document.getElementById('panel-widget-palette')!;
   palette.textContent = '';
@@ -326,6 +381,43 @@ export function initPanel(): void {
     nameInput.value = name.trim();
     clearInspector();
     rerender();
+  });
+
+  // HIL Connection
+  const hilUrlInput = document.getElementById('panel-hil-url') as HTMLInputElement;
+  const hilConnectBtn = document.getElementById('panel-hil-connect') as HTMLButtonElement;
+  const hilStatusEl = document.getElementById('panel-hil-status')!;
+
+  hilConnectBtn.addEventListener('click', () => {
+    if (hilClient?.connected) {
+      hilClient.disconnect();
+      stopPubsubSync();
+      return;
+    }
+    const url = hilUrlInput.value.trim();
+    if (!url) return;
+
+    hilClient = new HilClient();
+    hilClient.onConnect = () => {
+      hilStatusEl.textContent = 'Connected';
+      hilStatusEl.className = 'text-[11px] text-success';
+      hilConnectBtn.textContent = 'Disconnect';
+      startPubsubSync();
+    };
+    hilClient.onDisconnect = () => {
+      hilStatusEl.textContent = 'Disconnected';
+      hilStatusEl.className = 'text-[11px] text-text-dim';
+      hilConnectBtn.textContent = 'Connect';
+      stopPubsubSync();
+    };
+    hilClient.onError = (msg) => {
+      hilStatusEl.textContent = 'Error: ' + msg;
+      hilStatusEl.className = 'text-[11px] text-danger';
+    };
+
+    hilClient.connect(url);
+    hilStatusEl.textContent = 'Connecting...';
+    hilStatusEl.className = 'text-[11px] text-warning';
   });
 }
 
