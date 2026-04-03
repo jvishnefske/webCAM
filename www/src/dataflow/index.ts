@@ -16,6 +16,7 @@ import {
   uniqueName, createAutoSave,
 } from './storage.js';
 import { createSidebar } from './sidebar.js';
+import { TelemetryPublisher } from './telemetry.js';
 import type { GraphSnapshot, Value } from './types.js';
 
 let mgr: DataflowManager | null = null;
@@ -23,11 +24,14 @@ let editor: DataflowEditor | null = null;
 let hilClient: HilClient | null = null;
 let activeProjectName = 'Untitled';
 let triggerAutoSave: (() => void) | null = null;
+let telemetry: TelemetryPublisher | null = null;
 
 export function initDataflow(): void {
   mgr = new DataflowManager(0.01);
   const container = $('dataflow-workspace') as HTMLDivElement;
   editor = new DataflowEditor(container, mgr);
+  telemetry = new TelemetryPublisher();
+  mgr.telemetry = telemetry;
 
   editor.onSelect = (blockId, snap) => {
     updateBlockInfo(blockId, snap);
@@ -71,6 +75,8 @@ export function initDataflow(): void {
     editor.destroy();
     mgr.destroy();
     mgr = new DataflowManager(dt);
+    if (telemetry) mgr.telemetry = telemetry;
+    telemetry?.publish({ tag: 55 });
     editor = new DataflowEditor(container, mgr);
     editor.onSelect = (blockId, snap) => updateBlockInfo(blockId, snap);
     editor.onEdgeSelect = (channelId, snap) => updateEdgeInfo(channelId, snap);
@@ -453,12 +459,24 @@ function setupSidebarPalette(): void {
       if (bt.category !== lastCat) {
         lastCat = bt.category;
         const header = document.createElement('div');
-        header.className = 'text-[11px] text-text-dim uppercase mt-2 first:mt-0';
+        header.className = 'text-[10px] text-text-dim uppercase tracking-wider px-2 pt-2 pb-1';
+        if (container.childNodes.length > 0) {
+          header.style.borderTop = '1px solid var(--color-border)';
+        }
         header.textContent = bt.category;
         container.appendChild(header);
       }
       const item = document.createElement('button');
-      item.className = 'block w-full text-left text-xs px-2 py-1 rounded cursor-pointer bg-transparent border-none text-text hover:bg-border transition-colors';
+      item.className = 'block w-full text-left text-xs px-2 py-1.5 cursor-pointer bg-transparent border-none text-text transition-colors';
+      item.style.cssText = 'border-left: 2px solid transparent;';
+      item.addEventListener('mouseenter', () => {
+        item.style.background = 'var(--color-border)';
+        item.style.borderLeftColor = 'var(--color-accent)';
+      });
+      item.addEventListener('mouseleave', () => {
+        item.style.background = 'transparent';
+        item.style.borderLeftColor = 'transparent';
+      });
       item.textContent = bt.name;
       item.addEventListener('click', () => {
         if (!mgr || !editor) return;
@@ -533,6 +551,10 @@ function setupHilConnection(): void {
       statusEl.className = 'text-xs text-success mb-2';
       connectBtn.textContent = 'Disconnect';
       deployBtn.disabled = false;
+      if (telemetry && hilClient?.socket) {
+        telemetry.attach(hilClient.socket);
+        telemetry.setEnabled(true);
+      }
     };
 
     hilClient.onDisconnect = () => {
@@ -540,6 +562,7 @@ function setupHilConnection(): void {
       statusEl.className = 'text-xs text-text-dim mb-2';
       connectBtn.textContent = 'Connect';
       deployBtn.disabled = true;
+      telemetry?.detach();
     };
 
     hilClient.onBusList = (buses) => {
