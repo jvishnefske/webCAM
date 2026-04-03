@@ -373,32 +373,18 @@ pub fn DagEditorPanel() -> impl IntoView {
             // Center: canvas
             <div class="dag-canvas-container">
                 <div class="dag-toolbar">
-                    <button class="btn btn-primary" on:click=on_evaluate>"Evaluate"</button>
-                    <button class="btn btn-secondary" on:click=on_deploy>"Deploy to MCU"</button>
-                    <button class="btn btn-secondary" on:click=on_tick>"Tick"</button>
-                    <button class="btn btn-danger" on:click=on_delete>"Delete Block"</button>
+                    <button
+                        class=move || if sim_running.get() { "btn btn-danger" } else { "btn btn-primary" }
+                        on:click=on_play_pause
+                    >
+                        {move || if sim_running.get() { "Pause" } else { "Play" }}
+                    </button>
+                    <button class="btn btn-secondary" on:click=on_step>"Step"</button>
+                    <button class="btn btn-secondary" on:click=on_reset>"Reset"</button>
+                    <button class="btn btn-secondary" on:click=on_deploy>"Deploy"</button>
+                    <button class="btn btn-danger" on:click=on_delete>"Delete"</button>
                     <span class="dag-status">{move || deploy_status.get()}</span>
                 </div>
-                // Evaluation results
-                {move || {
-                    let results = eval_results.get();
-                    if results.is_empty() {
-                        view! { <div></div> }.into_any()
-                    } else {
-                        view! {
-                            <div class="dag-eval-results">
-                                {results.iter().map(|(name, val)| {
-                                    view! {
-                                        <span class="dag-eval-entry">
-                                            <span class="dag-eval-name">{name.clone()}</span>
-                                            <span class="dag-eval-value">{format!("{val:.4}")}</span>
-                                        </span>
-                                    }
-                                }).collect_view()}
-                            </div>
-                        }.into_any()
-                    }
-                }}
                 <svg class="dag-canvas" viewBox="0 0 700 400">
                     {move || {
                         blocks.get().iter().map(|pb| {
@@ -452,6 +438,9 @@ pub fn DagEditorPanel() -> impl IntoView {
                     }}
                 </svg>
             </div>
+
+            // Bottom: live monitor
+            <MonitorPanel topics=sim_topics tick_count=sim_tick_count />
 
             // Right: config panel
             <ConfigPanel
