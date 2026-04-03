@@ -253,6 +253,26 @@ export function panel_update_widget(panel_id: number, widget_id: number, config_
 export function panel_snapshot(panel_id: number): string;
 
 /**
+ * Set a single topic value in the panel's pubsub store.
+ */
+export function panel_set_topic(panel_id: number, topic: string, value: number): void;
+
+/**
+ * Get all topic values as a JSON object.
+ */
+export function panel_get_values(panel_id: number): string;
+
+/**
+ * Merge external topic values (JSON object) into the panel's pubsub store.
+ */
+export function panel_merge_values(panel_id: number, values_json: string): void;
+
+/**
+ * Collect output topic values written by widgets as a JSON object.
+ */
+export function panel_collect_outputs(panel_id: number): string;
+
+/**
  * Return flat move list as JSON for the tool simulation.
  * Each move: `{ x, y, z, rapid }`.
  */

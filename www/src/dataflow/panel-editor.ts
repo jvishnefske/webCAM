@@ -488,6 +488,43 @@ export function initPanel(): void {
     hilStatusEl.textContent = 'Connecting...';
     hilStatusEl.className = 'text-[11px] text-warning';
   });
+
+  // HIL Connection
+  const hilUrlInput = document.getElementById('panel-hil-url') as HTMLInputElement;
+  const hilConnectBtn = document.getElementById('panel-hil-connect') as HTMLButtonElement;
+  const hilStatusEl = document.getElementById('panel-hil-status')!;
+
+  hilConnectBtn.addEventListener('click', () => {
+    if (hilClient?.connected) {
+      hilClient.disconnect();
+      stopPubsubSync();
+      return;
+    }
+    const url = hilUrlInput.value.trim();
+    if (!url) return;
+
+    hilClient = new HilClient();
+    hilClient.onConnect = () => {
+      hilStatusEl.textContent = 'Connected';
+      hilStatusEl.className = 'text-[11px] text-success';
+      hilConnectBtn.textContent = 'Disconnect';
+      startPubsubSync();
+    };
+    hilClient.onDisconnect = () => {
+      hilStatusEl.textContent = 'Disconnected';
+      hilStatusEl.className = 'text-[11px] text-text-dim';
+      hilConnectBtn.textContent = 'Connect';
+      stopPubsubSync();
+    };
+    hilClient.onError = (msg) => {
+      hilStatusEl.textContent = 'Error: ' + msg;
+      hilStatusEl.className = 'text-[11px] text-danger';
+    };
+
+    hilClient.connect(url);
+    hilStatusEl.textContent = 'Connecting...';
+    hilStatusEl.className = 'text-[11px] text-warning';
+  });
 }
 
 export function activatePanel(): void {
