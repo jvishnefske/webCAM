@@ -6,6 +6,7 @@ import {
   dataflow_run, dataflow_set_speed, dataflow_snapshot, dataflow_block_types,
 } from '../../pkg/rustcam.js';
 import type { GraphSnapshot, BlockTypeInfo, NodePosition } from './types.js';
+import type { TelemetryPublisher } from './telemetry.js';
 import type { SavedProject } from './storage.js';
 
 export class DataflowManager {
@@ -16,6 +17,9 @@ export class DataflowManager {
 
   /** UI positions for each block, keyed by block id. */
   positions = new Map<number, NodePosition>();
+
+  /** Optional telemetry publisher for CRUD events. */
+  telemetry: TelemetryPublisher | null = null;
 
   /** Callback invoked after each tick with the latest snapshot. */
   onTick: ((snap: GraphSnapshot) => void) | null = null;
@@ -32,24 +36,30 @@ export class DataflowManager {
   addBlock(blockType: string, config: Record<string, unknown>, x = 100, y = 100): number {
     const id = dataflow_add_block(this.graphId, blockType, JSON.stringify(config));
     this.positions.set(id, { x, y });
+    this.telemetry?.publish({ tag: 50, blockId: id, blockType, config, x, y });
     return id;
   }
 
   updateBlock(blockId: number, blockType: string, config: Record<string, unknown>): void {
     dataflow_update_block(this.graphId, blockId, blockType, JSON.stringify(config));
+    this.telemetry?.publish({ tag: 52, blockId, blockType, config });
   }
 
   removeBlock(blockId: number): void {
     dataflow_remove_block(this.graphId, blockId);
     this.positions.delete(blockId);
+    this.telemetry?.publish({ tag: 51, blockId });
   }
 
   connect(fromBlock: number, fromPort: number, toBlock: number, toPort: number): number {
-    return dataflow_connect(this.graphId, fromBlock, fromPort, toBlock, toPort);
+    const id = dataflow_connect(this.graphId, fromBlock, fromPort, toBlock, toPort);
+    this.telemetry?.publish({ tag: 53, fromBlock, fromPort, toBlock, toPort, channelId: id });
+    return id;
   }
 
   disconnect(channelId: number): void {
     dataflow_disconnect(this.graphId, channelId);
+    this.telemetry?.publish({ tag: 54, channelId });
   }
 
   setSpeed(speed: number): void {
