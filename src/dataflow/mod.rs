@@ -17,5 +17,5 @@ pub mod sim_peripherals;
 pub use block::{BlockId, Module, PortDef, PortKind, Tick, Value};
 pub use channel::{Channel, ChannelId};
 pub use graph::DataflowGraph;
-pub use panel::PanelModel;
+pub use panel::{PanelModel, PanelRuntime};
 pub use scheduler::Scheduler;
