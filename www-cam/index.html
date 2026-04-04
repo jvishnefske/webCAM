@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Wasm Engineered Browser Computer-Aided Manufacturing</title>
+<link rel="stylesheet" href="./dist/styles.css"/>
+</head>
+<body class="font-sans bg-bg text-text min-h-screen box-border m-0 p-0">
+
+<header class="bg-surface border-b border-border px-6 py-3 flex items-center gap-4">
+  <h1 class="text-lg font-semibold">Wasm Engineered Browser Computer-Aided Manufacturing</h1>
+  <span class="text-text-dim text-[13px]">STL / SVG &rarr; G-code &mdash; runs entirely in your browser</span>
+  <div class="flex gap-0.5 ml-auto bg-bg rounded-md p-0.5" id="mode-switcher">
+    <button class="active bg-transparent border-none text-text-dim text-[13px] font-semibold px-4 py-1.5 rounded cursor-pointer transition-colors duration-150 [&.active]:bg-accent [&.active]:text-white" data-mode="cam">CAM</button>
+    <button class="bg-transparent border-none text-text-dim text-[13px] font-semibold px-4 py-1.5 rounded cursor-pointer transition-colors duration-150 [&.active]:bg-accent [&.active]:text-white" data-mode="sketch">2D Sketch</button>
+  </div>
+</header>
+
+<div class="app">
+  <!-- Sidebar -->
+  <div class="sidebar bg-surface border-r border-border p-4 overflow-y-auto">
+    <div id="cam-sidebar-content">
+    <section class="mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Input File</h2>
+      <div class="drop-zone border-2 border-dashed border-border rounded-lg px-4 py-8 text-center cursor-pointer transition-colors duration-200 mb-3 hover:border-accent hover:bg-[rgba(79,140,255,0.06)]" id="drop-zone">
+        <p class="text-[13px] text-text-dim">Drop an <b>.stl</b> or <b>.svg</b> file here<br/>or click to browse</p>
+        <div class="text-accent font-semibold mt-2 text-sm" id="filename"></div>
+      </div>
+      <input type="file" id="file-input" accept=".stl,.svg" hidden/>
+    </section>
+    <section class="mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Machine</h2>
+      <select id="machine-type" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2">
+        <option value="cnc_mill">CNC Mill</option>
+        <option value="laser_cutter">Laser Cutter</option>
+      </select>
+    </section>
+    <section class="mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Strategy</h2>
+      <select id="strategy" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2">
+        <option value="contour">Contour (profile cut)</option>
+        <option value="pocket">Pocket (area clear)</option>
+        <option value="slice">Slice (layer contour)</option>
+        <option value="zigzag">Zigzag Surface</option>
+        <option value="perimeter">Perimeter</option>
+        <option value="laser_cut">Laser Cut</option>
+        <option value="laser_engrave">Laser Engrave</option>
+      </select>
+    </section>
+    <section class="mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Tool</h2>
+      <label class="block text-[13px] text-text-dim mb-1">Tool type</label>
+      <select id="tool-type" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2">
+        <option value="end_mill">End Mill</option>
+        <option value="ball_end">Ball End</option>
+        <option value="face_mill">Face Mill</option>
+      </select>
+      <label class="block text-[13px] text-text-dim mb-1">Tool diameter (mm)</label>
+      <input type="number" id="tool-diameter" value="3.175" step="0.1" min="0.1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <div id="effective-diameter-row" class="hidden">
+        <label class="block text-[13px] text-text-dim mb-1">Effective diameter (mm)</label>
+        <input type="number" id="effective-diameter" value="3.175" step="0.1" min="0.1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      </div>
+      <div id="corner-radius-row" class="hidden">
+        <label class="block text-[13px] text-text-dim mb-1">Corner radius (mm)</label>
+        <input type="number" id="corner-radius" value="0" step="0.1" min="0" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      </div>
+      <label class="block text-[13px] text-text-dim mb-1">Step-over (mm)</label>
+      <input type="number" id="step-over" value="1.5" step="0.1" min="0.1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+    </section>
+    <section id="zigzag-options" class="hidden mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Zigzag Options</h2>
+      <label class="block text-[13px] text-text-dim mb-1">Scan direction</label>
+      <select id="scan-direction" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2">
+        <option value="x">X (rows along X)</option>
+        <option value="y">Y (rows along Y)</option>
+      </select>
+    </section>
+    <section id="perimeter-options" class="hidden mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Perimeter Options</h2>
+      <label class="block text-[13px] text-text-dim mb-1">
+        <input type="checkbox" id="climb-cut"/>
+        Climb cutting
+      </label>
+      <label class="block text-[13px] text-text-dim mb-1">Number of passes</label>
+      <input type="number" id="perimeter-passes" value="1" step="1" min="1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+    </section>
+    <section id="cnc-params" class="mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Cutting</h2>
+      <label class="block text-[13px] text-text-dim mb-1">Cut depth (mm, negative)</label>
+      <input type="number" id="cut-depth" value="-1" step="0.5" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Step-down per pass (mm)</label>
+      <input type="number" id="step-down" value="1" step="0.25" min="0.1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Feed rate (mm/min)</label>
+      <input type="number" id="feed-rate" value="800" step="50" min="1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Plunge rate (mm/min)</label>
+      <input type="number" id="plunge-rate" value="300" step="50" min="1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Spindle speed (RPM)</label>
+      <input type="number" id="spindle-speed" value="12000" step="500" min="0" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Safe Z (mm)</label>
+      <input type="number" id="safe-z" value="5" step="1" min="0.5" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+    </section>
+    <section id="laser-params" class="hidden mb-5">
+      <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Laser</h2>
+      <label class="block text-[13px] text-text-dim mb-1">Laser power (%)</label>
+      <input type="number" id="laser-power" value="100" step="5" min="0" max="100" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Feed rate (mm/min)</label>
+      <input type="number" id="laser-feed-rate" value="1000" step="50" min="1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">Number of passes</label>
+      <input type="number" id="laser-passes" value="1" step="1" min="1" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      <label class="block text-[13px] text-text-dim mb-1">
+        <input type="checkbox" id="air-assist"/>
+        Air assist
+      </label>
+    </section>
+    <section class="mb-5">
+      <button class="btn btn-primary" id="generate-btn" disabled>Generate G-code</button>
+      <div class="text-xs mt-2 min-h-4" id="status"></div>
+    </section>
+    </div><!-- cam-sidebar-content -->
+
+    <div id="sketch-sidebar-content" class="hidden">
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Drawing Tools</h2>
+        <div class="grid grid-cols-2 gap-1 mb-3">
+          <button class="btn btn-secondary btn-tool active" data-tool="line">Line</button>
+          <button class="btn btn-secondary btn-tool" data-tool="rect">Rectangle</button>
+          <button class="btn btn-secondary btn-tool" data-tool="circle">Circle</button>
+          <button class="btn btn-secondary btn-tool" data-tool="polyline">Polyline</button>
+        </div>
+      </section>
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Canvas</h2>
+        <label class="block text-[13px] text-text-dim mb-1">Grid snap (mm)</label>
+        <input type="number" id="grid-snap" value="1" step="0.5" min="0" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+        <label class="block text-[13px] text-text-dim mb-1">Canvas size (mm)</label>
+        <input type="number" id="canvas-size" value="100" step="10" min="10" class="w-full bg-bg border border-border text-text px-2 py-1.5 rounded text-[13px] mb-2 focus:outline-none focus:border-accent"/>
+      </section>
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Shapes (<span id="shape-count">0</span>)</h2>
+        <div id="shape-list" class="max-h-[200px] overflow-y-auto text-xs text-text-dim"></div>
+      </section>
+      <section class="mb-5">
+        <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Constraints</h2>
+        <div class="grid grid-cols-2 gap-1">
+          <button class="btn btn-secondary btn-cst" data-cst="coincident" title="Merge two points">Coincident</button>
+          <button class="btn btn-secondary btn-cst" data-cst="horizontal" title="Same Y">Horiz</button>
+          <button class="btn btn-secondary btn-cst" data-cst="vertical" title="Same X">Vert</button>
+          <button class="btn btn-secondary btn-cst" data-cst="distance" title="Fixed distance">Distance</button>
+          <button class="btn btn-secondary btn-cst" data-cst="fixed" title="Lock point position">Fix</button>
+          <button class="btn btn-secondary btn-cst" data-cst="perpendicular" title="90 degrees">Perp</button>
+          <button class="btn btn-secondary btn-cst" data-cst="parallel" title="Same angle">Parallel</button>
+          <button class="btn btn-secondary btn-cst" data-cst="equal_length" title="Equal segment lengths">Equal</button>
+        </div>
+        <div id="cst-status" class="text-[11px] text-text-dim mt-1"></div>
+        <div id="cst-dof" class="text-xs mt-1 font-semibold"></div>
+        <div id="cst-list" class="max-h-[150px] overflow-y-auto text-[11px] text-text-dim mt-1"></div>
+      </section>
+      <section class="mb-5">
+        <button class="btn btn-secondary" id="sketch-undo">Undo Last Shape</button>
+        <button class="btn btn-secondary" id="sketch-clear">Clear All</button>
+        <button class="btn btn-primary mt-3" id="sketch-to-cam">Use Sketch in CAM &rarr;</button>
+        <div class="text-xs mt-2 min-h-4" id="sketch-status"></div>
+      </section>
+    </div><!-- sketch-sidebar-content -->
+  </div>
+
+  <!-- Preview canvas -->
+  <div class="preview bg-bg flex flex-col border-r border-border">
+    <div class="text-[13px] uppercase tracking-wider text-text-dim px-4 py-3 border-b border-border" id="preview-header">Toolpath Preview</div>
+    <canvas id="preview-canvas"></canvas>
+    <div id="sketch-canvas-wrap" class="flex-1 relative" style="display:none">
+      <canvas id="sketch-canvas" class="absolute inset-0 w-full h-full cursor-crosshair"></canvas>
+      <div class="absolute top-2 right-3 text-[11px] text-text-dim font-mono" id="sketch-cursor-pos"></div>
+    </div>
+  </div>
+
+  <!-- Right pane: G-code + Simulation tabs -->
+  <div class="right-pane bg-bg flex flex-col overflow-hidden">
+    <div class="tab-bar flex border-b border-border">
+      <button class="active flex-1 bg-transparent border-none text-text-dim text-[13px] font-semibold uppercase tracking-wider py-2.5 cursor-pointer border-b-2 border-transparent transition-colors duration-150 [&.active]:text-accent [&.active]:border-b-accent" data-tab="gcode-tab">G-code</button>
+      <button class="flex-1 bg-transparent border-none text-text-dim text-[13px] font-semibold uppercase tracking-wider py-2.5 cursor-pointer border-b-2 border-transparent transition-colors duration-150 [&.active]:text-accent [&.active]:border-b-accent" data-tab="sim-tab">Simulation</button>
+    </div>
+
+    <!-- G-code tab -->
+    <div class="tab-content flex-1 flex-col overflow-hidden [&.active]:flex active" id="gcode-tab">
+      <div class="flex items-center gap-2 px-4 py-2 border-b border-border">
+        <div class="flex-1"></div>
+        <button class="btn btn-sm btn-secondary" id="copy-btn">Copy</button>
+        <button class="btn btn-sm btn-secondary" id="download-btn">Download .nc</button>
+      </div>
+      <textarea id="gcode-output" readonly placeholder="G-code will appear here after generation..." class="flex-1 bg-surface text-text border-none p-3 font-mono text-xs leading-relaxed resize-none overflow-auto"></textarea>
+    </div>
+
+    <!-- Simulation tab -->
+    <div class="tab-content flex-1 flex-col overflow-hidden [&.active]:flex" id="sim-tab">
+      <div class="flex-1 relative">
+        <canvas id="sim-canvas" class="absolute inset-0 w-full h-full"></canvas>
+      </div>
+      <div class="flex items-center gap-2 px-3 py-2 border-t border-border bg-surface">
+        <button class="btn btn-sm btn-secondary" id="sim-play">Play</button>
+        <button class="btn btn-sm btn-secondary" id="sim-reset">Reset</button>
+        <label class="m-0 text-[11px] min-w-[50px]">Speed</label>
+        <input type="range" id="sim-speed" min="1" max="200" value="50" class="w-20 flex-none"/>
+        <input type="range" class="flex-[3]" id="sim-scrub" min="0" max="1" step="0.001" value="0"/>
+        <div class="text-[11px] text-text-dim min-w-[90px] text-right font-mono" id="sim-info">0 / 0</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="./dist/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "private": true,
+  "dependencies": {
+    "cbor-x": "^1.6.0"
+  },
+  "scripts": {
+    "build:css": "npx @tailwindcss/cli -i ./src/input.css -o ./dist/styles.css --minify",
+    "build:js": "node esbuild.config.mjs",
+    "build": "npm run build:css && npm run build:js",
+    "watch:css": "npx @tailwindcss/cli -i ./src/input.css -o ./dist/styles.css --watch",
+    "watch:js": "node esbuild.config.mjs --watch",
+    "watch": "npm run watch:css & npm run watch:js",
+    "dev": "npm run watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.0.0",
+    "esbuild": "^0.27.4",
+    "jsdom": "^29.0.1",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.1"
+  }
+}
