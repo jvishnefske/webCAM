@@ -792,7 +792,7 @@ mod tests {
 
         // lower succeeds
         let result = block.lower().unwrap();
-        assert!(result.dag.len() >= 1);
+        assert!(!result.dag.is_empty());
         assert_eq!(result.ports.inputs.len(), 1);
         assert_eq!(result.ports.inputs[0].0, "in");
         assert_eq!(result.ports.outputs.len(), 1);

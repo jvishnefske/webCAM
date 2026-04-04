@@ -311,7 +311,7 @@ fn mfr_fault_response_defaults() {
 fn status_vout_setter() {
     let mut dev = Bmr4696001::new(Address::new(ADDR).unwrap());
     dev.set_status_vout(0xAA);
-    let mut engine = PmBusEngine::new(dev);
+    let engine = PmBusEngine::new(dev);
     let mut bus = SimBusBuilder::new().with_device(engine).build();
     let mut buf = [0u8; 1];
     bus.write_read(ADDR, &[0x7A], &mut buf).unwrap();
