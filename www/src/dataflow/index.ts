@@ -1,6 +1,6 @@
 /** Dataflow mode: wires up the graph manager, editor, and plot display. */
 
-import { dataflow_codegen, dataflow_codegen_multi } from '../../pkg/rustcam.js';
+import { dataflow_codegen, dataflow_codegen_multi } from '../../pkg/rustsim.js';
 import { $, $btn, $input } from '../dom.js';
 import { DataflowManager } from './graph.js';
 import { DataflowEditor } from './editor.js';

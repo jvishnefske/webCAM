@@ -4,7 +4,7 @@ import {
   dataflow_new, dataflow_destroy, dataflow_add_block, dataflow_remove_block,
   dataflow_update_block, dataflow_connect, dataflow_disconnect, dataflow_advance,
   dataflow_run, dataflow_set_speed, dataflow_snapshot, dataflow_block_types,
-} from '../../pkg/rustcam.js';
+} from '../../pkg/rustsim.js';
 import type { GraphSnapshot, BlockTypeInfo, NodePosition } from './types.js';
 import type { TelemetryPublisher } from './telemetry.js';
 import type { SavedProject } from './storage.js';
