@@ -464,7 +464,7 @@ fn read_vin_getter() {
 
 #[test]
 fn operation_getter() {
-    let mut dev = Ltc4287::new(addr());
+    let dev = Ltc4287::new(addr());
     assert_eq!(dev.operation(), 0x00);
 
     let mut bus = SimBusBuilder::new().with_device(dev).build();
