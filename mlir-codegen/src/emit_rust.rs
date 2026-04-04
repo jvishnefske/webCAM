@@ -462,6 +462,101 @@ mod tests {
     }
 
     #[test]
+    fn test_emit_encoder_read() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        b.encoder_read(2);
+        let module = b.build();
+        let code = emit_rust(&module);
+        assert!(
+            code.contains("hw.encoder_read(2)"),
+            "expected encoder_read call, got:\n{code}"
+        );
+        assert!(
+            code.contains("state.v0 = p; state.v1 = v;"),
+            "expected position and velocity assignment, got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_emit_subf() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let a = b.constant_f64(10.0);
+        let c = b.constant_f64(3.0);
+        let _result = b.subf(a, c);
+        let module = b.build();
+        let code = emit_rust(&module);
+        assert!(
+            code.contains("state.v2 = state.v0 - state.v1;"),
+            "expected subtraction, got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_emit_gpio_read_write() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let val = b.gpio_read(5);
+        b.gpio_write(7, val);
+        let module = b.build();
+        let code = emit_rust(&module);
+        assert!(
+            code.contains("hw.gpio_read(5)"),
+            "expected gpio_read call, got:\n{code}"
+        );
+        assert!(
+            code.contains("hw.gpio_write(7, state.v0)"),
+            "expected gpio_write call, got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_emit_uart_rx_tx() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let val = b.uart_rx(1);
+        b.uart_tx(2, val);
+        let module = b.build();
+        let code = emit_rust(&module);
+        assert!(
+            code.contains("hw.uart_read(1)"),
+            "expected uart_read call, got:\n{code}"
+        );
+        assert!(
+            code.contains("hw.uart_write(2, state.v0)"),
+            "expected uart_write call, got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_emit_unknown_op() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        b.custom_op("my.unknown_op", &[], &[], 0);
+        let module = b.build();
+        let code = emit_rust(&module);
+        assert!(
+            code.contains("// unsupported: my.unknown_op"),
+            "expected unsupported comment, got:\n{code}"
+        );
+    }
+
+    #[test]
+    fn test_emit_empty_module() {
+        let module = IrModule { funcs: vec![] };
+        let code = emit_rust(&module);
+        assert!(
+            code.contains("pub struct State {}"),
+            "expected empty State struct, got:\n{code}"
+        );
+        assert!(
+            code.contains("pub fn tick(_state: &mut State, _hw: &mut dyn HardwareBridge) {}"),
+            "expected empty tick fn, got:\n{code}"
+        );
+    }
+
+    #[test]
     fn test_emit_forbid_unsafe() {
         let mut b = IrBuilder::new();
         b.begin_func("tick", &[], &[]);
