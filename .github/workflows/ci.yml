@@ -169,10 +169,10 @@ jobs:
           PR=${{ github.event.pull_request.number }}
           mkdir -p ~/.ssh && echo "$DEPLOY_KEY" > ~/.ssh/key && chmod 600 ~/.ssh/key
           export GIT_SSH_COMMAND="ssh -i ~/.ssh/key -o StrictHostKeyChecking=no"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git clone --branch gh-pages --depth 1 git@github.com:jvishnefske/cam.git _cam
           cd _cam
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           if [ -d "pr-preview/pr-$PR" ]; then
             git rm -rf "pr-preview/pr-$PR"
             git commit -m "Remove preview for PR #$PR"
