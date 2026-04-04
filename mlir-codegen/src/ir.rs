@@ -473,6 +473,118 @@ mod tests {
     }
 
     #[test]
+    fn test_default_builder() {
+        let b = IrBuilder::default();
+        let module = b.build();
+        assert!(module.funcs.is_empty());
+    }
+
+    #[test]
+    fn test_subf() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let a = b.constant_f64(10.0);
+        let c = b.constant_f64(3.0);
+        let result = b.subf(a, c);
+        let module = b.build();
+
+        let sub_op = &module.funcs[0].ops[2];
+        assert_eq!(sub_op.name, "arith.subf");
+        assert_eq!(sub_op.operands, vec![a, c]);
+        assert_eq!(sub_op.results, vec![result]);
+    }
+
+    #[test]
+    fn test_gpio_read() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let val = b.gpio_read(5);
+        let module = b.build();
+
+        let op = &module.funcs[0].ops[0];
+        assert_eq!(op.name, "dataflow.gpio_read");
+        assert_eq!(op.attrs.get("pin"), Some(&Attr::I64(5)));
+        assert_eq!(op.results.len(), 1);
+        assert_eq!(op.results[0], val);
+    }
+
+    #[test]
+    fn test_gpio_write() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let val = b.constant_f64(1.0);
+        b.gpio_write(7, val);
+        let module = b.build();
+
+        let op = &module.funcs[0].ops[1];
+        assert_eq!(op.name, "dataflow.gpio_write");
+        assert_eq!(op.attrs.get("pin"), Some(&Attr::I64(7)));
+        assert_eq!(op.operands, vec![val]);
+        assert_eq!(op.results.len(), 0);
+    }
+
+    #[test]
+    fn test_uart_rx() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let val = b.uart_rx(2);
+        let module = b.build();
+
+        let op = &module.funcs[0].ops[0];
+        assert_eq!(op.name, "dataflow.uart_rx");
+        assert_eq!(op.attrs.get("port"), Some(&Attr::I64(2)));
+        assert_eq!(op.results.len(), 1);
+        assert_eq!(op.results[0], val);
+    }
+
+    #[test]
+    fn test_uart_tx() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let val = b.constant_f64(99.0);
+        b.uart_tx(3, val);
+        let module = b.build();
+
+        let op = &module.funcs[0].ops[1];
+        assert_eq!(op.name, "dataflow.uart_tx");
+        assert_eq!(op.attrs.get("port"), Some(&Attr::I64(3)));
+        assert_eq!(op.operands, vec![val]);
+        assert_eq!(op.results.len(), 0);
+    }
+
+    #[test]
+    fn test_encoder_read() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let (pos, vel) = b.encoder_read(4);
+        let module = b.build();
+
+        let op = &module.funcs[0].ops[0];
+        assert_eq!(op.name, "dataflow.encoder_read");
+        assert_eq!(op.attrs.get("channel"), Some(&Attr::I64(4)));
+        assert_eq!(op.results.len(), 2);
+        assert_eq!(op.results[0], pos);
+        assert_eq!(op.results[1], vel);
+    }
+
+    #[test]
+    fn test_func_arg_with_multiple_args() {
+        let mut b = IrBuilder::new();
+        b.begin_func(
+            "tick",
+            &[("a", IrType::F64), ("b", IrType::F64), ("c", IrType::F64)],
+            &[],
+        );
+        let a = b.func_arg(0);
+        let b_arg = b.func_arg(1);
+        let c = b.func_arg(2);
+        // All should be unique
+        assert_ne!(a, b_arg);
+        assert_ne!(b_arg, c);
+        assert_ne!(a, c);
+    }
+
+    #[test]
     fn test_value_id_uniqueness() {
         let mut b = IrBuilder::new();
         b.begin_func("tick", &[("x", IrType::F64)], &[]);
