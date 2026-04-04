@@ -19,10 +19,12 @@
 
 pub mod c_types;
 pub mod dialect;
+pub mod emit_rust;
 pub mod ir;
 pub mod lower;
 pub mod peripherals;
 pub mod pipeline;
+pub mod printer;
 pub mod runtime;
 pub mod state_machine;
 
