@@ -648,6 +648,164 @@ fn emit_udp_sink(out: &mut String, _id: u32, inputs: &[String]) -> Result<(), St
     Ok(())
 }
 
+// ---------------------------------------------------------------------------
+// Typed IR lowering (IrBuilder-based)
+// ---------------------------------------------------------------------------
+
+use crate::ir::{IrBuilder, IrModule, ValueId};
+
+/// For a given block, resolve each input port to a [`ValueId`].
+///
+/// Connected inputs get the SSA value of the upstream output;
+/// unconnected inputs fall back to the provided `zero` constant.
+fn resolve_inputs_ir(
+    block_id: u32,
+    block: &BlockSnapshot,
+    channels: &[Channel],
+    output_map: &HashMap<(u32, usize), ValueId>,
+    zero: ValueId,
+) -> Vec<ValueId> {
+    let mut inputs = Vec::with_capacity(block.inputs.len());
+    for port_idx in 0..block.inputs.len() {
+        let val = channels
+            .iter()
+            .find(|ch| ch.to_block.0 == block_id && ch.to_port == port_idx)
+            .and_then(|ch| output_map.get(&(ch.from_block.0, ch.from_port)))
+            .copied()
+            .unwrap_or(zero);
+        inputs.push(val);
+    }
+    inputs
+}
+
+/// Lower a `GraphSnapshot` to a typed [`IrModule`].
+///
+/// Walks blocks in topological order and emits IR ops using the [`IrBuilder`].
+/// This is the typed replacement for [`lower_graph()`] (which produces string MLIR).
+pub fn lower_graph_ir(snap: &GraphSnapshot) -> Result<IrModule, String> {
+    let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
+    let sorted = topological_sort(&block_ids, &snap.channels)?;
+    let block_map: HashMap<u32, &BlockSnapshot> = snap.blocks.iter().map(|b| (b.id, b)).collect();
+
+    let mut builder = IrBuilder::new();
+    builder.begin_func("tick", &[], &[]);
+
+    // Emit a zero constant for unconnected inputs.
+    let zero = builder.constant_f64(0.0);
+
+    // Track SSA values per block output: (block_id, port_index) → ValueId
+    let mut output_map: HashMap<(u32, usize), ValueId> = HashMap::new();
+
+    for &BlockId(id) in &sorted {
+        let block = block_map[&id];
+        let bt = block.block_type.as_str();
+
+        if is_skipped(bt) {
+            continue;
+        }
+
+        let inputs = resolve_inputs_ir(id, block, &snap.channels, &output_map, zero);
+
+        match bt {
+            "constant" => {
+                let v = builder.constant_f64(config_float(block, "value"));
+                output_map.insert((id, 0), v);
+            }
+            "gain" => {
+                let input = inputs.first().copied().unwrap_or(zero);
+                let factor = builder.constant_f64(config_float(block, "param1"));
+                let v = builder.mulf(input, factor);
+                output_map.insert((id, 0), v);
+            }
+            "add" => {
+                let a = inputs.first().copied().unwrap_or(zero);
+                let b = inputs.get(1).copied().unwrap_or(zero);
+                let v = builder.addf(a, b);
+                output_map.insert((id, 0), v);
+            }
+            "subtract" => {
+                let a = inputs.first().copied().unwrap_or(zero);
+                let b = inputs.get(1).copied().unwrap_or(zero);
+                let v = builder.subf(a, b);
+                output_map.insert((id, 0), v);
+            }
+            "multiply" => {
+                let a = inputs.first().copied().unwrap_or(zero);
+                let b = inputs.get(1).copied().unwrap_or(zero);
+                let v = builder.mulf(a, b);
+                output_map.insert((id, 0), v);
+            }
+            "clamp" => {
+                let input = inputs.first().copied().unwrap_or(zero);
+                let lo = config_float(block, "param1");
+                let hi = config_float(block, "param2");
+                let v = builder.clamp(input, lo, hi);
+                output_map.insert((id, 0), v);
+            }
+            "adc_source" => {
+                let channel = config_u64(block, "channel") as u8;
+                let v = builder.adc_read(channel);
+                output_map.insert((id, 0), v);
+            }
+            "pwm_sink" => {
+                let channel = config_u64(block, "channel") as u8;
+                let input = inputs.first().copied().unwrap_or(zero);
+                builder.pwm_write(channel, input);
+            }
+            "gpio_in" => {
+                let pin = config_u64(block, "pin") as u8;
+                let v = builder.gpio_read(pin);
+                output_map.insert((id, 0), v);
+            }
+            "gpio_out" => {
+                let pin = config_u64(block, "pin") as u8;
+                let input = inputs.first().copied().unwrap_or(zero);
+                builder.gpio_write(pin, input);
+            }
+            "uart_rx" => {
+                let port = config_u64(block, "port") as u8;
+                let v = builder.uart_rx(port);
+                output_map.insert((id, 0), v);
+            }
+            "uart_tx" => {
+                let port = config_u64(block, "port") as u8;
+                let input = inputs.first().copied().unwrap_or(zero);
+                builder.uart_tx(port, input);
+            }
+            "encoder" => {
+                let channel = config_u64(block, "channel") as u8;
+                let (pos, vel) = builder.encoder_read(channel);
+                output_map.insert((id, 0), pos);
+                output_map.insert((id, 1), vel);
+            }
+            "pubsub_source" => {
+                let topic = config_str(block, "topic");
+                let t = if topic.is_empty() { "unknown" } else { topic };
+                let v = builder.subscribe(t);
+                output_map.insert((id, 0), v);
+            }
+            "pubsub_sink" => {
+                let topic = config_str(block, "topic");
+                let t = if topic.is_empty() { "unknown" } else { topic };
+                let input = inputs.first().copied().unwrap_or(zero);
+                builder.publish(t, input);
+            }
+            "udp_source" => {
+                let v = builder.constant_f64(0.0); // stub
+                output_map.insert((id, 0), v);
+            }
+            "udp_sink" => {
+                // skip — no output
+            }
+            other => {
+                return Err(format!("unsupported block type: {other}"));
+            }
+        }
+    }
+
+    Ok(builder.build())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1316,5 +1474,225 @@ mod tests {
             mlir.contains("%v3_p0"),
             "expected final SSA %v3_p0, got:\n{mlir}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Typed IR lowering tests (lower_graph_ir)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_lower_ir_constant() {
+        let snap = GraphSnapshot {
+            blocks: vec![make_block(
+                1,
+                "constant",
+                serde_json::json!({"value": 42.0}),
+            )],
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let module = lower_graph_ir(&snap).unwrap();
+        assert_eq!(module.funcs.len(), 1, "should have 1 function");
+        // Ops: zero constant + the 42.0 constant = 2 ops
+        let ops = &module.funcs[0].ops;
+        assert_eq!(ops.len(), 2, "expected 2 ops (zero + constant), got {}", ops.len());
+        // The second op should be the constant(42.0)
+        assert_eq!(ops[1].name, "dataflow.constant");
+        assert_eq!(
+            ops[1].attrs.get("value"),
+            Some(&crate::ir::Attr::F64(42.0))
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_chain() {
+        // constant(5) → gain(2)
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 5.0})),
+            {
+                let mut b = make_block(2, "gain", serde_json::json!({"param1": 2.0}));
+                b.inputs = vec![PortDef {
+                    name: "in".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        // Ops: zero(0.0), constant(5.0), constant(2.0 factor), mulf
+        assert_eq!(ops.len(), 4, "expected 4 ops, got {}", ops.len());
+
+        // Op 0: zero constant
+        assert_eq!(ops[0].name, "dataflow.constant");
+        assert_eq!(ops[0].attrs.get("value"), Some(&crate::ir::Attr::F64(0.0)));
+
+        // Op 1: constant(5.0)
+        assert_eq!(ops[1].name, "dataflow.constant");
+        assert_eq!(ops[1].attrs.get("value"), Some(&crate::ir::Attr::F64(5.0)));
+
+        // Op 2: constant(2.0) — gain factor
+        assert_eq!(ops[2].name, "dataflow.constant");
+        assert_eq!(ops[2].attrs.get("value"), Some(&crate::ir::Attr::F64(2.0)));
+
+        // Op 3: mulf — should wire constant(5) and constant(2)
+        assert_eq!(ops[3].name, "arith.mulf");
+        assert_eq!(ops[3].operands.len(), 2);
+        // mulf operand 0 = result of constant(5.0), operand 1 = result of constant(2.0)
+        assert_eq!(ops[3].operands[0], ops[1].results[0]);
+        assert_eq!(ops[3].operands[1], ops[2].results[0]);
+    }
+
+    #[test]
+    fn test_lower_ir_peripheral() {
+        // adc_source(ch=0) → gain(×3) → pwm_sink(ch=1)
+        let blocks = vec![
+            {
+                let mut b = make_block(1, "adc_source", serde_json::json!({"channel": 0}));
+                b.inputs = vec![];
+                b
+            },
+            {
+                let mut b = make_block(2, "gain", serde_json::json!({"param1": 3.0}));
+                b.inputs = vec![PortDef {
+                    name: "in".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b
+            },
+            {
+                let mut b = make_block(3, "pwm_sink", serde_json::json!({"channel": 1}));
+                b.inputs = vec![PortDef {
+                    name: "duty".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0), make_channel(2, 2, 0, 3, 0)];
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+
+        // Collect op names for verification
+        let op_names: Vec<&str> = ops.iter().map(|op| op.name.as_str()).collect();
+        assert!(
+            op_names.contains(&"dataflow.adc_read"),
+            "expected adc_read op, got: {op_names:?}"
+        );
+        assert!(
+            op_names.contains(&"arith.mulf"),
+            "expected mulf op for gain, got: {op_names:?}"
+        );
+        assert!(
+            op_names.contains(&"dataflow.pwm_write"),
+            "expected pwm_write op, got: {op_names:?}"
+        );
+
+        // The pwm_write should consume the mulf result
+        let pwm_op = ops.iter().find(|op| op.name == "dataflow.pwm_write").unwrap();
+        let mulf_op = ops.iter().find(|op| op.name == "arith.mulf").unwrap();
+        assert_eq!(
+            pwm_op.operands[0], mulf_op.results[0],
+            "pwm_write should consume the gain output"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_pubsub() {
+        let blocks = vec![
+            {
+                let mut b = make_block(
+                    1,
+                    "pubsub_source",
+                    serde_json::json!({"topic": "sensor/temp"}),
+                );
+                b.inputs = vec![];
+                b
+            },
+            {
+                let mut b = make_block(
+                    2,
+                    "pubsub_sink",
+                    serde_json::json!({"topic": "actuator/fan"}),
+                );
+                b.inputs = vec![PortDef {
+                    name: "value".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+
+        let sub_op = ops.iter().find(|op| op.name == "dataflow.subscribe").unwrap();
+        assert_eq!(
+            sub_op.attrs.get("topic"),
+            Some(&crate::ir::Attr::Str("sensor/temp".to_string()))
+        );
+
+        let pub_op = ops.iter().find(|op| op.name == "dataflow.publish").unwrap();
+        assert_eq!(
+            pub_op.attrs.get("topic"),
+            Some(&crate::ir::Attr::Str("actuator/fan".to_string()))
+        );
+
+        // publish should consume subscribe's output
+        assert_eq!(pub_op.operands[0], sub_op.results[0]);
+    }
+
+    #[test]
+    fn test_lower_ir_cycle_detection() {
+        let blocks = vec![
+            {
+                let mut b = make_block(1, "gain", serde_json::json!({"param1": 1.0}));
+                b.inputs = vec![PortDef {
+                    name: "in".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b
+            },
+            {
+                let mut b = make_block(2, "gain", serde_json::json!({"param1": 1.0}));
+                b.inputs = vec![PortDef {
+                    name: "in".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0), make_channel(2, 2, 0, 1, 0)];
+        let snap = GraphSnapshot {
+            blocks,
+            channels,
+            tick_count: 0,
+            time: 0.0,
+        };
+        let result = lower_graph_ir(&snap);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("cycle"));
     }
 }
