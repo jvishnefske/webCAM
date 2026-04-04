@@ -31,6 +31,9 @@ pub mod state_machine;
 use lower::GraphSnapshot;
 
 pub use runtime::{BlockFn, DagRuntime, HardwareBridge, NullHardware};
+pub use ir::{IrModule, IrBuilder, ValueId, IrType, Attr, IrOp, IrFunc};
+pub use printer::print_mlir;
+pub use emit_rust::emit_rust;
 
 /// Lower a `GraphSnapshot` (deserialized from JSON) to textual `.mlir`.
 ///
@@ -80,6 +83,32 @@ pub fn build_runtime(json: &str) -> Result<DagRuntime, String> {
 pub fn generate_logic_files(snap: &GraphSnapshot) -> Result<Vec<(String, String)>, String> {
     let config = pipeline::PipelineConfig::default();
     pipeline::generate_mlir_logic_files(snap, &config)
+}
+
+/// Lower a GraphSnapshot to a typed IrModule.
+///
+/// This is the new typed-IR entry point. The returned module can be:
+/// - Printed to MLIR text via [`print_mlir`]
+/// - Emitted as safe Rust via [`emit_rust`]
+pub fn graph_to_ir(snap: &GraphSnapshot) -> Result<IrModule, String> {
+    lower::lower_graph_ir(snap)
+}
+
+/// Lower a JSON GraphSnapshot to a typed IrModule.
+pub fn graph_json_to_ir(json: &str) -> Result<IrModule, String> {
+    let snap: GraphSnapshot =
+        serde_json::from_str(json).map_err(|e| format!("failed to parse graph JSON: {e}"))?;
+    graph_to_ir(&snap)
+}
+
+/// Run the full typed IR pipeline: lower → MLIR text + Rust source.
+pub fn run_ir_pipeline(snap: &GraphSnapshot) -> Result<pipeline::IrPipelineOutput, String> {
+    pipeline::run_ir_pipeline(snap)
+}
+
+/// Generate logic crate files using the typed IR pipeline.
+pub fn generate_ir_logic_files(snap: &GraphSnapshot) -> Result<Vec<(String, String)>, String> {
+    pipeline::generate_ir_logic_files(snap)
 }
 
 #[cfg(test)]
