@@ -380,6 +380,141 @@ mod tests {
     }
 
     #[test]
+    fn test_print_multi_result_op() {
+        // encoder_read produces two results, exercising the multi-result branch in print_op
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let (pos, vel) = b.encoder_read(1);
+        let module = b.build();
+        let text = print_mlir(&module);
+
+        // Should have `%0, %1 = "dataflow.encoder_read"...`
+        let enc_line = text
+            .lines()
+            .find(|l| l.contains("dataflow.encoder_read"))
+            .expect("should have encoder_read line");
+        assert!(
+            enc_line.contains(&format!("%{}, %{}", pos.0, vel.0)),
+            "multi-result should list both ValueIds, got: {enc_line}"
+        );
+        assert!(
+            enc_line.contains("-> (f64, f64)"),
+            "multi-result should have tuple return type, got: {enc_line}"
+        );
+    }
+
+    #[test]
+    fn test_print_func_with_result_types() {
+        // Exercise the branch that prints `-> (...)` on the function signature
+        let mut b = IrBuilder::new();
+        b.begin_func("compute", &[], &[IrType::F64, IrType::I32]);
+        b.constant_f64(1.0);
+        let module = b.build();
+        let text = print_mlir(&module);
+
+        assert!(
+            text.contains("-> (f64, i32)"),
+            "function should declare return types, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_print_multiple_functions() {
+        // Exercise the separator newline between multiple functions
+        let mut b = IrBuilder::new();
+        b.begin_func("setup", &[], &[]);
+        b.constant_f64(0.0);
+        b.begin_func("tick", &[], &[]);
+        b.constant_f64(1.0);
+        let module = b.build();
+        let text = print_mlir(&module);
+
+        assert!(
+            text.contains("func.func @setup"),
+            "should have setup func, got:\n{text}"
+        );
+        assert!(
+            text.contains("func.func @tick"),
+            "should have tick func, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_print_bool_attr() {
+        // Exercise the Attr::Bool branch in print_attr
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        b.custom_op("my.op", &[], &[("flag", Attr::Bool(true))], 1);
+        let module = b.build();
+        let text = print_mlir(&module);
+
+        assert!(
+            text.contains("flag = true"),
+            "should print Bool attr as true, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_print_type_variants() {
+        // Exercise all IrType variants through function args
+        let mut b = IrBuilder::new();
+        b.begin_func(
+            "tick",
+            &[
+                ("a", IrType::I32),
+                ("b", IrType::I64),
+                ("c", IrType::Bool),
+                ("d", IrType::Index),
+            ],
+            &[],
+        );
+        let a = b.func_arg(0);
+        let _sum = b.addf(a, a); // reference arg so it's inferred
+        let module = b.build();
+        let text = print_mlir(&module);
+
+        assert!(text.contains("i32"), "should print i32 type, got:\n{text}");
+        assert!(text.contains("i64"), "should print i64 type, got:\n{text}");
+        assert!(text.contains("i1"), "should print Bool as i1, got:\n{text}");
+        assert!(
+            text.contains("index"),
+            "should print index type, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_infer_arg_ids_unused_args() {
+        // Exercise the fallback path in infer_arg_value_ids when args are not
+        // referenced by any operand (unused args).
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[("x", IrType::F64)], &[]);
+        // Don't reference the argument — just emit a constant
+        b.constant_f64(42.0);
+        let module = b.build();
+        let text = print_mlir(&module);
+
+        // Should still produce a valid function signature with the arg
+        assert!(
+            text.contains("func.func @tick(%"),
+            "should have arg in signature, got:\n{text}"
+        );
+    }
+
+    #[test]
+    fn test_infer_arg_ids_no_ops() {
+        // Exercise the fallback path when there are args but no ops at all
+        let mut b = IrBuilder::new();
+        b.begin_func("noop", &[("x", IrType::F64)], &[]);
+        let module = b.build();
+        let text = print_mlir(&module);
+
+        assert!(
+            text.contains("func.func @noop(%"),
+            "should have arg in signature even with no ops, got:\n{text}"
+        );
+    }
+
+    #[test]
     fn test_print_void_op() {
         let mut b = IrBuilder::new();
         b.begin_func("tick", &[], &[]);
