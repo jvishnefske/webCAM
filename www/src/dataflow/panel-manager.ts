@@ -4,7 +4,7 @@ import {
   panel_new, panel_destroy, panel_load, panel_save,
   panel_add_widget, panel_remove_widget, panel_update_widget, panel_snapshot,
   panel_set_topic, panel_get_values, panel_merge_values, panel_collect_outputs,
-} from '../../pkg/rustcam.js';
+} from '../../pkg/rustsim.js';
 import type { PanelModel, Widget } from './panel-types.js';
 
 /**

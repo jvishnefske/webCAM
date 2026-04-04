@@ -1,6 +1,7 @@
 /** Main entry point — boots WASM, wires modules together. */
 
 import init from '../pkg/rustcam.js';
+import initSim from '../pkg/rustsim.js';
 import { $ } from './dom.js';
 import * as cam from './cam.js';
 import { loadSim, resizeSim } from './sim.js';
@@ -95,6 +96,7 @@ $('sketch-to-cam').addEventListener('click', () => {
 async function boot(): Promise<void> {
   try {
     await init();
+    await initSim();
     cam.setWasmReady(true);
     initDataflow();
     initPanel();
