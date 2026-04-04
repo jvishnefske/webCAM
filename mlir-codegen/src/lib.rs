@@ -1,15 +1,12 @@
 #![forbid(unsafe_code)]
 //! MLIR-based code generation backend for the RustCAM dataflow engine.
 //!
-//! This crate replaces the string-interpolation Rust codegen in `emit.rs`
-//! with an MLIR pipeline:
+//! This crate lowers a `GraphSnapshot` to MLIR for analysis and optimization,
+//! and generates safe Rust logic crates (no C FFI, no `unsafe`).
 //!
 //! ```text
-//! GraphSnapshot (JSON) → lower.rs → .mlir → mlir-opt → mlir-translate → C
+//! GraphSnapshot (JSON) → lower.rs → .mlir → mlir-opt → analysis
 //! ```
-//!
-//! The generated C code is compiled into a static library via the `cc` crate
-//! and linked into the firmware binary via FFI.
 //!
 //! # Crate structure
 //!
@@ -17,11 +14,12 @@
 //! - [`c_types`] — PortKind → C type mapping
 //! - [`lower`] — GraphSnapshot → `.mlir` text generation
 //! - [`state_machine`] — FSM blocks → MLIR region-based control flow
-//! - [`peripherals`] — Generate `peripherals.h` C header
-//! - [`pipeline`] — Orchestrate mlir-opt → mlir-translate → .c/.h
+//! - [`peripherals`] — Generate safe Rust state modules
+//! - [`pipeline`] — Orchestrate mlir-opt → mlir-translate pipeline
 
 pub mod c_types;
 pub mod dialect;
+pub mod ir;
 pub mod lower;
 pub mod peripherals;
 pub mod pipeline;
@@ -49,10 +47,11 @@ pub fn graph_json_to_mlir(json: &str) -> Result<String, String> {
     graph_to_mlir(&snap)
 }
 
-/// Run the full MLIR pipeline: lower → optimize → emit C.
+/// Run the full MLIR pipeline: lower → optimize → (optionally) emit C.
 ///
 /// Uses default pipeline configuration. If MLIR tools are not available,
-/// produces the `.mlir` text and a fallback C stub.
+/// produces only the `.mlir` text. The C output is for analysis only;
+/// execution uses pure Rust runtime.
 pub fn compile_to_c(snap: &GraphSnapshot) -> Result<pipeline::PipelineOutput, String> {
     let config = pipeline::PipelineConfig::default();
     pipeline::run_pipeline(snap, &config)
@@ -68,13 +67,11 @@ pub fn build_runtime(json: &str) -> Result<DagRuntime, String> {
     DagRuntime::from_json(json)
 }
 
-/// Generate all files for the MLIR-backed logic crate in a workspace.
+/// Generate all files for the logic crate in a workspace.
 ///
+/// Produces a safe Rust-only logic crate (no C FFI, no `unsafe`).
 /// Returns `(path, content)` pairs for:
-/// - `logic/csrc/graph.mlir`
-/// - `logic/csrc/peripherals.h`
-/// - `logic/csrc/logic.c`
-/// - `logic/build.rs`
+/// - `logic/mlir/graph.mlir`
 /// - `logic/Cargo.toml`
 /// - `logic/src/ffi.rs`
 /// - `logic/src/lib.rs`
@@ -138,7 +135,6 @@ mod tests {
         };
         let output = compile_to_c(&snap).unwrap();
         assert!(output.mlir_text.contains("dataflow.constant"));
-        assert!(output.peripherals_h.contains("hw_adc_read"));
     }
 
     #[test]
@@ -223,26 +219,27 @@ mod tests {
         let files = generate_logic_files(&snap).unwrap();
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
 
-        let expected = [
-            "logic/csrc/graph.mlir",
-            "logic/csrc/peripherals.h",
-            "logic/csrc/logic.c",
-            "logic/build.rs",
-            "logic/Cargo.toml",
-            "logic/src/ffi.rs",
-            "logic/src/lib.rs",
-        ];
-        for path in &expected {
-            assert!(
-                paths.contains(path),
-                "expected path {path} not found in generated files; got: {paths:?}"
-            );
+        // Must include safe Rust files + MLIR for debugging
+        assert!(paths.contains(&"logic/mlir/graph.mlir"));
+        assert!(paths.contains(&"logic/Cargo.toml"));
+        assert!(paths.contains(&"logic/src/ffi.rs"));
+        assert!(paths.contains(&"logic/src/lib.rs"));
+
+        // Must NOT include C files, C headers, or cc build scripts
+        for (path, _) in &files {
+            assert!(!path.ends_with(".h"), "no C headers: {path}");
+            assert!(!path.ends_with(".c"), "no C sources: {path}");
         }
-        assert_eq!(
-            files.len(),
-            expected.len(),
-            "unexpected number of generated files"
-        );
+
+        // All .rs files must be safe (allow `forbid(unsafe_code)` lint)
+        for (path, content) in &files {
+            if path.ends_with(".rs") {
+                assert!(
+                    !content.contains("unsafe {") && !content.contains("unsafe fn"),
+                    "{path} contains unsafe code"
+                );
+            }
+        }
     }
 
     #[test]
