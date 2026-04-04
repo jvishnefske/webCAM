@@ -23,7 +23,7 @@ WORKSPACE_EXCLUDES = \
 	--exclude vprbrd-usb-gpio \
 	--exclude usb-composite-dispatchers
 
-all: hil-verify ci ## Run everything
+all: hil-verify ci require-safe ## Run everything
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -37,11 +37,21 @@ lint: ## Run clippy on all host crates (matches CI)
 test: ## Run all library crate tests with coverage (llvm-cov)
 	cargo llvm-cov --fail-under-functions 95 --workspace $(WORKSPACE_EXCLUDES)
 
-wasm: ## Build WASM + JS bindings (requires wasm-pack)
-	wasm-pack build --target web --out-dir www/pkg --release
+wasm: wasm-cam wasm-dataflow ## Build all WASM targets
 
-ts: ## Build and test TypeScript frontend (matches CI)
-	cd www && npm ci && npm run typecheck && npm run test && npm run build
+wasm-cam: ## Build CAM WASM + JS bindings
+	wasm-pack build crates/rustcam --target web --out-dir ../../www-cam/pkg --release
+
+wasm-dataflow: ## Build Dataflow WASM + JS bindings
+	wasm-pack build crates/rustsim --target web --out-dir ../../www-dataflow/pkg --release
+
+ts: ts-cam ts-dataflow ## Build and test all TypeScript frontends
+
+ts-cam: ## Build and test CAM TypeScript frontend
+	cd www-cam && npm ci && npm run typecheck && npm run test && npm run build
+
+ts-dataflow: ## Build and test Dataflow TypeScript frontend
+	cd www-dataflow && npm ci && npm run typecheck && npm run test && npm run build
 
 verify: ## Build, test, lint, format-check (swiss-cheese gate)
 	cargo build --workspace $(WORKSPACE_EXCLUDES) --all-targets
@@ -51,25 +61,32 @@ verify: ## Build, test, lint, format-check (swiss-cheese gate)
 
 ci: lint test wasm ts ## Run full CI pipeline locally
 
-release: wasm ts ## Package www/ for deployment (matches CI)
-	cd www && zip -r ../rustcam.zip .
-	@echo "Release artifact: rustcam.zip"
+release: wasm ts ## Package both webapps for deployment
+	cd www-cam && zip -r ../rustcam.zip .
+	cd www-dataflow && zip -r ../rustsim.zip .
+	@echo "Release artifacts: rustcam.zip rustsim.zip"
 
-serve: wasm ts ## Build and serve locally (python)
-	@echo "Serving at http://localhost:8080"
-	@cd www && python3 -m http.server 8080
+serve-cam: wasm-cam ts-cam ## Build and serve CAM locally
+	@echo "Serving CAM at http://localhost:8080"
+	@cd www-cam && python3 -m http.server 8080
 
-serve-native: wasm ## Build WASM + run native server with mock HAL
+serve-dataflow: wasm-dataflow ts-dataflow ## Build and serve Dataflow locally
+	@echo "Serving Dataflow at http://localhost:8081"
+	@cd www-dataflow && python3 -m http.server 8081
+
+serve-native: wasm-dataflow ## Build WASM + run native server with mock HAL
 	cargo build -p native-server
 	@echo "Starting native-server at http://localhost:3000"
-	cargo run -p native-server -- --www-dir www --port 3000
+	cargo run -p native-server -- --www-dir www-dataflow --port 3000
 
 hil-e2e: ## Run E2E tests against live Pico2 (requires flashed device)
 	./tests/pico2_e2e.sh
 
 clean: ## Remove build artifacts
 	cargo clean
-	rm -rf www/pkg www/dist www/node_modules rustcam.zip
+	rm -rf www-cam/pkg www-cam/dist www-cam/node_modules
+	rm -rf www-dataflow/pkg www-dataflow/dist www-dataflow/node_modules
+	rm -f rustcam.zip rustsim.zip
 
 # --- HIL targets ---
 
@@ -108,8 +125,10 @@ hil-verify: hil-firmware ## Build all HIL firmware (host crates covered by ci)
 # --- Embedded assets ---
 
 dag-frontend: ## Build DAG editor JS bundle
-	cd www && npx esbuild dag/dag-editor.ts --bundle --format=esm --target=es2022 --minify --external:../pkg/rustcam.js --outfile=dag/dag-editor.js
+	cd www-dataflow && npx esbuild dag/dag-editor.ts --bundle --format=esm --target=es2022 --minify --external:../pkg/rustsim.js --outfile=dag/dag-editor.js
 
 embed-assets: dag-frontend ## Gzip frontend assets and generate Rust source
 	bash tools/embed-assets.sh
-
+	
+require-safe:
+	git grep -m 0 unsafe

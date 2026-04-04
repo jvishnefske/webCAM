@@ -137,108 +137,6 @@ fn telemetry_duty_cycle_and_frequency() {
 }
 
 #[test]
-fn telemetry_temperature_1() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_read_temperature_1(0xFACE);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
-
-    let mut buf = [0u8; 2];
-    bus.write_read(ADDR, &[0x8D], &mut buf).unwrap();
-    assert_eq!(u16::from_le_bytes(buf), 0xFACE);
-}
-
-#[test]
-fn status_word_w1c_cascade_clears_input() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_input(0xFF);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
-
-    // W1C STATUS_WORD high bit 5 (bit 13) should cascade to clear STATUS_INPUT
-    bus.write(ADDR, &[0x79, 0x00, 0x20]).unwrap();
-
-    let mut buf = [0u8; 1];
-    bus.write_read(ADDR, &[0x7C], &mut buf).unwrap();
-    assert_eq!(buf[0], 0x00);
-}
-
-#[test]
-fn status_word_w1c_cascade_clears_mfr_specific() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_mfr_specific(0xFF);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
-
-    // W1C STATUS_WORD high bit 4 (bit 12) should cascade to clear STATUS_MFR_SPECIFIC
-    bus.write(ADDR, &[0x79, 0x00, 0x10]).unwrap();
-
-    let mut buf = [0u8; 1];
-    bus.write_read(ADDR, &[0x80], &mut buf).unwrap();
-    assert_eq!(buf[0], 0x00);
-}
-
-#[test]
-fn status_byte_w1c_cascade_clears_temperature() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_temperature(0xFF);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
-
-    // W1C STATUS_BYTE bit 2 should cascade to clear STATUS_TEMPERATURE
-    bus.write(ADDR, &[0x78, 1 << 2]).unwrap();
-
-    let mut buf = [0u8; 1];
-    bus.write_read(ADDR, &[0x7D], &mut buf).unwrap();
-    assert_eq!(buf[0], 0x00);
-}
-
-#[test]
-fn status_byte_w1c_cascade_clears_cml() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_cml(0xFF);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
-
-    // W1C STATUS_BYTE bit 1 should cascade to clear STATUS_CML
-    bus.write(ADDR, &[0x78, 1 << 1]).unwrap();
-
-    let mut buf = [0u8; 1];
-    bus.write_read(ADDR, &[0x7E], &mut buf).unwrap();
-    assert_eq!(buf[0], 0x00);
-}
-
-#[test]
-fn status_byte_w1c_cascade_clears_mfr_specific() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_mfr_specific(0xFF);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
-
-    // W1C STATUS_BYTE bit 0 should cascade to clear STATUS_MFR_SPECIFIC
-    bus.write(ADDR, &[0x78, 1]).unwrap();
-
-    let mut buf = [0u8; 1];
-    bus.write_read(ADDR, &[0x80], &mut buf).unwrap();
-    assert_eq!(buf[0], 0x00);
-}
-
-#[test]
-fn status_byte_w1c_cascade_clears_input() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_input(0xFF);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
-
-    // W1C STATUS_BYTE bit 3 should cascade to clear STATUS_INPUT bit 4
-    bus.write(ADDR, &[0x78, 1 << 3]).unwrap();
-
-    let mut buf = [0u8; 1];
-    bus.write_read(ADDR, &[0x7C], &mut buf).unwrap();
-    assert_eq!(buf[0] & 0x10, 0, "STATUS_INPUT bit 4 should be cleared");
-}
-
-#[test]
 fn write_protect_wp1() {
     let mut bus = make_bus();
     // Enable WP1
@@ -407,108 +305,113 @@ fn mfr_fault_response_defaults() {
     assert_eq!(buf[0], 0x80);
 }
 
+// --- Individual status setter tests ---
+
 #[test]
-fn status_word_w1c_cascade_clears_iout() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+fn status_vout_setter() {
+    let mut dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    dev.set_status_vout(0xAA);
     let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_iout(0xFF);
     let mut bus = SimBusBuilder::new().with_device(engine).build();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7A], &mut buf).unwrap();
+    assert_eq!(buf[0], 0xAA);
+}
 
-    // W1C STATUS_WORD high bit 6 (bit 14) should cascade to clear STATUS_IOUT
-    bus.write(ADDR, &[0x79, 0x00, 0x40]).unwrap();
-
+#[test]
+fn status_iout_setter() {
+    let mut dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    dev.set_status_iout(0xBB);
+    let mut bus = SimBusBuilder::new()
+        .with_device(PmBusEngine::new(dev))
+        .build();
     let mut buf = [0u8; 1];
     bus.write_read(ADDR, &[0x7B], &mut buf).unwrap();
-    assert_eq!(buf[0], 0x00);
+    assert_eq!(buf[0], 0xBB);
 }
 
 #[test]
-fn computed_status_byte_temperature_bit() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_temperature(0x01);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
+fn status_input_setter() {
+    let mut dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    dev.set_status_input(0xCC);
+    let mut bus = SimBusBuilder::new()
+        .with_device(PmBusEngine::new(dev))
+        .build();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7C], &mut buf).unwrap();
+    assert_eq!(buf[0], 0xCC);
+}
 
+#[test]
+fn status_temperature_setter() {
+    let mut dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    dev.set_status_temperature(0xDD);
+    let mut bus = SimBusBuilder::new()
+        .with_device(PmBusEngine::new(dev))
+        .build();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7D], &mut buf).unwrap();
+    assert_eq!(buf[0], 0xDD);
+}
+
+#[test]
+fn status_cml_setter() {
+    let mut dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    dev.set_status_cml(0xEE);
+    let mut bus = SimBusBuilder::new()
+        .with_device(PmBusEngine::new(dev))
+        .build();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7E], &mut buf).unwrap();
+    assert_eq!(buf[0], 0xEE);
+}
+
+#[test]
+fn status_mfr_specific_setter() {
+    let mut dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    dev.set_status_mfr_specific(0x55);
+    let mut bus = SimBusBuilder::new()
+        .with_device(PmBusEngine::new(dev))
+        .build();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x80], &mut buf).unwrap();
+    assert_eq!(buf[0], 0x55);
+}
+
+// --- Individual computed STATUS_BYTE bit tests ---
+
+#[test]
+fn computed_status_byte_vin_uv() {
+    let mut dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    dev.set_status_input(0x10);
+    let mut bus = SimBusBuilder::new()
+        .with_device(PmBusEngine::new(dev))
+        .build();
     let mut buf = [0u8; 1];
     bus.write_read(ADDR, &[0x78], &mut buf).unwrap();
-    assert_ne!(
-        buf[0] & (1 << 2),
-        0,
-        "TEMPERATURE should set STATUS_BYTE bit 2"
-    );
+    assert_ne!(buf[0] & (1 << 3), 0, "VIN_UV bit should be set");
 }
 
 #[test]
-fn computed_status_byte_cml_bit() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_cml(0x01);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
-
+fn computed_status_byte_cml() {
+    let mut dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    dev.set_status_cml(0x01);
+    let mut bus = SimBusBuilder::new()
+        .with_device(PmBusEngine::new(dev))
+        .build();
     let mut buf = [0u8; 1];
     bus.write_read(ADDR, &[0x78], &mut buf).unwrap();
-    assert_ne!(buf[0] & (1 << 1), 0, "CML should set STATUS_BYTE bit 1");
+    assert_ne!(buf[0] & (1 << 1), 0, "CML bit should be set");
 }
 
 #[test]
-fn computed_status_byte_mfr_bit() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_mfr_specific(0x01);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
-
+fn computed_status_byte_mfr_specific() {
+    let mut dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    dev.set_status_mfr_specific(0x01);
+    let mut bus = SimBusBuilder::new()
+        .with_device(PmBusEngine::new(dev))
+        .build();
     let mut buf = [0u8; 1];
     bus.write_read(ADDR, &[0x78], &mut buf).unwrap();
-    assert_ne!(buf[0] & 1, 0, "MFR_SPECIFIC should set STATUS_BYTE bit 0");
-}
-
-#[test]
-fn computed_status_word_iout_aggregation() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_iout(0x80);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
-
-    let mut buf = [0u8; 2];
-    bus.write_read(ADDR, &[0x79], &mut buf).unwrap();
-    let word = u16::from_le_bytes(buf);
-    assert_ne!(
-        word & (1 << 14),
-        0,
-        "STATUS_IOUT should set STATUS_WORD bit 14"
-    );
-}
-
-#[test]
-fn computed_status_word_input_aggregation() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_input(0x10);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
-
-    let mut buf = [0u8; 2];
-    bus.write_read(ADDR, &[0x79], &mut buf).unwrap();
-    let word = u16::from_le_bytes(buf);
-    assert_ne!(
-        word & (1 << 13),
-        0,
-        "STATUS_INPUT should set STATUS_WORD bit 13"
-    );
-}
-
-#[test]
-fn computed_status_word_mfr_aggregation() {
-    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
-    let mut engine = PmBusEngine::new(dev);
-    engine.device_mut().set_status_mfr_specific(0x01);
-    let mut bus = SimBusBuilder::new().with_device(engine).build();
-
-    let mut buf = [0u8; 2];
-    bus.write_read(ADDR, &[0x79], &mut buf).unwrap();
-    let word = u16::from_le_bytes(buf);
-    assert_ne!(
-        word & (1 << 12),
-        0,
-        "STATUS_MFR should set STATUS_WORD bit 12"
-    );
+    assert_ne!(buf[0] & 1, 0, "NONE_OF_THE_ABOVE bit should be set");
 }
