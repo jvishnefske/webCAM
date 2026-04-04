@@ -24,16 +24,35 @@ jobs:
           targets: wasm32-unknown-unknown
           components: clippy
       - uses: jetli/wasm-pack-action@v0.4.0
-      - run: cargo install cargo-llvm-cov --locked
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: make lint
-      - run: make test
-      - run: make wasm
-      - run: make ts
-      - run: |
-          echo '{"sha":"'"${GITHUB_SHA::8}"'","date":"'"$(date -u +%FT%TZ)"'","ref":"'"$GITHUB_REF_NAME"'"}' > www/version.json
+          cache: npm
+          cache-dependency-path: www/package-lock.json
+      - run: >-
+          cargo clippy --workspace
+          --exclude board-support-pico
+          --exclude board-support-pico2
+          --exclude board-support-stm32
+          --exclude board-support-pi-zero
+          --exclude pico-bootloader
+          --exclude combined-frontend
+          --exclude hil-frontend
+          --all-targets -- -D warnings
+      - run: >-
+          cargo test --workspace
+          --exclude board-support-pico
+          --exclude board-support-pico2
+          --exclude board-support-stm32
+          --exclude board-support-pi-zero
+          --exclude pico-bootloader
+          --exclude combined-frontend
+          --exclude hil-frontend
+      - run: cd crates/rustcam && wasm-pack build --target web --out-dir ../../www/pkg --release
+      - run: cd crates/rustsim && wasm-pack build --target web --out-dir ../../www/pkg --release
+      - run: cd www && npm ci && npm run typecheck && npm run test && npm run build
+      - name: Remove build-only files from www
+        run: rm -rf www/node_modules www/src www/package.json www/package-lock.json www/tsconfig.json www/esbuild.config.mjs
       - run: cd www && zip -r ../rustcam.zip .
       - uses: actions/upload-artifact@v4
         with:
@@ -77,11 +96,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: make wasm ts
-      - run: |
-          echo '{"sha":"'"${GITHUB_SHA::8}"'","date":"'"$(date -u +%FT%TZ)"'","ref":"'"$GITHUB_REF_NAME"'"}' > www/version.json
-      - name: Remove build-only files
-        run: rm -rf www-cam/node_modules www-dataflow/node_modules www/node_modules
+          cache: npm
+          cache-dependency-path: www/package-lock.json
+      - run: wasm-pack build --target web --out-dir www/pkg --release
+      - run: cd www && npm ci && npm run build
+      - name: Remove build-only files from www
+        run: rm -rf www/node_modules www/src www/package.json www/package-lock.json www/tsconfig.json www/esbuild.config.mjs
       - uses: peaceiris/actions-gh-pages@v4
         with:
           deploy_key: ${{ secrets.CAM_DEPLOY_KEY }}
@@ -146,13 +166,13 @@ jobs:
         env:
           DEPLOY_KEY: ${{ secrets.CAM_DEPLOY_KEY }}
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           PR=${{ github.event.pull_request.number }}
           mkdir -p ~/.ssh && echo "$DEPLOY_KEY" > ~/.ssh/key && chmod 600 ~/.ssh/key
           export GIT_SSH_COMMAND="ssh -i ~/.ssh/key -o StrictHostKeyChecking=no"
           git clone --branch gh-pages --depth 1 git@github.com:jvishnefske/cam.git _cam
           cd _cam
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
           if [ -d "pr-preview/pr-$PR" ]; then
             git rm -rf "pr-preview/pr-$PR"
             git commit -m "Remove preview for PR #$PR"
