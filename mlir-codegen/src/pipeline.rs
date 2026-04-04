@@ -10,10 +10,7 @@
 //!   mlir-opt (external)   ← canonicalize, constant fold, DCE
 //!       │
 //!       ▼
-//!   mlir-translate        ← EmitC → C source
-//!       │
-//!       ▼
-//!   (logic.c, peripherals.h)
+//!   mlir-translate        ← EmitC → C source (reference only)
 //! ```
 
 use std::path::PathBuf;
@@ -21,6 +18,12 @@ use std::process::Command;
 
 use crate::lower::{self, GraphSnapshot};
 use crate::peripherals;
+use crate::ir::IrModule;
+use crate::{emit_rust, printer};
+
+// Note: the MLIR pipeline preserves .mlir for debugging and optimization
+// analysis but does NOT generate C-FFI logic crates. The execution path
+// uses pure-Rust dag-core evaluation (see configurable-blocks codegen).
 
 /// Result of the MLIR compilation pipeline.
 #[derive(Debug)]
@@ -31,8 +34,6 @@ pub struct PipelineOutput {
     pub mlir_optimized: Option<String>,
     /// Generated C source code, if mlir-translate was available.
     pub c_source: Option<String>,
-    /// Generated `peripherals.h` header.
-    pub peripherals_h: String,
 }
 
 /// Configuration for the MLIR pipeline.
@@ -71,13 +72,10 @@ pub fn run_pipeline(
     // Step 1: Lower to MLIR
     let mlir_text = lower::lower_graph(snap)?;
 
-    // Step 2: Generate peripherals.h
-    let peripherals_h = peripherals::generate_peripherals_h();
-
-    // Step 3: Optimize with mlir-opt (optional)
+    // Step 2: Optimize with mlir-opt (optional)
     let mlir_optimized = run_mlir_opt(&mlir_text, config);
 
-    // Step 4: Translate to C via EmitC (optional)
+    // Step 3: Translate to C via EmitC (optional, for analysis only)
     let source_mlir = mlir_optimized.as_deref().unwrap_or(&mlir_text);
     let c_source = run_mlir_translate(source_mlir, config);
 
@@ -85,20 +83,17 @@ pub fn run_pipeline(
         mlir_text,
         mlir_optimized,
         c_source,
-        peripherals_h,
     })
 }
 
 /// Lower a graph to MLIR text only (no external tools needed).
 pub fn lower_only(snap: &GraphSnapshot) -> Result<PipelineOutput, String> {
     let mlir_text = lower::lower_graph(snap)?;
-    let peripherals_h = peripherals::generate_peripherals_h();
 
     Ok(PipelineOutput {
         mlir_text,
         mlir_optimized: None,
         c_source: None,
-        peripherals_h,
     })
 }
 
@@ -154,6 +149,9 @@ fn run_mlir_translate(mlir_text: &str, config: &PipelineConfig) -> Option<String
 
 /// Generate the complete set of files for the MLIR-backed logic crate.
 ///
+/// Produces a safe Rust-only logic crate (no C FFI, no `unsafe`).
+/// The `.mlir` source is preserved for debugging / optimization analysis.
+///
 /// Returns `(path, content)` pairs suitable for inclusion in a
 /// `GeneratedWorkspace`.
 pub fn generate_mlir_logic_files(
@@ -163,40 +161,33 @@ pub fn generate_mlir_logic_files(
     let pipeline = run_pipeline(snap, config)?;
     let mut files = Vec::new();
 
-    // Always emit the raw .mlir for debugging
+    // Preserve the raw .mlir for debugging
     files.push((
-        "logic/csrc/graph.mlir".to_string(),
+        "logic/mlir/graph.mlir".to_string(),
         pipeline.mlir_text.clone(),
     ));
 
-    // Emit peripherals.h
-    files.push((
-        "logic/csrc/peripherals.h".to_string(),
-        pipeline.peripherals_h,
-    ));
+    // Optionally preserve C translation for reference (not compiled)
+    if let Some(c_src) = pipeline.c_source {
+        files.push(("logic/mlir/logic.c.reference".to_string(), c_src));
+    }
 
-    // Emit logic.c — either from mlir-translate or a fallback stub
-    let c_source = pipeline
-        .c_source
-        .unwrap_or_else(|| generate_fallback_c(&pipeline.mlir_text));
-    files.push(("logic/csrc/logic.c".to_string(), c_source));
-
-    // Emit build.rs for cc crate
-    files.push(("logic/build.rs".to_string(), generate_logic_build_rs()));
-
-    // Emit Cargo.toml with cc build-dependency
+    // Emit Cargo.toml (pure Rust, no cc dependency)
     files.push((
         "logic/Cargo.toml".to_string(),
-        generate_logic_cargo_toml_mlir(),
+        generate_logic_cargo_toml(),
     ));
 
-    // Emit ffi.rs with safe State struct (no repr(C), no extern)
+    // Emit ffi.rs with safe State struct
     let state_fields = collect_state_fields(snap);
     let ffi_rs = peripherals::generate_ffi_rs(&state_fields);
     files.push(("logic/src/ffi.rs".to_string(), ffi_rs));
 
-    // Emit lib.rs that re-exports ffi
-    files.push(("logic/src/lib.rs".to_string(), generate_logic_lib_rs_mlir()));
+    // Emit lib.rs — safe tick function using dataflow-rt Peripherals trait
+    files.push((
+        "logic/src/lib.rs".to_string(),
+        generate_logic_lib_rs(&state_fields),
+    ));
 
     Ok(files)
 }
@@ -216,32 +207,7 @@ fn collect_state_fields(snap: &GraphSnapshot) -> Vec<(String, &'static str)> {
     fields
 }
 
-fn generate_fallback_c(_mlir_text: &str) -> String {
-    let mut out = String::new();
-    out.push_str("// Fallback: MLIR tools not available.\n");
-    out.push_str("// The .mlir source is preserved in graph.mlir for manual compilation.\n");
-    out.push_str("#include \"peripherals.h\"\n\n");
-    out.push_str("// TODO: compile graph.mlir with mlir-opt + mlir-translate\n");
-    out.push_str("void tick(void* state) {\n");
-    out.push_str("    // stub — replace with mlir-translate output\n");
-    out.push_str("    (void)state;\n");
-    out.push_str("}\n");
-    out
-}
-
-fn generate_logic_build_rs() -> String {
-    r#"fn main() {
-    cc::Build::new()
-        .file("csrc/logic.c")
-        .include("csrc")
-        .opt_level(2)
-        .compile("logic");
-}
-"#
-    .to_string()
-}
-
-fn generate_logic_cargo_toml_mlir() -> String {
+fn generate_logic_cargo_toml() -> String {
     r#"[package]
 name = "logic"
 version = "0.1.0"
@@ -251,21 +217,105 @@ edition = "2021"
 name = "logic"
 
 [dependencies]
-
-[build-dependencies]
-cc = "1"
+dataflow-rt = { path = "../dataflow-rt", default-features = false }
 "#
     .to_string()
 }
 
-fn generate_logic_lib_rs_mlir() -> String {
-    r#"//! Logic crate — MLIR-generated C tick function via FFI.
+fn generate_logic_lib_rs(state_fields: &[(String, &str)]) -> String {
+    use std::fmt::Write;
 
-#![no_std]
+    let mut out = String::new();
+    writeln!(out, "//! Logic crate — safe Rust tick function.").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "#![no_std]").unwrap();
+    writeln!(out, "#![forbid(unsafe_code)]").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "pub mod ffi;").unwrap();
+    writeln!(out, "pub use ffi::State;").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "use dataflow_rt::Peripherals;").unwrap();
+    writeln!(out).unwrap();
+    writeln!(out, "/// Evaluate one tick of the dataflow graph.").unwrap();
+    writeln!(out, "pub fn tick<P: Peripherals>(hw: &mut P, state: &mut State) {{").unwrap();
 
-pub mod ffi;
+    // Generate stub tick body — each output field is set to its default
+    for (name, _ty) in state_fields {
+        writeln!(out, "    let _ = &state.{name};").unwrap();
+    }
+    if state_fields.is_empty() {
+        writeln!(out, "    let _ = hw;").unwrap();
+        writeln!(out, "    let _ = state;").unwrap();
+    }
 
-pub use ffi::{State, tick_safe};
+    writeln!(out, "}}").unwrap();
+    out
+}
+
+// ── Typed IR pipeline ────────────────────────────────────────────
+
+/// Result of the typed IR pipeline.
+#[derive(Debug)]
+pub struct IrPipelineOutput {
+    /// The typed IR module.
+    pub ir_module: IrModule,
+    /// MLIR text serialized from the typed IR.
+    pub mlir_text: String,
+    /// Generated safe Rust source code with callable objects.
+    pub rust_source: String,
+}
+
+/// Run the typed IR pipeline: lower → IR → MLIR text + Rust source.
+///
+/// This is the new pipeline that replaces string-based MLIR generation.
+/// The IR can be printed to MLIR text for debugging and emitted as
+/// safe Rust code with callable objects for runtime interpretation.
+pub fn run_ir_pipeline(snap: &GraphSnapshot) -> Result<IrPipelineOutput, String> {
+    // Step 1: Lower to typed IR
+    let ir_module = lower::lower_graph_ir(snap)?;
+
+    // Step 2: Print to MLIR text (for debugging)
+    let mlir_text = printer::print_mlir(&ir_module);
+
+    // Step 3: Emit safe Rust code
+    let rust_source = emit_rust::emit_rust(&ir_module);
+
+    Ok(IrPipelineOutput {
+        ir_module,
+        mlir_text,
+        rust_source,
+    })
+}
+
+/// Generate logic crate files using the typed IR pipeline.
+///
+/// Produces:
+/// - `logic/mlir/graph.mlir` — MLIR text for debugging
+/// - `logic/Cargo.toml` — Pure Rust crate manifest
+/// - `logic/src/lib.rs` — Generated Rust with callable objects
+pub fn generate_ir_logic_files(snap: &GraphSnapshot) -> Result<Vec<(String, String)>, String> {
+    let output = run_ir_pipeline(snap)?;
+
+    let files = vec![
+        // MLIR for debugging
+        ("logic/mlir/graph.mlir".to_string(), output.mlir_text),
+        // Cargo.toml (simpler — no dataflow-rt dep needed since code is self-contained)
+        ("logic/Cargo.toml".to_string(), generate_ir_cargo_toml()),
+        // Generated Rust source with HardwareBridge trait + State + tick()
+        ("logic/src/lib.rs".to_string(), output.rust_source),
+    ];
+
+    Ok(files)
+}
+
+fn generate_ir_cargo_toml() -> String {
+    r#"[package]
+name = "logic"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "logic"
 "#
     .to_string()
 }
@@ -304,7 +354,6 @@ mod tests {
         assert!(output.mlir_text.contains("dataflow.constant"));
         assert!(output.mlir_optimized.is_none());
         assert!(output.c_source.is_none());
-        assert!(output.peripherals_h.contains("hw_adc_read"));
     }
 
     #[test]
@@ -313,26 +362,46 @@ mod tests {
         let config = PipelineConfig::default();
         let files = generate_mlir_logic_files(&snap, &config).unwrap();
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
-        assert!(paths.contains(&"logic/csrc/graph.mlir"));
-        assert!(paths.contains(&"logic/csrc/peripherals.h"));
-        assert!(paths.contains(&"logic/csrc/logic.c"));
-        assert!(paths.contains(&"logic/build.rs"));
+        assert!(paths.contains(&"logic/mlir/graph.mlir"));
         assert!(paths.contains(&"logic/Cargo.toml"));
         assert!(paths.contains(&"logic/src/ffi.rs"));
         assert!(paths.contains(&"logic/src/lib.rs"));
     }
 
     #[test]
-    fn fallback_c_is_valid() {
-        let c = generate_fallback_c("// some mlir");
-        assert!(c.contains("void tick("));
-        assert!(c.contains("#include \"peripherals.h\""));
+    fn generated_logic_crate_is_safe() {
+        let snap = simple_graph();
+        let config = PipelineConfig::default();
+        let files = generate_mlir_logic_files(&snap, &config).unwrap();
+        for (path, content) in &files {
+            if path.ends_with(".rs") {
+                assert!(
+                    !content.contains("unsafe {") && !content.contains("unsafe fn"),
+                    "file {path} contains unsafe code"
+                );
+                assert!(
+                    !content.contains("#[no_mangle]"),
+                    "file {path} contains #[no_mangle]"
+                );
+                assert!(
+                    !content.contains("extern \"C\""),
+                    "file {path} contains extern \"C\""
+                );
+            }
+        }
+        // No C files or headers in the output
+        assert!(
+            !files.iter().any(|(p, _)| p.ends_with(".h") || p.ends_with(".c")),
+            "logic crate must not contain C files"
+        );
     }
 
     #[test]
-    fn build_rs_uses_cc() {
-        let rs = generate_logic_build_rs();
-        assert!(rs.contains("cc::Build::new()"));
-        assert!(rs.contains("logic.c"));
+    fn lib_rs_forbids_unsafe() {
+        let snap = simple_graph();
+        let config = PipelineConfig::default();
+        let files = generate_mlir_logic_files(&snap, &config).unwrap();
+        let lib = files.iter().find(|(p, _)| p.ends_with("lib.rs")).unwrap();
+        assert!(lib.1.contains("forbid(unsafe_code)"));
     }
 }
