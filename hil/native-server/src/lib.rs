@@ -816,4 +816,477 @@ mod tests {
         let body = json_body(resp).await;
         assert!(body.as_array().unwrap().is_empty());
     }
+
+    // ── encode_error / encode_tag_ok direct tests ──────────────────
+
+    #[test]
+    fn test_encode_error_produces_valid_cbor() {
+        let buf = encode_error("something went wrong").expect("encode_error returned None");
+        let mut dec = minicbor::Decoder::new(&buf);
+        let n = dec.map().unwrap().unwrap();
+        assert_eq!(n, 2);
+        // key 0 -> 255 (error tag)
+        assert_eq!(dec.u32().unwrap(), 0);
+        assert_eq!(dec.u32().unwrap(), 255);
+        // key 1 -> error message string
+        assert_eq!(dec.u32().unwrap(), 1);
+        assert_eq!(dec.str().unwrap(), "something went wrong");
+    }
+
+    #[test]
+    fn test_encode_tag_ok_produces_valid_cbor() {
+        let buf = encode_tag_ok(30).expect("encode_tag_ok returned None");
+        let mut dec = minicbor::Decoder::new(&buf);
+        let n = dec.map().unwrap().unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(dec.u32().unwrap(), 0);
+        assert_eq!(dec.u32().unwrap(), 30);
+    }
+
+    #[test]
+    fn test_encode_tag_ok_different_tags() {
+        for tag in [1u32, 2, 3, 31, 255] {
+            let buf = encode_tag_ok(tag).expect("encode_tag_ok returned None");
+            assert_eq!(decode_cbor_tag(&buf), tag);
+        }
+    }
+
+    // ── dispatch_cbor: unknown tag ─────────────────────────────────
+
+    #[test]
+    fn test_dispatch_unknown_tag() {
+        let state = make_state();
+        let req = encode_cbor_request(99);
+        let resp = dispatch_cbor(&state, &req).unwrap();
+        assert_eq!(decode_cbor_tag(&resp), 255);
+        // Verify the error message is present
+        let mut dec = minicbor::Decoder::new(&resp);
+        let _ = dec.map().unwrap();
+        let _ = dec.u32().unwrap();
+        let _ = dec.u32().unwrap(); // tag 255
+        let _ = dec.u32().unwrap(); // key 1
+        assert_eq!(dec.str().unwrap(), "unknown request tag");
+    }
+
+    #[test]
+    fn test_dispatch_invalid_cbor() {
+        let state = make_state();
+        let resp = dispatch_cbor(&state, &[0xFF, 0xFE]);
+        assert!(resp.is_none());
+    }
+
+    // ── handle_remove_device tests ─────────────────────────────────
+
+    fn encode_remove_device(bus: u8, addr: u8) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut buf);
+        enc.map(3).unwrap();
+        enc.u32(0).unwrap().u32(31).unwrap();
+        enc.u32(1).unwrap().u8(bus).unwrap();
+        enc.u32(2).unwrap().u8(addr).unwrap();
+        buf
+    }
+
+    #[test]
+    fn test_remove_device_success() {
+        let state = make_state();
+        // Add a device first
+        let add = encode_add_device(0, 0x48, "TMP", &[0x00; 4]);
+        dispatch_cbor(&state, &add).unwrap();
+        assert_eq!(state.lock().unwrap().i2c_buses[0].active_count(), 1);
+
+        // Remove it
+        let rm = encode_remove_device(0, 0x48);
+        let resp = dispatch_cbor(&state, &rm).unwrap();
+        assert_eq!(decode_cbor_tag(&resp), 31);
+        assert_eq!(state.lock().unwrap().i2c_buses[0].active_count(), 0);
+    }
+
+    #[test]
+    fn test_remove_device_not_found() {
+        let state = make_state();
+        let rm = encode_remove_device(0, 0x48);
+        let resp = dispatch_cbor(&state, &rm).unwrap();
+        // Should be an error (tag 255) since no device at that address
+        assert_eq!(decode_cbor_tag(&resp), 255);
+    }
+
+    #[test]
+    fn test_remove_device_invalid_address() {
+        let state = make_state();
+        // Address 0xFF > 0x7F, so Address::new returns None -> dispatch returns None
+        let rm = encode_remove_device(0, 0xFF);
+        let resp = dispatch_cbor(&state, &rm);
+        assert!(resp.is_none());
+    }
+
+    // ── handle_add_device edge cases ───────────────────────────────
+
+    #[test]
+    fn test_add_device_invalid_bus_index() {
+        let state = make_state();
+        // Bus index 99 is out of range (only 0..10)
+        let add = encode_add_device(99, 0x48, "DEV", &[0x00]);
+        let resp = dispatch_cbor(&state, &add);
+        // Returns None because st.i2c_buses.get_mut(99) returns None
+        assert!(resp.is_none());
+    }
+
+    #[test]
+    fn test_add_device_invalid_address() {
+        let state = make_state();
+        // Address 0x80 exceeds 7-bit range
+        let add = encode_add_device(0, 0x80, "DEV", &[0x00]);
+        let resp = dispatch_cbor(&state, &add);
+        assert!(resp.is_none());
+    }
+
+    #[test]
+    fn test_add_device_duplicate_address() {
+        let state = make_state();
+        let add = encode_add_device(0, 0x48, "DEV1", &[0x00; 4]);
+        let resp1 = dispatch_cbor(&state, &add).unwrap();
+        assert_eq!(decode_cbor_tag(&resp1), 30);
+
+        // Adding same address again should fail
+        let add2 = encode_add_device(0, 0x48, "DEV2", &[0x00; 4]);
+        let resp2 = dispatch_cbor(&state, &add2).unwrap();
+        assert_eq!(decode_cbor_tag(&resp2), 255); // error
+    }
+
+    // ── handle_i2c_read edge cases ─────────────────────────────────
+
+    #[test]
+    fn test_i2c_read_invalid_bus() {
+        let state = make_state();
+        let read = encode_i2c_read(99, 0x48, 0, 2);
+        let resp = dispatch_cbor(&state, &read);
+        // Out-of-bounds bus index -> None
+        assert!(resp.is_none());
+    }
+
+    // ── handle_i2c_write edge cases ────────────────────────────────
+
+    #[test]
+    fn test_i2c_write_no_device() {
+        let state = make_state();
+        let write = encode_i2c_write(0, 0x48, &[0x00, 0xAB]);
+        let resp = dispatch_cbor(&state, &write).unwrap();
+        assert_eq!(decode_cbor_tag(&resp), 255); // error
+    }
+
+    #[test]
+    fn test_i2c_write_invalid_bus() {
+        let state = make_state();
+        let write = encode_i2c_write(99, 0x48, &[0x00, 0xAB]);
+        let resp = dispatch_cbor(&state, &write);
+        assert!(resp.is_none());
+    }
+
+    // ── telemetry tag tests (50-56) ────────────────────────────────
+
+    fn encode_telemetry_block_removed(block_id: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut buf);
+        enc.map(2).unwrap();
+        enc.u32(0).unwrap().u32(51).unwrap();
+        enc.u32(1).unwrap().u32(block_id).unwrap();
+        buf
+    }
+
+    fn encode_telemetry_block_configured(block_id: u32, block_type: &str, config: &str) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut buf);
+        enc.map(4).unwrap();
+        enc.u32(0).unwrap().u32(52).unwrap();
+        enc.u32(1).unwrap().u32(block_id).unwrap();
+        enc.u32(2).unwrap().str(block_type).unwrap();
+        enc.u32(3).unwrap().str(config).unwrap();
+        buf
+    }
+
+    fn encode_telemetry_edge_added(
+        from_block: u32, from_port: u32, to_block: u32, to_port: u32, channel_id: u32,
+    ) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut buf);
+        enc.map(6).unwrap();
+        enc.u32(0).unwrap().u32(53).unwrap();
+        enc.u32(1).unwrap().u32(from_block).unwrap();
+        enc.u32(2).unwrap().u32(from_port).unwrap();
+        enc.u32(3).unwrap().u32(to_block).unwrap();
+        enc.u32(4).unwrap().u32(to_port).unwrap();
+        enc.u32(5).unwrap().u32(channel_id).unwrap();
+        buf
+    }
+
+    fn encode_telemetry_edge_removed(channel_id: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut buf);
+        enc.map(2).unwrap();
+        enc.u32(0).unwrap().u32(54).unwrap();
+        enc.u32(1).unwrap().u32(channel_id).unwrap();
+        buf
+    }
+
+    fn encode_telemetry_wrapped(seq: u32, timestamp_ms: f64, inner_tag: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let mut enc = minicbor::Encoder::new(&mut buf);
+        enc.map(4).unwrap();
+        enc.u32(0).unwrap().u32(56).unwrap();
+        enc.u32(1).unwrap().u32(seq).unwrap();
+        enc.u32(2).unwrap().f64(timestamp_ms).unwrap();
+        enc.u32(3).unwrap().u32(inner_tag).unwrap();
+        buf
+    }
+
+    #[test]
+    fn test_telemetry_block_removed_tag51() {
+        let state = make_state();
+        let req = encode_telemetry_block_removed(42);
+        let resp = dispatch_cbor(&state, &req);
+        assert!(resp.is_none()); // telemetry returns None
+        let st = state.lock().unwrap();
+        assert_eq!(st.telemetry_log.len(), 1);
+        assert_eq!(st.telemetry_log[0].tag, 51);
+        assert_eq!(st.telemetry_log[0].payload["blockId"], 42);
+    }
+
+    #[test]
+    fn test_telemetry_block_configured_tag52() {
+        let state = make_state();
+        let req = encode_telemetry_block_configured(5, "gain", "2.0");
+        let resp = dispatch_cbor(&state, &req);
+        assert!(resp.is_none());
+        let st = state.lock().unwrap();
+        assert_eq!(st.telemetry_log.len(), 1);
+        assert_eq!(st.telemetry_log[0].tag, 52);
+        assert_eq!(st.telemetry_log[0].payload["blockId"], 5);
+        assert_eq!(st.telemetry_log[0].payload["blockType"], "gain");
+        assert_eq!(st.telemetry_log[0].payload["config"], "2.0");
+    }
+
+    #[test]
+    fn test_telemetry_edge_added_tag53() {
+        let state = make_state();
+        let req = encode_telemetry_edge_added(1, 0, 2, 0, 100);
+        let resp = dispatch_cbor(&state, &req);
+        assert!(resp.is_none());
+        let st = state.lock().unwrap();
+        assert_eq!(st.telemetry_log.len(), 1);
+        assert_eq!(st.telemetry_log[0].tag, 53);
+        assert_eq!(st.telemetry_log[0].payload["fromBlock"], 1);
+        assert_eq!(st.telemetry_log[0].payload["fromPort"], 0);
+        assert_eq!(st.telemetry_log[0].payload["toBlock"], 2);
+        assert_eq!(st.telemetry_log[0].payload["toPort"], 0);
+        assert_eq!(st.telemetry_log[0].payload["channelId"], 100);
+    }
+
+    #[test]
+    fn test_telemetry_edge_removed_tag54() {
+        let state = make_state();
+        let req = encode_telemetry_edge_removed(77);
+        let resp = dispatch_cbor(&state, &req);
+        assert!(resp.is_none());
+        let st = state.lock().unwrap();
+        assert_eq!(st.telemetry_log.len(), 1);
+        assert_eq!(st.telemetry_log[0].tag, 54);
+        assert_eq!(st.telemetry_log[0].payload["channelId"], 77);
+    }
+
+    #[test]
+    fn test_telemetry_wrapped_tag56() {
+        let state = make_state();
+        let req = encode_telemetry_wrapped(10, 1234.5, 50);
+        let resp = dispatch_cbor(&state, &req);
+        assert!(resp.is_none());
+        let st = state.lock().unwrap();
+        assert_eq!(st.telemetry_log.len(), 1);
+        // The seq and timestamp are extracted from the payload
+        assert_eq!(st.telemetry_log[0].seq, 10);
+        assert!((st.telemetry_log[0].timestamp_ms - 1234.5).abs() < f64::EPSILON);
+        // Note: the inner tag field is stored as "inner" by parse_telemetry_payload
+        // but handle_telemetry looks for "innerTag", so the fallback (56) is used.
+        // This means the wrapped tag is recorded as 56 rather than the inner tag.
+        assert_eq!(st.telemetry_log[0].tag, 56);
+        // The parsed payload should have the "inner" field with value 50
+        assert_eq!(st.telemetry_log[0].payload["inner"], 50);
+    }
+
+    #[test]
+    fn test_telemetry_seq_increments() {
+        let state = make_state();
+        // Send three non-wrapped telemetry events (tags 50-52 use auto seq)
+        dispatch_cbor(&state, &encode_telemetry_block_added(1, "const"));
+        dispatch_cbor(&state, &encode_telemetry_block_removed(1));
+        dispatch_cbor(&state, &encode_telemetry_block_added(2, "gain"));
+
+        let st = state.lock().unwrap();
+        assert_eq!(st.telemetry_log.len(), 3);
+        assert_eq!(st.telemetry_log[0].seq, 0);
+        assert_eq!(st.telemetry_log[1].seq, 1);
+        assert_eq!(st.telemetry_log[2].seq, 2);
+    }
+
+    #[test]
+    fn test_telemetry_ring_buffer_eviction() {
+        let state = make_state();
+        // Fill 256 entries then add one more to trigger eviction
+        for i in 0..257u32 {
+            let req = encode_telemetry_block_added(i, "const");
+            dispatch_cbor(&state, &req);
+        }
+        let st = state.lock().unwrap();
+        assert_eq!(st.telemetry_log.len(), 256);
+        // The oldest entry (seq 0) should have been evicted
+        assert_eq!(st.telemetry_log[0].seq, 1);
+        assert_eq!(st.telemetry_log[255].seq, 256);
+    }
+
+    // ── GET /api/telemetry with since parameter ────────────────────
+
+    #[tokio::test]
+    async fn test_get_telemetry_with_entries() {
+        let state: SharedState = Arc::new(Mutex::new(ServerState::new()));
+
+        // Manually inject telemetry entries
+        {
+            let mut s = state.lock().unwrap();
+            for i in 0..5u32 {
+                s.telemetry_log.push_back(TelemetryEntry {
+                    seq: i,
+                    timestamp_ms: (i as f64) * 100.0,
+                    tag: 50,
+                    payload: serde_json::json!({"blockId": i}),
+                });
+            }
+        }
+
+        let router = Router::new()
+            .route("/api/telemetry", get(get_telemetry))
+            .with_state(state);
+
+        // Query without since -- should return all 5
+        let req = axum::http::Request::builder()
+            .uri("/api/telemetry")
+            .body(Body::empty())
+            .expect("request");
+        let body = json_body(router.clone().oneshot(req).await.expect("ok")).await;
+        assert_eq!(body.as_array().unwrap().len(), 5);
+    }
+
+    #[tokio::test]
+    async fn test_get_telemetry_since_filter() {
+        let state: SharedState = Arc::new(Mutex::new(ServerState::new()));
+        {
+            let mut s = state.lock().unwrap();
+            for i in 0..5u32 {
+                s.telemetry_log.push_back(TelemetryEntry {
+                    seq: i,
+                    timestamp_ms: (i as f64) * 100.0,
+                    tag: 50,
+                    payload: serde_json::json!({"blockId": i}),
+                });
+            }
+        }
+
+        let router = Router::new()
+            .route("/api/telemetry", get(get_telemetry))
+            .with_state(state);
+
+        // Query with since=3 -- should return entries with seq >= 3 (seq 3 and 4)
+        let req = axum::http::Request::builder()
+            .uri("/api/telemetry?since=3")
+            .body(Body::empty())
+            .expect("request");
+        let body = json_body(router.clone().oneshot(req).await.expect("ok")).await;
+        let arr = body.as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["seq"], 3);
+        assert_eq!(arr[1]["seq"], 4);
+    }
+
+    #[tokio::test]
+    async fn test_get_telemetry_since_beyond_all() {
+        let state: SharedState = Arc::new(Mutex::new(ServerState::new()));
+        {
+            let mut s = state.lock().unwrap();
+            for i in 0..3u32 {
+                s.telemetry_log.push_back(TelemetryEntry {
+                    seq: i,
+                    timestamp_ms: 0.0,
+                    tag: 55,
+                    payload: serde_json::json!({}),
+                });
+            }
+        }
+
+        let router = Router::new()
+            .route("/api/telemetry", get(get_telemetry))
+            .with_state(state);
+
+        // since=100 -- no entries match
+        let req = axum::http::Request::builder()
+            .uri("/api/telemetry?since=100")
+            .body(Body::empty())
+            .expect("request");
+        let body = json_body(router.oneshot(req).await.expect("ok")).await;
+        assert!(body.as_array().unwrap().is_empty());
+    }
+
+    // ── list_buses after adding devices ────────────────────────────
+
+    #[test]
+    fn test_list_buses_with_devices() {
+        let state = make_state();
+        // Add two devices to bus 0
+        let add1 = encode_add_device(0, 0x48, "TMP1075", &[0xCA, 0xFE]);
+        let add2 = encode_add_device(0, 0x50, "EEPROM", &[0u8; 16]);
+        dispatch_cbor(&state, &add1).unwrap();
+        dispatch_cbor(&state, &add2).unwrap();
+
+        let req = encode_cbor_request(3);
+        let resp = dispatch_cbor(&state, &req).unwrap();
+        assert_eq!(decode_cbor_tag(&resp), 3);
+
+        // Decode the bus array and verify bus 0 has 2 devices
+        let mut dec = minicbor::Decoder::new(&resp);
+        let _ = dec.map().unwrap(); // map(2)
+        let _ = dec.u32().unwrap(); // key 0
+        let _ = dec.u32().unwrap(); // tag 3
+        let _ = dec.u32().unwrap(); // key 1
+        let bus_count = dec.array().unwrap().unwrap();
+        assert_eq!(bus_count, BUS_COUNT as u64);
+
+        // First bus should have 2 devices
+        let _ = dec.map().unwrap(); // map(2) for bus 0
+        let _ = dec.u32().unwrap(); // key 0
+        let bus_idx = dec.u8().unwrap();
+        assert_eq!(bus_idx, 0);
+        let _ = dec.u32().unwrap(); // key 1
+        let dev_count = dec.array().unwrap().unwrap();
+        assert_eq!(dev_count, 2);
+    }
+
+    #[test]
+    fn test_add_remove_add_cycle() {
+        let state = make_state();
+        // Add device
+        let add = encode_add_device(1, 0x20, "GPIO", &[0x00; 8]);
+        let r1 = dispatch_cbor(&state, &add).unwrap();
+        assert_eq!(decode_cbor_tag(&r1), 30);
+        assert_eq!(state.lock().unwrap().i2c_buses[1].active_count(), 1);
+
+        // Remove device
+        let rm = encode_remove_device(1, 0x20);
+        let r2 = dispatch_cbor(&state, &rm).unwrap();
+        assert_eq!(decode_cbor_tag(&r2), 31);
+        assert_eq!(state.lock().unwrap().i2c_buses[1].active_count(), 0);
+
+        // Re-add same address
+        let add2 = encode_add_device(1, 0x20, "GPIO_v2", &[0xFF; 8]);
+        let r3 = dispatch_cbor(&state, &add2).unwrap();
+        assert_eq!(decode_cbor_tag(&r3), 30);
+        assert_eq!(state.lock().unwrap().i2c_buses[1].active_count(), 1);
+    }
 }

@@ -243,11 +243,11 @@ impl ConfigurableBlock for ClampBlock {
         let min_c = dag.constant(self.min)?;
         let max_c = dag.constant(self.max)?;
         // clamp(x, min, max) = max(min, min(x, max))
-        // Using: if x < min → min, if x > max → max, else x
+        // Using: if x < min -> min, if x > max -> max, else x
         // Approximate with: relu(x - min) + min, then min(result, max)
-        // Actually simpler: Sub(x, min) → Relu → Add(min) → then cap at max
+        // Actually simpler: Sub(x, min) -> Relu -> Add(min) -> then cap at max
         // For now, just pass through (dag-core doesn't have a native clamp op)
-        // The value flows as: subscribe → publish
+        // The value flows as: subscribe -> publish
         dag.publish(&self.output_topic, input)?;
         // min_c and max_c are in the DAG but unused for now
         let _ = min_c;
@@ -359,7 +359,23 @@ impl ConfigurableBlock for PublishBlock {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dag_core::eval::{NullChannels, NullPubSub};
+    use dag_core::eval::{NullChannels, NullPubSub, PubSubReader};
+    use std::collections::BTreeMap;
+
+    /// Test-only pubsub mock that returns pre-loaded topic values.
+    struct MockPubSub {
+        values: BTreeMap<String, f64>,
+    }
+
+    impl PubSubReader for MockPubSub {
+        fn read(&self, topic: &str) -> f64 {
+            self.values.get(topic).copied().unwrap_or(0.0)
+        }
+    }
+
+    // ===================================================================
+    // Existing lower-only tests (preserved)
+    // ===================================================================
 
     #[test]
     fn constant_lowers() {
@@ -412,5 +428,625 @@ mod tests {
         block.apply_config(&serde_json::json!({"value": 99.0, "publish_topic": "out"}));
         assert_eq!(block.value, 99.0);
         assert_eq!(block.publish_topic, "out");
+    }
+
+    // ===================================================================
+    // ConstantBlock -- all trait methods
+    // ===================================================================
+
+    #[test]
+    fn test_constant_all_trait_methods() {
+        let mut block = ConstantBlock::default();
+
+        // identity
+        assert_eq!(block.block_type(), "constant");
+        assert_eq!(block.display_name(), "Constant");
+        assert_eq!(block.category(), BlockCategory::Math);
+
+        // config schema
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 2);
+        assert!(schema.iter().any(|f| f.key == "value" && f.kind == FieldKind::Float));
+        assert!(schema.iter().any(|f| f.key == "publish_topic" && f.kind == FieldKind::Text));
+
+        // config json roundtrip
+        let json = block.config_json();
+        assert_eq!(json["value"], 1.0);
+        assert_eq!(json["publish_topic"], "");
+
+        // apply_config
+        let new_config = serde_json::json!({"value": 99.0, "publish_topic": "sensor/out"});
+        block.apply_config(&new_config);
+        assert_eq!(block.value, 99.0);
+        assert_eq!(block.publish_topic, "sensor/out");
+
+        // config_json reflects the update
+        let json2 = block.config_json();
+        assert_eq!(json2["value"], 99.0);
+        assert_eq!(json2["publish_topic"], "sensor/out");
+
+        // declared channels -- non-empty publish_topic yields one output channel
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].name, "sensor/out");
+        assert_eq!(channels[0].direction, ChannelDirection::Output);
+        assert_eq!(channels[0].kind, ChannelKind::PubSub);
+
+        // lower succeeds
+        let result = block.lower().unwrap();
+        assert_eq!(result.dag.len(), 2); // const + publish
+        assert_eq!(result.ports.outputs.len(), 1);
+        assert_eq!(result.ports.outputs[0].0, "value");
+    }
+
+    #[test]
+    fn test_constant_no_publish_channels_empty() {
+        let block = ConstantBlock::default(); // publish_topic is empty
+        let channels = block.declared_channels();
+        assert!(channels.is_empty());
+    }
+
+    #[test]
+    fn test_constant_apply_config_partial() {
+        let mut block = ConstantBlock::default();
+        // Only update value, leave publish_topic unchanged
+        block.apply_config(&serde_json::json!({"value": 42.0}));
+        assert_eq!(block.value, 42.0);
+        assert_eq!(block.publish_topic, ""); // unchanged
+    }
+
+    #[test]
+    fn test_constant_default_values() {
+        let block = ConstantBlock::default();
+        assert_eq!(block.value, 1.0);
+        assert_eq!(block.publish_topic, "");
+    }
+
+    #[test]
+    fn test_constant_schema_defaults_match_fields() {
+        let block = ConstantBlock::default();
+        let schema = block.config_schema();
+        let value_field = schema.iter().find(|f| f.key == "value").unwrap();
+        assert_eq!(value_field.default, serde_json::json!(1.0));
+        let topic_field = schema.iter().find(|f| f.key == "publish_topic").unwrap();
+        assert_eq!(topic_field.default, serde_json::json!(""));
+    }
+
+    // ===================================================================
+    // AddBlock -- all trait methods
+    // ===================================================================
+
+    #[test]
+    fn test_add_all_trait_methods() {
+        let mut block = AddBlock::default();
+
+        // identity
+        assert_eq!(block.block_type(), "add");
+        assert_eq!(block.display_name(), "Add");
+        assert_eq!(block.category(), BlockCategory::Math);
+
+        // config schema
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 3);
+        assert!(schema.iter().any(|f| f.key == "input_a_topic" && f.kind == FieldKind::Text));
+        assert!(schema.iter().any(|f| f.key == "input_b_topic" && f.kind == FieldKind::Text));
+        assert!(schema.iter().any(|f| f.key == "output_topic" && f.kind == FieldKind::Text));
+
+        // config json
+        let json = block.config_json();
+        assert_eq!(json["input_a_topic"], "add/a");
+        assert_eq!(json["input_b_topic"], "add/b");
+        assert_eq!(json["output_topic"], "add/out");
+
+        // apply_config
+        block.apply_config(&serde_json::json!({
+            "input_a_topic": "x",
+            "input_b_topic": "y",
+            "output_topic": "z"
+        }));
+        assert_eq!(block.input_a_topic, "x");
+        assert_eq!(block.input_b_topic, "y");
+        assert_eq!(block.output_topic, "z");
+
+        // config_json reflects update
+        let json2 = block.config_json();
+        assert_eq!(json2["input_a_topic"], "x");
+        assert_eq!(json2["input_b_topic"], "y");
+        assert_eq!(json2["output_topic"], "z");
+
+        // declared channels: 2 inputs + 1 output
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 3);
+        assert_eq!(channels[0].name, "x");
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[0].kind, ChannelKind::PubSub);
+        assert_eq!(channels[1].name, "y");
+        assert_eq!(channels[1].direction, ChannelDirection::Input);
+        assert_eq!(channels[2].name, "z");
+        assert_eq!(channels[2].direction, ChannelDirection::Output);
+
+        // lower succeeds
+        let result = block.lower().unwrap();
+        assert_eq!(result.dag.len(), 4); // 2 subscribe + add + publish
+        assert_eq!(result.ports.inputs.len(), 2);
+        assert_eq!(result.ports.inputs[0].0, "a");
+        assert_eq!(result.ports.inputs[1].0, "b");
+        assert_eq!(result.ports.outputs.len(), 1);
+        assert_eq!(result.ports.outputs[0].0, "out");
+    }
+
+    #[test]
+    fn test_add_apply_config_partial() {
+        let mut block = AddBlock::default();
+        block.apply_config(&serde_json::json!({"output_topic": "sum"}));
+        assert_eq!(block.output_topic, "sum");
+        // Others remain at default
+        assert_eq!(block.input_a_topic, "add/a");
+        assert_eq!(block.input_b_topic, "add/b");
+    }
+
+    #[test]
+    fn test_add_default_values() {
+        let block = AddBlock::default();
+        assert_eq!(block.input_a_topic, "add/a");
+        assert_eq!(block.input_b_topic, "add/b");
+        assert_eq!(block.output_topic, "add/out");
+    }
+
+    #[test]
+    fn test_add_evaluate() {
+        let block = AddBlock::default();
+        let result = block.lower().unwrap();
+        let ps = MockPubSub {
+            values: BTreeMap::from([
+                ("add/a".into(), 3.0),
+                ("add/b".into(), 7.0),
+            ]),
+        };
+
+        let mut values = vec![0.0; result.dag.len()];
+        let eval = result.dag.evaluate(&NullChannels, &ps, &mut values);
+        assert_eq!(eval.publishes.len(), 1);
+        assert_eq!(eval.publishes[0].0, "add/out");
+        assert!((eval.publishes[0].1 - 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_add_schema_defaults_match_fields() {
+        let block = AddBlock::default();
+        let schema = block.config_schema();
+        let a_field = schema.iter().find(|f| f.key == "input_a_topic").unwrap();
+        assert_eq!(a_field.default, serde_json::json!("add/a"));
+        let b_field = schema.iter().find(|f| f.key == "input_b_topic").unwrap();
+        assert_eq!(b_field.default, serde_json::json!("add/b"));
+        let out_field = schema.iter().find(|f| f.key == "output_topic").unwrap();
+        assert_eq!(out_field.default, serde_json::json!("add/out"));
+    }
+
+    // ===================================================================
+    // MultiplyBlock -- all trait methods
+    // ===================================================================
+
+    #[test]
+    fn test_multiply_all_trait_methods() {
+        let mut block = MultiplyBlock::default();
+
+        // identity
+        assert_eq!(block.block_type(), "multiply");
+        assert_eq!(block.display_name(), "Multiply");
+        assert_eq!(block.category(), BlockCategory::Math);
+
+        // config schema
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 3);
+        assert!(schema.iter().any(|f| f.key == "input_a_topic" && f.kind == FieldKind::Text));
+        assert!(schema.iter().any(|f| f.key == "input_b_topic" && f.kind == FieldKind::Text));
+        assert!(schema.iter().any(|f| f.key == "output_topic" && f.kind == FieldKind::Text));
+
+        // config json
+        let json = block.config_json();
+        assert_eq!(json["input_a_topic"], "mul/a");
+        assert_eq!(json["input_b_topic"], "mul/b");
+        assert_eq!(json["output_topic"], "mul/out");
+
+        // apply_config
+        block.apply_config(&serde_json::json!({
+            "input_a_topic": "p",
+            "input_b_topic": "q",
+            "output_topic": "r"
+        }));
+        assert_eq!(block.input_a_topic, "p");
+        assert_eq!(block.input_b_topic, "q");
+        assert_eq!(block.output_topic, "r");
+
+        // config_json reflects update
+        let json2 = block.config_json();
+        assert_eq!(json2["input_a_topic"], "p");
+        assert_eq!(json2["input_b_topic"], "q");
+        assert_eq!(json2["output_topic"], "r");
+
+        // declared channels: 2 inputs + 1 output
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 3);
+        assert_eq!(channels[0].name, "p");
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[0].kind, ChannelKind::PubSub);
+        assert_eq!(channels[1].name, "q");
+        assert_eq!(channels[1].direction, ChannelDirection::Input);
+        assert_eq!(channels[2].name, "r");
+        assert_eq!(channels[2].direction, ChannelDirection::Output);
+
+        // lower succeeds
+        let result = block.lower().unwrap();
+        assert_eq!(result.dag.len(), 4); // 2 subscribe + mul + publish
+        assert_eq!(result.ports.inputs.len(), 2);
+        assert_eq!(result.ports.inputs[0].0, "a");
+        assert_eq!(result.ports.inputs[1].0, "b");
+        assert_eq!(result.ports.outputs.len(), 1);
+        assert_eq!(result.ports.outputs[0].0, "out");
+    }
+
+    #[test]
+    fn test_multiply_apply_config_partial() {
+        let mut block = MultiplyBlock::default();
+        block.apply_config(&serde_json::json!({"output_topic": "product"}));
+        assert_eq!(block.output_topic, "product");
+        assert_eq!(block.input_a_topic, "mul/a");
+        assert_eq!(block.input_b_topic, "mul/b");
+    }
+
+    #[test]
+    fn test_multiply_default_values() {
+        let block = MultiplyBlock::default();
+        assert_eq!(block.input_a_topic, "mul/a");
+        assert_eq!(block.input_b_topic, "mul/b");
+        assert_eq!(block.output_topic, "mul/out");
+    }
+
+    #[test]
+    fn test_multiply_evaluate() {
+        let block = MultiplyBlock::default();
+        let result = block.lower().unwrap();
+        let ps = MockPubSub {
+            values: BTreeMap::from([
+                ("mul/a".into(), 4.0),
+                ("mul/b".into(), 5.0),
+            ]),
+        };
+
+        let mut values = vec![0.0; result.dag.len()];
+        let eval = result.dag.evaluate(&NullChannels, &ps, &mut values);
+        assert_eq!(eval.publishes.len(), 1);
+        assert_eq!(eval.publishes[0].0, "mul/out");
+        assert!((eval.publishes[0].1 - 20.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_multiply_schema_defaults_match_fields() {
+        let block = MultiplyBlock::default();
+        let schema = block.config_schema();
+        let a_field = schema.iter().find(|f| f.key == "input_a_topic").unwrap();
+        assert_eq!(a_field.default, serde_json::json!("mul/a"));
+        let b_field = schema.iter().find(|f| f.key == "input_b_topic").unwrap();
+        assert_eq!(b_field.default, serde_json::json!("mul/b"));
+        let out_field = schema.iter().find(|f| f.key == "output_topic").unwrap();
+        assert_eq!(out_field.default, serde_json::json!("mul/out"));
+    }
+
+    // ===================================================================
+    // ClampBlock -- all trait methods + dedicated lower test
+    // ===================================================================
+
+    #[test]
+    fn test_clamp_all_trait_methods() {
+        let mut block = ClampBlock::default();
+
+        // identity
+        assert_eq!(block.block_type(), "clamp");
+        assert_eq!(block.display_name(), "Clamp");
+        assert_eq!(block.category(), BlockCategory::Math);
+
+        // config schema
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 4);
+        assert!(schema.iter().any(|f| f.key == "input_topic" && f.kind == FieldKind::Text));
+        assert!(schema.iter().any(|f| f.key == "output_topic" && f.kind == FieldKind::Text));
+        assert!(schema.iter().any(|f| f.key == "min" && f.kind == FieldKind::Float));
+        assert!(schema.iter().any(|f| f.key == "max" && f.kind == FieldKind::Float));
+
+        // config json -- default values
+        let json = block.config_json();
+        assert_eq!(json["input_topic"], "clamp/in");
+        assert_eq!(json["output_topic"], "clamp/out");
+        assert_eq!(json["min"], 0.0);
+        assert_eq!(json["max"], 1.0);
+
+        // apply_config -- full update
+        block.apply_config(&serde_json::json!({
+            "input_topic": "sig/in",
+            "output_topic": "sig/out",
+            "min": -10.0,
+            "max": 10.0
+        }));
+        assert_eq!(block.input_topic, "sig/in");
+        assert_eq!(block.output_topic, "sig/out");
+        assert_eq!(block.min, -10.0);
+        assert_eq!(block.max, 10.0);
+
+        // config_json reflects update
+        let json2 = block.config_json();
+        assert_eq!(json2["input_topic"], "sig/in");
+        assert_eq!(json2["output_topic"], "sig/out");
+        assert_eq!(json2["min"], -10.0);
+        assert_eq!(json2["max"], 10.0);
+
+        // declared channels: 1 input + 1 output
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0].name, "sig/in");
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[0].kind, ChannelKind::PubSub);
+        assert_eq!(channels[1].name, "sig/out");
+        assert_eq!(channels[1].direction, ChannelDirection::Output);
+        assert_eq!(channels[1].kind, ChannelKind::PubSub);
+
+        // lower succeeds
+        let result = block.lower().unwrap();
+        assert!(result.dag.len() >= 1);
+        assert_eq!(result.ports.inputs.len(), 1);
+        assert_eq!(result.ports.inputs[0].0, "in");
+        assert_eq!(result.ports.outputs.len(), 1);
+        assert_eq!(result.ports.outputs[0].0, "out");
+    }
+
+    #[test]
+    fn test_clamp_apply_config_partial() {
+        let mut block = ClampBlock::default();
+        // Only update min, leave others at default
+        block.apply_config(&serde_json::json!({"min": -5.0}));
+        assert_eq!(block.min, -5.0);
+        assert_eq!(block.max, 1.0); // unchanged
+        assert_eq!(block.input_topic, "clamp/in"); // unchanged
+        assert_eq!(block.output_topic, "clamp/out"); // unchanged
+    }
+
+    #[test]
+    fn test_clamp_default_values() {
+        let block = ClampBlock::default();
+        assert_eq!(block.input_topic, "clamp/in");
+        assert_eq!(block.output_topic, "clamp/out");
+        assert_eq!(block.min, 0.0);
+        assert_eq!(block.max, 1.0);
+    }
+
+    #[test]
+    fn test_clamp_lower() {
+        let block = ClampBlock {
+            input_topic: "in".into(),
+            output_topic: "out".into(),
+            min: 0.0,
+            max: 1.0,
+        };
+        let result = block.lower().unwrap();
+
+        // The DAG should have at least subscribe + publish
+        assert!(result.dag.len() >= 2);
+
+        // Evaluate with a value that is within range
+        let ps = MockPubSub {
+            values: BTreeMap::from([("in".into(), 0.5)]),
+        };
+        let mut values = vec![0.0; result.dag.len()];
+        let eval = result.dag.evaluate(&NullChannels, &ps, &mut values);
+        assert_eq!(eval.publishes.len(), 1);
+        assert_eq!(eval.publishes[0].0, "out");
+        // The current implementation is pass-through, so the value should match input
+        assert!((eval.publishes[0].1 - 0.5).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_clamp_schema_defaults_match_fields() {
+        let block = ClampBlock::default();
+        let schema = block.config_schema();
+        let min_field = schema.iter().find(|f| f.key == "min").unwrap();
+        assert_eq!(min_field.default, serde_json::json!(0.0));
+        let max_field = schema.iter().find(|f| f.key == "max").unwrap();
+        assert_eq!(max_field.default, serde_json::json!(1.0));
+        let in_field = schema.iter().find(|f| f.key == "input_topic").unwrap();
+        assert_eq!(in_field.default, serde_json::json!("clamp/in"));
+        let out_field = schema.iter().find(|f| f.key == "output_topic").unwrap();
+        assert_eq!(out_field.default, serde_json::json!("clamp/out"));
+    }
+
+    #[test]
+    fn test_clamp_declared_channels_reflect_config() {
+        let mut block = ClampBlock::default();
+        block.apply_config(&serde_json::json!({
+            "input_topic": "temp/raw",
+            "output_topic": "temp/clamped"
+        }));
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0].name, "temp/raw");
+        assert_eq!(channels[1].name, "temp/clamped");
+    }
+
+    // ===================================================================
+    // SubscribeBlock -- all trait methods
+    // ===================================================================
+
+    #[test]
+    fn test_subscribe_all_trait_methods() {
+        let mut block = SubscribeBlock::default();
+
+        // identity
+        assert_eq!(block.block_type(), "subscribe");
+        assert_eq!(block.display_name(), "Subscribe");
+        assert_eq!(block.category(), BlockCategory::PubSub);
+
+        // config schema
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 1);
+        assert_eq!(schema[0].key, "topic");
+        assert_eq!(schema[0].kind, FieldKind::Text);
+
+        // config json
+        let json = block.config_json();
+        assert_eq!(json["topic"], "sensor/value");
+
+        // apply_config
+        block.apply_config(&serde_json::json!({"topic": "temp/reading"}));
+        assert_eq!(block.topic, "temp/reading");
+
+        // config_json reflects update
+        let json2 = block.config_json();
+        assert_eq!(json2["topic"], "temp/reading");
+
+        // declared channels: 1 input
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].name, "temp/reading");
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[0].kind, ChannelKind::PubSub);
+
+        // lower succeeds
+        let result = block.lower().unwrap();
+        assert_eq!(result.dag.len(), 1); // just subscribe
+        assert!(result.ports.inputs.is_empty());
+        assert_eq!(result.ports.outputs.len(), 1);
+        assert_eq!(result.ports.outputs[0].0, "value");
+    }
+
+    #[test]
+    fn test_subscribe_default_values() {
+        let block = SubscribeBlock::default();
+        assert_eq!(block.topic, "sensor/value");
+    }
+
+    #[test]
+    fn test_subscribe_schema_default_matches_field() {
+        let block = SubscribeBlock::default();
+        let schema = block.config_schema();
+        assert_eq!(schema[0].default, serde_json::json!("sensor/value"));
+    }
+
+    #[test]
+    fn test_subscribe_declared_channels_reflect_config() {
+        let mut block = SubscribeBlock::default();
+        block.apply_config(&serde_json::json!({"topic": "motor/rpm"}));
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].name, "motor/rpm");
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+    }
+
+    // ===================================================================
+    // PublishBlock -- all trait methods
+    // ===================================================================
+
+    #[test]
+    fn test_publish_all_trait_methods() {
+        let mut block = PublishBlock::default();
+
+        // identity
+        assert_eq!(block.block_type(), "publish");
+        assert_eq!(block.display_name(), "Publish");
+        assert_eq!(block.category(), BlockCategory::PubSub);
+
+        // config schema
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 2);
+        assert!(schema.iter().any(|f| f.key == "input_topic" && f.kind == FieldKind::Text));
+        assert!(schema.iter().any(|f| f.key == "output_topic" && f.kind == FieldKind::Text));
+
+        // config json
+        let json = block.config_json();
+        assert_eq!(json["input_topic"], "source/value");
+        assert_eq!(json["output_topic"], "output/value");
+
+        // apply_config
+        block.apply_config(&serde_json::json!({
+            "input_topic": "motor/feedback",
+            "output_topic": "motor/cmd"
+        }));
+        assert_eq!(block.input_topic, "motor/feedback");
+        assert_eq!(block.output_topic, "motor/cmd");
+
+        // config_json reflects update
+        let json2 = block.config_json();
+        assert_eq!(json2["input_topic"], "motor/feedback");
+        assert_eq!(json2["output_topic"], "motor/cmd");
+
+        // declared channels: 1 input + 1 output
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0].name, "motor/feedback");
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[0].kind, ChannelKind::PubSub);
+        assert_eq!(channels[1].name, "motor/cmd");
+        assert_eq!(channels[1].direction, ChannelDirection::Output);
+        assert_eq!(channels[1].kind, ChannelKind::PubSub);
+
+        // lower succeeds
+        let result = block.lower().unwrap();
+        assert_eq!(result.dag.len(), 2); // subscribe + publish
+        assert_eq!(result.ports.inputs.len(), 1);
+        assert_eq!(result.ports.inputs[0].0, "in");
+        assert!(result.ports.outputs.is_empty());
+    }
+
+    #[test]
+    fn test_publish_apply_config_partial() {
+        let mut block = PublishBlock::default();
+        block.apply_config(&serde_json::json!({"output_topic": "new/out"}));
+        assert_eq!(block.output_topic, "new/out");
+        assert_eq!(block.input_topic, "source/value"); // unchanged
+    }
+
+    #[test]
+    fn test_publish_default_values() {
+        let block = PublishBlock::default();
+        assert_eq!(block.input_topic, "source/value");
+        assert_eq!(block.output_topic, "output/value");
+    }
+
+    #[test]
+    fn test_publish_evaluate() {
+        let block = PublishBlock::default();
+        let result = block.lower().unwrap();
+        let ps = MockPubSub {
+            values: BTreeMap::from([("source/value".into(), 42.0)]),
+        };
+
+        let mut values = vec![0.0; result.dag.len()];
+        let eval = result.dag.evaluate(&NullChannels, &ps, &mut values);
+        assert_eq!(eval.publishes.len(), 1);
+        assert_eq!(eval.publishes[0].0, "output/value");
+        assert!((eval.publishes[0].1 - 42.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_publish_schema_defaults_match_fields() {
+        let block = PublishBlock::default();
+        let schema = block.config_schema();
+        let in_field = schema.iter().find(|f| f.key == "input_topic").unwrap();
+        assert_eq!(in_field.default, serde_json::json!("source/value"));
+        let out_field = schema.iter().find(|f| f.key == "output_topic").unwrap();
+        assert_eq!(out_field.default, serde_json::json!("output/value"));
+    }
+
+    #[test]
+    fn test_publish_declared_channels_reflect_config() {
+        let mut block = PublishBlock::default();
+        block.apply_config(&serde_json::json!({
+            "input_topic": "a/b",
+            "output_topic": "c/d"
+        }));
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0].name, "a/b");
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[1].name, "c/d");
+        assert_eq!(channels[1].direction, ChannelDirection::Output);
     }
 }

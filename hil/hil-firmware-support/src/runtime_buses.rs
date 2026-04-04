@@ -80,20 +80,20 @@ impl<const MAX_BUSES: usize, const MAX_DEVICES: usize> I2cBusSet
         self.buses[idx].active_count()
     }
 
-    fn device_info(&self, bus: u8, index: u8) -> Option<(u8, &[u8])> {
+    fn with_device_info<R>(&self, bus: u8, index: u8, f: impl FnOnce(u8, &[u8]) -> R) -> Option<R> {
         let idx = bus as usize;
         if idx >= self.bus_count as usize {
             return None;
         }
-        self.buses[idx].active_device_info(index)
+        self.buses[idx].active_device_info(index).map(|(addr, name)| f(addr, name))
     }
 
-    fn device_registers(&self, bus: u8, addr: u8) -> Option<&[u8]> {
+    fn with_device_registers<R>(&self, bus: u8, addr: u8, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
         let idx = bus as usize;
         if idx >= self.bus_count as usize {
             return None;
         }
-        self.buses[idx].device_registers(addr).map(|r| r.as_slice())
+        self.buses[idx].device_registers(addr).map(|r| f(r.as_slice()))
     }
 
     fn add_device(&mut self, bus: u8, addr: u8, name: &[u8], registers: &[u8]) -> Result<(), ()> {
@@ -175,7 +175,8 @@ mod tests {
         buses.set_bus_count(2).unwrap();
         buses.add_device(0, 0x48, b"TMP1075", &[]).unwrap();
         assert_eq!(buses.device_count(0), 1);
-        assert_eq!(buses.device_info(0, 0), Some((0x48, b"TMP1075".as_slice())));
+        let info = buses.with_device_info(0, 0, |addr, name| (addr, name.to_vec()));
+        assert_eq!(info, Some((0x48, b"TMP1075".to_vec())));
     }
 
     #[test]
@@ -220,17 +221,18 @@ mod tests {
         buses.set_bus_count(1).unwrap();
         buses.add_device(0, 0x48, b"REG", &[0; 256]).unwrap();
         buses.set_registers(0, 0x48, 5, &[0xAB, 0xCD]).unwrap();
-        let regs = buses.device_registers(0, 0x48).unwrap();
-        assert_eq!(regs[5], 0xAB);
-        assert_eq!(regs[6], 0xCD);
+        buses.with_device_registers(0, 0x48, |regs| {
+            assert_eq!(regs[5], 0xAB);
+            assert_eq!(regs[6], 0xCD);
+        }).unwrap();
     }
 
     #[test]
     fn runtime_bus_set_device_registers_out_of_range() {
         let mut buses = RuntimeBusSet::<4, 8>::new();
         buses.set_bus_count(1).unwrap();
-        assert!(buses.device_registers(0, 0x99).is_none());
-        assert!(buses.device_registers(99, 0x48).is_none());
+        assert!(buses.with_device_registers(0, 0x99, |_| ()).is_none());
+        assert!(buses.with_device_registers(99, 0x48, |_| ()).is_none());
     }
 
     #[test]
