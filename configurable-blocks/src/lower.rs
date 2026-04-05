@@ -443,6 +443,32 @@ mod tests {
     }
 
     #[test]
+    fn test_lower_block_set_empty_returns_empty_dag() {
+        let profile = DeploymentProfile::new("bench");
+        let combined = lower_block_set(&[], &profile).expect("should succeed");
+        assert!(combined.is_empty());
+    }
+
+    #[test]
+    fn test_remap_dag_channels_unmapped_topic_preserved() {
+        let mut dag = Dag::new();
+        dag.add_op(Op::Subscribe("unmapped/topic".into())).unwrap();
+        dag.add_op(Op::Publish("also/unmapped".into(), 0)).unwrap();
+
+        let map = ChannelMap::new(); // empty — no remappings
+        let remapped = remap_dag_channels(&dag, &map).expect("remap failed");
+
+        match &remapped.nodes()[0] {
+            Op::Subscribe(t) => assert_eq!(t, "unmapped/topic"),
+            other => panic!("expected Subscribe, got {:?}", other),
+        }
+        match &remapped.nodes()[1] {
+            Op::Publish(t, _) => assert_eq!(t, "also/unmapped"),
+            other => panic!("expected Publish, got {:?}", other),
+        }
+    }
+
+    #[test]
     fn test_lower_block_set_unknown_block_type_returns_error() {
         let profile = DeploymentProfile::new("bench");
         let blocks: Vec<(String, serde_json::Value)> = vec![
