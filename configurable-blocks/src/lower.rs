@@ -242,7 +242,7 @@ pub fn lower_block_set_per_node(
             .cloned()
             .unwrap_or_else(|| "_default".to_string());
 
-        let dag = node_dags.entry(node_id).or_insert_with(Dag::new);
+        let dag = node_dags.entry(node_id).or_default();
         let offset = dag.len() as NodeId;
 
         for op in result.dag.nodes() {

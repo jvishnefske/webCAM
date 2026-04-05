@@ -364,7 +364,7 @@ pub fn validate_profile(
     // ── 2. UnknownMcu ────────────────────────────────────────────────────────
     // Look up MCU family via profile.boards (node_id → mcu_family), not the
     // raw node_id string which is a logical name like "motor_ctrl".
-    for (_, node_id) in &profile.node_assignments {
+    for node_id in profile.node_assignments.values() {
         if let Some(board) = profile.boards.iter().find(|b| b.node_id == *node_id) {
             if module_traits::inventory::mcu_for(&board.mcu_family).is_none() {
                 errors.push(ValidationError::UnknownMcu {
