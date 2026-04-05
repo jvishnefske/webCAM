@@ -171,9 +171,9 @@ fn print_op(op: &IrOp, out: &mut String) {
         }
     }
 
-    // Op name
+    // Op name (derived from typed IrOpKind)
     out.push('"');
-    out.push_str(&op.name);
+    out.push_str(&op.kind.mlir_name());
     out.push('"');
 
     // Operands
@@ -298,7 +298,7 @@ mod tests {
         assert!(text.contains("module {"), "should have module wrapper");
         assert!(text.contains("func.func @tick()"), "should have tick func");
         assert!(
-            text.contains("\"dataflow.constant\"() {value = 42.0 : f64} : () -> f64"),
+            text.contains("\"arith.constant\"() {value = 42.0 : f64} : () -> f64"),
             "should have constant op, got:\n{text}"
         );
         assert!(text.contains("return"), "should end with return");
@@ -316,11 +316,11 @@ mod tests {
 
         // Should reference the correct SSA values
         assert!(
-            text.contains("\"dataflow.constant\"() {value = 5.0 : f64} : () -> f64"),
+            text.contains("\"arith.constant\"() {value = 5.0 : f64} : () -> f64"),
             "should have constant 5.0, got:\n{text}"
         );
         assert!(
-            text.contains("\"dataflow.constant\"() {value = 2.0 : f64} : () -> f64"),
+            text.contains("\"arith.constant\"() {value = 2.0 : f64} : () -> f64"),
             "should have constant 2.0, got:\n{text}"
         );
         assert!(
@@ -374,7 +374,7 @@ mod tests {
         let text = print_mlir(&module);
 
         assert!(
-            text.contains(r#""dataflow.subscribe"() {topic = "sensor/temp"} : () -> f64"#),
+            text.contains(r#""func.call @subscribe"() {topic = "sensor/temp"} : () -> f64"#),
             "should have subscribe with quoted topic, got:\n{text}"
         );
     }
