@@ -3,7 +3,7 @@
 import type { BlockTypeInfo } from './types.js';
 import type { DataflowManager } from './graph.js';
 
-const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
+export const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
   constant: { value: 1.0 },
   gain: { op: 'Gain', param1: 1.0, param2: 0.0 },
   clamp: { op: 'Clamp', param1: 0.0, param2: 100.0 },

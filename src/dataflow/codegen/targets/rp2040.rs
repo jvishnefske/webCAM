@@ -192,34 +192,5 @@ fn generate_main_rs(binding: &Binding, dt: f64) -> String {
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
 
-    // Append C-FFI hw_* stubs for MLIR backend
-    writeln!(out).unwrap();
-    writeln!(out, "static mut HW: HwPeripherals = HwPeripherals {{").unwrap();
-    for pin in &binding.pins {
-        match pin {
-            PinBinding::Adc {
-                logical_channel, ..
-            } => {
-                writeln!(out, "    adc_{logical_channel}: 0.0,").unwrap();
-            }
-            PinBinding::Pwm {
-                logical_channel, ..
-            } => {
-                writeln!(out, "    pwm_{logical_channel}: 0.0,").unwrap();
-            }
-            PinBinding::Gpio { logical_pin, .. } => {
-                writeln!(out, "    gpio_{logical_pin}: false,").unwrap();
-            }
-            PinBinding::Uart { logical_port, .. } => {
-                writeln!(out, "    uart_{logical_port}_buf: [0u8; 64],").unwrap();
-            }
-            _ => {}
-        }
-    }
-    if binding.pins.is_empty() {
-        writeln!(out, "    _marker: (),").unwrap();
-    }
-    writeln!(out, "}};").unwrap();
-
     out
 }

@@ -255,45 +255,25 @@ impl I2cBusSet for WsBusAccess {
         })
     }
 
-    fn device_info(&self, bus: u8, index: u8) -> Option<(u8, &[u8])> {
-        // SAFETY: The returned slice borrows from the static SharedBusMutex.
-        // Since the RuntimeBus is in a StaticCell, the data won't move.
-        // We must use a raw pointer to escape the borrow checker since
-        // BlockingMutex::lock doesn't allow returning borrows.
+    fn with_device_info<R>(&self, bus: u8, index: u8, f: impl FnOnce(u8, &[u8]) -> R) -> Option<R> {
         self.shared.lock(|inner| {
             let state = inner.borrow();
             let idx = bus as usize;
             if idx >= state.bus_count as usize {
                 return None;
             }
-            // Get the device info - returns references into the static bus
-            let info = state.buses[idx].active_device_info(index);
-            info.map(|(addr, name)| {
-                // SAFETY: The name slice lives in the static SharedState allocation.
-                // It remains valid as long as the device is not removed. This is safe
-                // because we only use this in encode_bus_list_dynamic which consumes
-                // the data immediately within the same call.
-                let name_ptr = name.as_ptr();
-                let name_len = name.len();
-                (addr, unsafe {
-                    core::slice::from_raw_parts(name_ptr, name_len)
-                })
-            })
+            state.buses[idx].active_device_info(index).map(|(addr, name)| f(addr, name))
         })
     }
 
-    fn device_registers(&self, bus: u8, addr: u8) -> Option<&[u8]> {
+    fn with_device_registers<R>(&self, bus: u8, addr: u8, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
         self.shared.lock(|inner| {
             let state = inner.borrow();
             let idx = bus as usize;
             if idx >= state.bus_count as usize {
                 return None;
             }
-            state.buses[idx].device_registers(addr).map(|r| {
-                let ptr = r.as_ptr();
-                let len = r.len();
-                unsafe { core::slice::from_raw_parts(ptr, len) }
-            })
+            state.buses[idx].device_registers(addr).map(|r| f(r.as_slice()))
         })
     }
 

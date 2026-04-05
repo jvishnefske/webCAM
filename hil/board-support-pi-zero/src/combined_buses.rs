@@ -111,23 +111,21 @@ impl I2cBusSet for CombinedBusSet {
         }
     }
 
-    fn device_info(&self, bus: u8, index: u8) -> Option<(u8, &[u8])> {
+    fn with_device_info<R>(&self, bus: u8, index: u8, f: impl FnOnce(u8, &[u8]) -> R) -> Option<R> {
         if self.is_linux_bus(bus) {
             None
         } else {
             let idx = self.sim_index(bus)?;
-            self.sim_buses[idx].active_device_info(index)
+            self.sim_buses[idx].active_device_info(index).map(|(addr, name)| f(addr, name))
         }
     }
 
-    fn device_registers(&self, bus: u8, addr: u8) -> Option<&[u8]> {
+    fn with_device_registers<R>(&self, bus: u8, addr: u8, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
         if self.is_linux_bus(bus) {
             None
         } else {
             let idx = self.sim_index(bus)?;
-            self.sim_buses[idx]
-                .device_registers(addr)
-                .map(|r| r.as_slice())
+            self.sim_buses[idx].device_registers(addr).map(|r| f(r.as_slice()))
         }
     }
 
