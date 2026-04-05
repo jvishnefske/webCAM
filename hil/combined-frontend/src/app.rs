@@ -9,6 +9,7 @@ use crate::backoff;
 use crate::components::header::Header;
 use crate::components::tab_bar::TabBar;
 use crate::messages::{BusEntry, Request, Response};
+use crate::types::BlockSet;
 use crate::ws_client::{self, ConnState};
 
 // ---------------------------------------------------------------------------
@@ -164,6 +165,11 @@ pub fn App() -> impl IntoView {
     if let Some(f) = do_connect.borrow().as_ref() {
         f();
     }
+
+    // -- Shared block set (editor → deploy panel bridge) --
+    let (shared_blocks, set_shared_blocks) = signal(BlockSet::new());
+    provide_context(shared_blocks);
+    provide_context(set_shared_blocks);
 
     // -- Provide context --
     let ctx = AppContext {
