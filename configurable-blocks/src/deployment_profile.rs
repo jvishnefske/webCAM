@@ -44,6 +44,11 @@ impl ChannelMap {
     pub fn remap<'a>(&'a self, name: &'a str) -> &'a str {
         self.0.get(name).map(String::as_str).unwrap_or(name)
     }
+
+    /// Returns `true` if no mappings have been added.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
 }
 
 impl FromIterator<(String, String)> for ChannelMap {
@@ -144,7 +149,7 @@ mod tests {
     fn deployment_profile_new_defaults() {
         let profile = DeploymentProfile::new("my_deployment");
         assert_eq!(profile.name, "my_deployment");
-        assert!(profile.channel_map.0.is_empty());
+        assert!(profile.channel_map.is_empty());
         assert!(profile.node_assignments.is_empty());
         assert!(profile.peripheral_assignments.is_empty());
     }
