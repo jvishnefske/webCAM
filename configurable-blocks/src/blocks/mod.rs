@@ -63,6 +63,34 @@ pub fn registry() -> Vec<BlockEntry> {
             description: "PID controller with configurable gains, pubsub I/O, and output clamping",
             create: || Box::new(pid::PidBlock::default()),
         },
+        BlockEntry {
+            block_type: "subtract",
+            display_name: "Subtract",
+            category: BlockCategory::Math,
+            description: "Subtract two pubsub inputs (a - b) and publish the difference",
+            create: || Box::new(basic::SubtractBlock::default()),
+        },
+        BlockEntry {
+            block_type: "negate",
+            display_name: "Negate",
+            category: BlockCategory::Math,
+            description: "Flip the sign of a pubsub input",
+            create: || Box::new(basic::NegateBlock::default()),
+        },
+        BlockEntry {
+            block_type: "map_scale",
+            display_name: "Map/Scale",
+            category: BlockCategory::Math,
+            description: "Linear mapping: (in - in_min)/(in_max - in_min) * (out_max - out_min) + out_min",
+            create: || Box::new(basic::MapScaleBlock::default()),
+        },
+        BlockEntry {
+            block_type: "lowpass",
+            display_name: "Low-Pass Filter",
+            category: BlockCategory::Math,
+            description: "Exponential moving average: y = alpha*x + (1-alpha)*y_prev",
+            create: || Box::new(basic::LowPassBlock::default()),
+        },
         // I/O
         BlockEntry {
             block_type: "adc",
@@ -70,6 +98,13 @@ pub fn registry() -> Vec<BlockEntry> {
             category: BlockCategory::Io,
             description: "Read a hardware ADC channel and expose as a hardware input port",
             create: || Box::new(basic::AdcBlock::default()),
+        },
+        BlockEntry {
+            block_type: "pwm",
+            display_name: "PWM Output",
+            category: BlockCategory::Io,
+            description: "Write duty cycle to hardware PWM channel",
+            create: || Box::new(basic::PwmBlock::default()),
         },
         // PubSub
         BlockEntry {

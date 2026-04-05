@@ -353,6 +353,300 @@ impl ConfigurableBlock for PublishBlock {
 }
 
 // ---------------------------------------------------------------------------
+// PWM Output (hardware output)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PwmBlock {
+    pub channel_name: String,
+}
+
+impl Default for PwmBlock {
+    fn default() -> Self {
+        Self { channel_name: "pwm0".into() }
+    }
+}
+
+impl ConfigurableBlock for PwmBlock {
+    fn block_type(&self) -> &str { "pwm" }
+    fn display_name(&self) -> &str { "PWM Output" }
+    fn category(&self) -> BlockCategory { BlockCategory::Io }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![ConfigField { key: "channel_name".into(), label: "Channel Name".into(), kind: FieldKind::Text, default: self.channel_name.clone().into() }]
+    }
+
+    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+
+    fn apply_config(&mut self, config: &serde_json::Value) {
+        if let Some(s) = config.get("channel_name").and_then(|v| v.as_str()) { self.channel_name = s.into(); }
+    }
+
+    fn declared_channels(&self) -> Vec<DeclaredChannel> {
+        vec![DeclaredChannel { name: self.channel_name.clone(), direction: ChannelDirection::Output, kind: ChannelKind::Hardware }]
+    }
+
+    fn lower(&self) -> Result<LowerResult, DagError> {
+        let mut dag = Dag::new();
+        let node = dag.output(&self.channel_name, 0).or_else(|_| {
+            // If no upstream node, create a constant 0 and output that
+            let c = dag.constant(0.0)?;
+            dag.output(&self.channel_name, c)
+        })?;
+        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![], outputs: vec![("hw_out".into(), node)] } })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Subtract
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubtractBlock {
+    pub input_a_topic: String,
+    pub input_b_topic: String,
+    pub output_topic: String,
+}
+
+impl Default for SubtractBlock {
+    fn default() -> Self {
+        Self { input_a_topic: "sub/a".into(), input_b_topic: "sub/b".into(), output_topic: "sub/out".into() }
+    }
+}
+
+impl ConfigurableBlock for SubtractBlock {
+    fn block_type(&self) -> &str { "subtract" }
+    fn display_name(&self) -> &str { "Subtract" }
+    fn category(&self) -> BlockCategory { BlockCategory::Math }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![
+            ConfigField { key: "input_a_topic".into(), label: "Input A Topic".into(), kind: FieldKind::Text, default: self.input_a_topic.clone().into() },
+            ConfigField { key: "input_b_topic".into(), label: "Input B Topic".into(), kind: FieldKind::Text, default: self.input_b_topic.clone().into() },
+            ConfigField { key: "output_topic".into(), label: "Output Topic".into(), kind: FieldKind::Text, default: self.output_topic.clone().into() },
+        ]
+    }
+
+    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+
+    fn apply_config(&mut self, config: &serde_json::Value) {
+        if let Some(s) = config.get("input_a_topic").and_then(|v| v.as_str()) { self.input_a_topic = s.into(); }
+        if let Some(s) = config.get("input_b_topic").and_then(|v| v.as_str()) { self.input_b_topic = s.into(); }
+        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) { self.output_topic = s.into(); }
+    }
+
+    fn declared_channels(&self) -> Vec<DeclaredChannel> {
+        vec![
+            DeclaredChannel { name: self.input_a_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
+            DeclaredChannel { name: self.input_b_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
+            DeclaredChannel { name: self.output_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub },
+        ]
+    }
+
+    fn lower(&self) -> Result<LowerResult, DagError> {
+        let mut dag = Dag::new();
+        let a = dag.subscribe(&self.input_a_topic)?;
+        let b = dag.subscribe(&self.input_b_topic)?;
+        let diff = dag.sub(a, b)?;
+        dag.publish(&self.output_topic, diff)?;
+        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![("a".into(), a), ("b".into(), b)], outputs: vec![("out".into(), diff)] } })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Negate
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NegateBlock {
+    pub input_topic: String,
+    pub output_topic: String,
+}
+
+impl Default for NegateBlock {
+    fn default() -> Self {
+        Self { input_topic: "neg/in".into(), output_topic: "neg/out".into() }
+    }
+}
+
+impl ConfigurableBlock for NegateBlock {
+    fn block_type(&self) -> &str { "negate" }
+    fn display_name(&self) -> &str { "Negate" }
+    fn category(&self) -> BlockCategory { BlockCategory::Math }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![
+            ConfigField { key: "input_topic".into(), label: "Input Topic".into(), kind: FieldKind::Text, default: self.input_topic.clone().into() },
+            ConfigField { key: "output_topic".into(), label: "Output Topic".into(), kind: FieldKind::Text, default: self.output_topic.clone().into() },
+        ]
+    }
+
+    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+
+    fn apply_config(&mut self, config: &serde_json::Value) {
+        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) { self.input_topic = s.into(); }
+        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) { self.output_topic = s.into(); }
+    }
+
+    fn declared_channels(&self) -> Vec<DeclaredChannel> {
+        vec![
+            DeclaredChannel { name: self.input_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
+            DeclaredChannel { name: self.output_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub },
+        ]
+    }
+
+    fn lower(&self) -> Result<LowerResult, DagError> {
+        let mut dag = Dag::new();
+        let input = dag.subscribe(&self.input_topic)?;
+        let neg = dag.neg(input)?;
+        dag.publish(&self.output_topic, neg)?;
+        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![("in".into(), input)], outputs: vec![("out".into(), neg)] } })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Map/Scale — linear mapping: out = (in - in_min)/(in_max - in_min) * (out_max - out_min) + out_min
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MapScaleBlock {
+    pub input_topic: String,
+    pub output_topic: String,
+    pub in_min: f64,
+    pub in_max: f64,
+    pub out_min: f64,
+    pub out_max: f64,
+}
+
+impl Default for MapScaleBlock {
+    fn default() -> Self {
+        Self {
+            input_topic: "map/in".into(), output_topic: "map/out".into(),
+            in_min: 0.0, in_max: 1023.0, out_min: 0.0, out_max: 100.0,
+        }
+    }
+}
+
+impl ConfigurableBlock for MapScaleBlock {
+    fn block_type(&self) -> &str { "map_scale" }
+    fn display_name(&self) -> &str { "Map/Scale" }
+    fn category(&self) -> BlockCategory { BlockCategory::Math }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![
+            ConfigField { key: "input_topic".into(), label: "Input Topic".into(), kind: FieldKind::Text, default: self.input_topic.clone().into() },
+            ConfigField { key: "output_topic".into(), label: "Output Topic".into(), kind: FieldKind::Text, default: self.output_topic.clone().into() },
+            ConfigField { key: "in_min".into(), label: "Input Min".into(), kind: FieldKind::Float, default: self.in_min.into() },
+            ConfigField { key: "in_max".into(), label: "Input Max".into(), kind: FieldKind::Float, default: self.in_max.into() },
+            ConfigField { key: "out_min".into(), label: "Output Min".into(), kind: FieldKind::Float, default: self.out_min.into() },
+            ConfigField { key: "out_max".into(), label: "Output Max".into(), kind: FieldKind::Float, default: self.out_max.into() },
+        ]
+    }
+
+    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+
+    fn apply_config(&mut self, config: &serde_json::Value) {
+        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) { self.input_topic = s.into(); }
+        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) { self.output_topic = s.into(); }
+        if let Some(v) = config.get("in_min").and_then(|v| v.as_f64()) { self.in_min = v; }
+        if let Some(v) = config.get("in_max").and_then(|v| v.as_f64()) { self.in_max = v; }
+        if let Some(v) = config.get("out_min").and_then(|v| v.as_f64()) { self.out_min = v; }
+        if let Some(v) = config.get("out_max").and_then(|v| v.as_f64()) { self.out_max = v; }
+    }
+
+    fn declared_channels(&self) -> Vec<DeclaredChannel> {
+        vec![
+            DeclaredChannel { name: self.input_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
+            DeclaredChannel { name: self.output_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub },
+        ]
+    }
+
+    fn lower(&self) -> Result<LowerResult, DagError> {
+        // out = (in - in_min) / (in_max - in_min) * (out_max - out_min) + out_min
+        // Decompose: scale = (out_max - out_min) / (in_max - in_min)
+        //            out = (in - in_min) * scale + out_min
+        let in_range = self.in_max - self.in_min;
+        let out_range = self.out_max - self.out_min;
+        let scale = if in_range.abs() > 1e-15 { out_range / in_range } else { 0.0 };
+
+        let mut dag = Dag::new();
+        let input = dag.subscribe(&self.input_topic)?;
+        let in_min_c = dag.constant(self.in_min)?;
+        let shifted = dag.sub(input, in_min_c)?;       // in - in_min
+        let scale_c = dag.constant(scale)?;
+        let scaled = dag.mul(shifted, scale_c)?;        // (in - in_min) * scale
+        let out_min_c = dag.constant(self.out_min)?;
+        let result = dag.add(scaled, out_min_c)?;       // + out_min
+        dag.publish(&self.output_topic, result)?;
+        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![("in".into(), input)], outputs: vec![("out".into(), result)] } })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Low-Pass Filter — exponential moving average: y = alpha*x + (1-alpha)*y_prev
+// Note: since dag-core is stateless per-tick, this approximates by applying
+// alpha weighting to the input. Full IIR requires cross-tick state (future).
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LowPassBlock {
+    pub input_topic: String,
+    pub output_topic: String,
+    pub alpha: f64,
+}
+
+impl Default for LowPassBlock {
+    fn default() -> Self {
+        Self { input_topic: "lp/in".into(), output_topic: "lp/out".into(), alpha: 0.1 }
+    }
+}
+
+impl ConfigurableBlock for LowPassBlock {
+    fn block_type(&self) -> &str { "lowpass" }
+    fn display_name(&self) -> &str { "Low-Pass Filter" }
+    fn category(&self) -> BlockCategory { BlockCategory::Math }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![
+            ConfigField { key: "input_topic".into(), label: "Input Topic".into(), kind: FieldKind::Text, default: self.input_topic.clone().into() },
+            ConfigField { key: "output_topic".into(), label: "Output Topic".into(), kind: FieldKind::Text, default: self.output_topic.clone().into() },
+            ConfigField { key: "alpha".into(), label: "Alpha (0-1, lower = smoother)".into(), kind: FieldKind::Float, default: self.alpha.into() },
+        ]
+    }
+
+    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+
+    fn apply_config(&mut self, config: &serde_json::Value) {
+        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) { self.input_topic = s.into(); }
+        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) { self.output_topic = s.into(); }
+        if let Some(v) = config.get("alpha").and_then(|v| v.as_f64()) { self.alpha = v.clamp(0.0, 1.0); }
+    }
+
+    fn declared_channels(&self) -> Vec<DeclaredChannel> {
+        vec![
+            DeclaredChannel { name: self.input_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
+            DeclaredChannel { name: self.output_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub },
+        ]
+    }
+
+    fn lower(&self) -> Result<LowerResult, DagError> {
+        // y = alpha * x + (1 - alpha) * y_prev
+        // Since dag-core is stateless, we subscribe to both the input and the
+        // output topic (which holds the previous value via pubsub persistence).
+        let mut dag = Dag::new();
+        let x = dag.subscribe(&self.input_topic)?;
+        let y_prev = dag.subscribe(&self.output_topic)?; // previous output via pubsub
+        let alpha_c = dag.constant(self.alpha)?;
+        let one_minus_alpha = dag.constant(1.0 - self.alpha)?;
+        let ax = dag.mul(alpha_c, x)?;                   // alpha * x
+        let by = dag.mul(one_minus_alpha, y_prev)?;       // (1-alpha) * y_prev
+        let y = dag.add(ax, by)?;                         // alpha*x + (1-alpha)*y_prev
+        dag.publish(&self.output_topic, y)?;
+        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![("in".into(), x)], outputs: vec![("out".into(), y)] } })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Adc (hardware input)
 // ---------------------------------------------------------------------------
 
@@ -1117,5 +1411,193 @@ mod tests {
         assert_eq!(channels[0].direction, ChannelDirection::Input);
         assert_eq!(channels[1].name, "c/d");
         assert_eq!(channels[1].direction, ChannelDirection::Output);
+    }
+
+    // ===================================================================
+    // PWM Output block
+    // ===================================================================
+
+    #[test]
+    fn test_pwm_identity() {
+        let block = PwmBlock::default();
+        assert_eq!(block.block_type(), "pwm");
+        assert_eq!(block.display_name(), "PWM Output");
+        assert_eq!(block.category(), BlockCategory::Io);
+    }
+
+    #[test]
+    fn test_pwm_config_and_channels() {
+        let mut block = PwmBlock::default();
+        assert_eq!(block.channel_name, "pwm0");
+        block.apply_config(&serde_json::json!({"channel_name": "pwm1"}));
+        assert_eq!(block.channel_name, "pwm1");
+        let ch = block.declared_channels();
+        assert_eq!(ch.len(), 1);
+        assert_eq!(ch[0].direction, ChannelDirection::Output);
+        assert_eq!(ch[0].kind, ChannelKind::Hardware);
+    }
+
+    #[test]
+    fn test_pwm_lower() {
+        let block = PwmBlock::default();
+        let result = block.lower().unwrap();
+        assert!(!result.dag.is_empty());
+    }
+
+    // ===================================================================
+    // Subtract block
+    // ===================================================================
+
+    #[test]
+    fn test_subtract_identity() {
+        let block = SubtractBlock::default();
+        assert_eq!(block.block_type(), "subtract");
+        assert_eq!(block.display_name(), "Subtract");
+        assert_eq!(block.category(), BlockCategory::Math);
+    }
+
+    #[test]
+    fn test_subtract_evaluate() {
+        let block = SubtractBlock::default();
+        let result = block.lower().unwrap();
+        let ps = MockPubSub {
+            values: BTreeMap::from([
+                ("sub/a".into(), 10.0),
+                ("sub/b".into(), 3.0),
+            ]),
+        };
+        let mut values = vec![0.0; result.dag.len()];
+        let eval = result.dag.evaluate(&NullChannels, &ps, &mut values);
+        assert_eq!(eval.publishes.len(), 1);
+        assert_eq!(eval.publishes[0].0, "sub/out");
+        assert!((eval.publishes[0].1 - 7.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_subtract_config() {
+        let mut block = SubtractBlock::default();
+        block.apply_config(&serde_json::json!({"input_a_topic": "x", "input_b_topic": "y", "output_topic": "z"}));
+        assert_eq!(block.input_a_topic, "x");
+        let ch = block.declared_channels();
+        assert_eq!(ch.len(), 3);
+    }
+
+    // ===================================================================
+    // Negate block
+    // ===================================================================
+
+    #[test]
+    fn test_negate_identity() {
+        let block = NegateBlock::default();
+        assert_eq!(block.block_type(), "negate");
+        assert_eq!(block.display_name(), "Negate");
+        assert_eq!(block.category(), BlockCategory::Math);
+    }
+
+    #[test]
+    fn test_negate_evaluate() {
+        let block = NegateBlock::default();
+        let result = block.lower().unwrap();
+        let ps = MockPubSub {
+            values: BTreeMap::from([("neg/in".into(), 5.0)]),
+        };
+        let mut values = vec![0.0; result.dag.len()];
+        let eval = result.dag.evaluate(&NullChannels, &ps, &mut values);
+        assert_eq!(eval.publishes.len(), 1);
+        assert!((eval.publishes[0].1 - (-5.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_negate_config() {
+        let mut block = NegateBlock::default();
+        block.apply_config(&serde_json::json!({"input_topic": "a", "output_topic": "b"}));
+        assert_eq!(block.input_topic, "a");
+        assert_eq!(block.output_topic, "b");
+    }
+
+    // ===================================================================
+    // Map/Scale block
+    // ===================================================================
+
+    #[test]
+    fn test_map_scale_identity() {
+        let block = MapScaleBlock::default();
+        assert_eq!(block.block_type(), "map_scale");
+        assert_eq!(block.display_name(), "Map/Scale");
+        assert_eq!(block.category(), BlockCategory::Math);
+    }
+
+    #[test]
+    fn test_map_scale_evaluate_midpoint() {
+        // in_min=0, in_max=1024, out_min=0, out_max=100
+        // input=512 → output=50
+        let mut block = MapScaleBlock::default();
+        block.apply_config(&serde_json::json!({
+            "in_min": 0.0, "in_max": 1024.0,
+            "out_min": 0.0, "out_max": 100.0,
+            "input_topic": "raw", "output_topic": "scaled"
+        }));
+        let result = block.lower().unwrap();
+        let ps = MockPubSub {
+            values: BTreeMap::from([("raw".into(), 512.0)]),
+        };
+        let mut values = vec![0.0; result.dag.len()];
+        let eval = result.dag.evaluate(&NullChannels, &ps, &mut values);
+        assert_eq!(eval.publishes.len(), 1);
+        assert!((eval.publishes[0].1 - 50.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_map_scale_config() {
+        let block = MapScaleBlock::default();
+        let schema = block.config_schema();
+        assert!(schema.len() >= 6); // in_min, in_max, out_min, out_max, input_topic, output_topic
+        assert!(schema.iter().any(|f| f.key == "in_min"));
+        assert!(schema.iter().any(|f| f.key == "out_max"));
+    }
+
+    // ===================================================================
+    // Low-pass filter block
+    // ===================================================================
+
+    #[test]
+    fn test_lowpass_identity() {
+        let block = LowPassBlock::default();
+        assert_eq!(block.block_type(), "lowpass");
+        assert_eq!(block.display_name(), "Low-Pass Filter");
+        assert_eq!(block.category(), BlockCategory::Math);
+    }
+
+    #[test]
+    fn test_lowpass_config() {
+        let mut block = LowPassBlock::default();
+        assert!(block.alpha > 0.0 && block.alpha <= 1.0);
+        block.apply_config(&serde_json::json!({"alpha": 0.5}));
+        assert_eq!(block.alpha, 0.5);
+    }
+
+    #[test]
+    fn test_lowpass_lower() {
+        let block = LowPassBlock::default();
+        let result = block.lower().unwrap();
+        assert!(!result.dag.is_empty());
+        // Should have at least subscribe + some math + publish
+        assert!(result.dag.len() >= 3);
+    }
+
+    // ===================================================================
+    // Registry includes all new blocks
+    // ===================================================================
+
+    #[test]
+    fn test_registry_has_new_blocks() {
+        use crate::registry;
+        let descs = registry::block_descriptors();
+        let types: Vec<&str> = descs.iter().map(|d| d.block_type.as_str()).collect();
+        assert!(types.contains(&"pwm"), "missing pwm");
+        assert!(types.contains(&"subtract"), "missing subtract");
+        assert!(types.contains(&"negate"), "missing negate");
+        assert!(types.contains(&"map_scale"), "missing map_scale");
+        assert!(types.contains(&"lowpass"), "missing lowpass");
     }
 }
