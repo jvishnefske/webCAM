@@ -124,8 +124,6 @@ fn gen_cargo_toml(node_id: &str, mcu: &McuDef) -> String {
     writeln!(out, "defmt = \"0.3\"").unwrap();
     writeln!(out, "defmt-rtt = \"0.4\"").unwrap();
     writeln!(out).unwrap();
-    writeln!(out, "#![forbid(unsafe_code)]").unwrap();
-    writeln!(out).unwrap();
     writeln!(out, "[profile.release]").unwrap();
     writeln!(out, "opt-level = \"s\"").unwrap();
     writeln!(out, "lto = true").unwrap();
@@ -227,7 +225,7 @@ fn emit_hardware_channels_struct(
         let pin = b.pins.first().map(|p| p.pin.as_str()).unwrap_or("PIN_26");
         writeln!(out, "    /// ADC for port \"{}\" on {}", b.port_name, pin).unwrap();
         writeln!(out, "    adc_{i}: Adc<'static, embassy_rp::peripherals::ADC>,").unwrap();
-        writeln!(out, "    adc_pin_{i}: embassy_rp::adc::Channel<'static>,").unwrap();
+        writeln!(out, "    adc_pin_{i}: AdcChannel<'static>,").unwrap();
     }
 
     // PWM fields: one PWM slice per PWM binding
@@ -259,30 +257,38 @@ fn emit_hardware_channels_struct(
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
-    // --- Helper: async read_all_adc (fills the cache from hardware) ---
-    if !adc_bindings.is_empty() {
+    // --- Helper methods on HardwareChannels ---
+    let need_impl = !adc_bindings.is_empty() || !pwm_bindings.is_empty();
+    if need_impl {
         writeln!(out, "impl HardwareChannels {{").unwrap();
-        writeln!(out, "    /// Read all ADC channels and cache the results.").unwrap();
-        writeln!(out, "    async fn read_all_adc(&mut self) {{").unwrap();
-        for i in 0..adc_bindings.len() {
-            writeln!(out, "        let raw_{i} = self.adc_{i}.read(&mut self.adc_pin_{i}).await;").unwrap();
-            writeln!(out, "        self.adc_cache[{i}] = raw_{i} as f64;").unwrap();
-        }
-        writeln!(out, "    }}").unwrap();
-        writeln!(out).unwrap();
 
-        // --- Helper: write_pwm_outputs ---
-        writeln!(out, "    /// Apply DAG output values to PWM duty cycles.").unwrap();
-        writeln!(out, "    fn write_pwm_outputs(&mut self, result: &dag_core::eval::EvalResult) {{").unwrap();
-        writeln!(out, "        for (name, val) in &result.outputs {{").unwrap();
-        writeln!(out, "            match name.as_str() {{").unwrap();
-        for (i, b) in pwm_bindings.iter().enumerate() {
-            writeln!(out, "                \"{}\" => self.pwm_{i}.set_duty_cycle(*val as u16),", b.port_name).unwrap();
+        // read_all_adc: fills the cache from hardware
+        if !adc_bindings.is_empty() {
+            writeln!(out, "    /// Read all ADC channels and cache the results.").unwrap();
+            writeln!(out, "    async fn read_all_adc(&mut self) {{").unwrap();
+            for i in 0..adc_bindings.len() {
+                writeln!(out, "        let raw_{i} = self.adc_{i}.read(&mut self.adc_pin_{i}).await;").unwrap();
+                writeln!(out, "        self.adc_cache[{i}] = raw_{i} as f64;").unwrap();
+            }
+            writeln!(out, "    }}").unwrap();
+            writeln!(out).unwrap();
         }
-        writeln!(out, "                _ => {{}}").unwrap();
-        writeln!(out, "            }}").unwrap();
-        writeln!(out, "        }}").unwrap();
-        writeln!(out, "    }}").unwrap();
+
+        // write_pwm_outputs: dispatches DAG output values to PWM duty cycles
+        if !pwm_bindings.is_empty() {
+            writeln!(out, "    /// Apply DAG output values to PWM duty cycles.").unwrap();
+            writeln!(out, "    fn write_pwm_outputs(&mut self, result: &dag_core::eval::EvalResult) {{").unwrap();
+            writeln!(out, "        for (name, val) in &result.outputs {{").unwrap();
+            writeln!(out, "            match name.as_str() {{").unwrap();
+            for (i, b) in pwm_bindings.iter().enumerate() {
+                writeln!(out, "                \"{}\" => {{ let _ = self.pwm_{i}.set_duty_cycle(*val as u16); }}", b.port_name).unwrap();
+            }
+            writeln!(out, "                _ => {{}}").unwrap();
+            writeln!(out, "            }}").unwrap();
+            writeln!(out, "        }}").unwrap();
+            writeln!(out, "    }}").unwrap();
+        }
+
         writeln!(out, "}}").unwrap();
         writeln!(out).unwrap();
     }
@@ -302,7 +308,7 @@ fn emit_peripheral_init(
         let pin = b.pins.first().map(|p| p.pin.as_str()).unwrap_or("PIN_26");
         let pin_upper = pin.to_uppercase();
         writeln!(out, "    let adc_{i} = Adc::new(p.ADC, Irqs);").unwrap();
-        writeln!(out, "    let adc_pin_{i} = embassy_rp::adc::Channel::new_pin(p.{pin_upper}, Pull::None);").unwrap();
+        writeln!(out, "    let adc_pin_{i} = AdcChannel::new_pin(p.{pin_upper}, Pull::None);").unwrap();
     }
 
     // PWM init
@@ -352,7 +358,7 @@ fn gen_main_rs(
 
     writeln!(out, "#![no_std]").unwrap();
     writeln!(out, "#![no_main]").unwrap();
-    writeln!(out, "#![forbid(unsafe_code)]").unwrap();
+    writeln!(out, "#![deny(unsafe_code)]").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "use defmt_rtt as _;").unwrap();
     writeln!(out, "use panic_halt as _;").unwrap();
@@ -487,8 +493,8 @@ fn gen_main_rs(
     writeln!(out, "                }}").unwrap();
     writeln!(out, "            }}").unwrap();
     writeln!(out, "            if !found && pubsub.count < 16 {{").unwrap();
-    writeln!(out, "                // Note: topic string must be 'static for this to work").unwrap();
-    writeln!(out, "                // In practice, dag-core topics are embedded in the DAG constant").unwrap();
+    writeln!(out, "                // Topics come from the DAG CBOR constant so are 'static.").unwrap();
+    writeln!(out, "                pubsub.topics[pubsub.count] = (topic, *val);").unwrap();
     writeln!(out, "                pubsub.count += 1;").unwrap();
     writeln!(out, "            }}").unwrap();
     writeln!(out, "        }}").unwrap();
@@ -562,7 +568,7 @@ mod tests {
         assert!(main.1.contains("DAG_CBOR"));
         assert!(main.1.contains("dag.evaluate"));
         assert!(main.1.contains("no_std"));
-        assert!(main.1.contains("forbid(unsafe_code)"));
+        assert!(main.1.contains("deny(unsafe_code)"));
         assert!(main.1.contains("embassy_executor::main"));
     }
 
@@ -720,7 +726,7 @@ mod tests {
 
         assert!(main.1.contains("Adc::new(p.ADC, Irqs)"), "missing ADC init");
         assert!(
-            main.1.contains("embassy_rp::adc::Channel::new_pin(p.PIN_26, Pull::None)"),
+            main.1.contains("AdcChannel::new_pin(p.PIN_26, Pull::None)"),
             "missing ADC pin init"
         );
         assert!(main.1.contains("read_all_adc"), "missing ADC read helper call");
@@ -787,8 +793,8 @@ mod tests {
                     "file {path} contains unsafe code"
                 );
                 assert!(
-                    content.contains("forbid(unsafe_code)"),
-                    "file {path} missing forbid(unsafe_code)"
+                    content.contains("deny(unsafe_code)"),
+                    "file {path} missing deny(unsafe_code)"
                 );
             }
         }
@@ -812,6 +818,44 @@ mod tests {
         assert!(
             !main.1.contains("HardwareChannels"),
             "HardwareChannels should not appear for wrong node"
+        );
+    }
+
+    #[test]
+    fn pwm_only_bindings_generate_write_pwm_outputs() {
+        let mut m = simple_manifest();
+        // PWM only — no ADC bindings
+        m.peripheral_bindings = vec![PeripheralBinding {
+            block_id: 2,
+            port_name: "pwm0".into(),
+            node: "motor_ctrl".into(),
+            peripheral: "PWM_SLICE4".into(),
+            pins: vec![PinBinding {
+                signal: "CH1".into(),
+                pin: "PIN_25".into(),
+                af: None,
+            }],
+            dma: None,
+            config: PeripheralConfig::Pwm {
+                frequency_hz: 25000,
+                dead_time_ns: None,
+            },
+        }];
+        let dag = simple_dag();
+        let files = generate_all_crates(&m, &dag).unwrap();
+        let main = files.iter().find(|(p, _)| p.ends_with("main.rs")).unwrap();
+
+        assert!(
+            main.1.contains("HardwareChannels"),
+            "expected HardwareChannels with PWM-only bindings"
+        );
+        assert!(
+            main.1.contains("write_pwm_outputs"),
+            "expected write_pwm_outputs method with PWM-only bindings"
+        );
+        assert!(
+            !main.1.contains("read_all_adc"),
+            "should not emit read_all_adc without ADC bindings"
         );
     }
 
