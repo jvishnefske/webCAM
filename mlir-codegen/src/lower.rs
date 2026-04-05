@@ -1498,7 +1498,7 @@ mod tests {
         let ops = &module.funcs[0].ops;
         assert_eq!(ops.len(), 2, "expected 2 ops (zero + constant), got {}", ops.len());
         // The second op should be the constant(42.0)
-        assert_eq!(ops[1].name, "arith.constant");
+        assert_eq!(ops[1].kind, crate::ir::IrOpKind::Arith(crate::ir::ArithOp::Constant));
         assert_eq!(
             ops[1].attrs.get("value"),
             Some(&crate::ir::Attr::F64(42.0))
@@ -1531,20 +1531,21 @@ mod tests {
         // Ops: zero(0.0), constant(5.0), constant(2.0 factor), mulf
         assert_eq!(ops.len(), 4, "expected 4 ops, got {}", ops.len());
 
+        use crate::ir::{ArithOp, IrOpKind};
         // Op 0: zero constant
-        assert_eq!(ops[0].name, "arith.constant");
+        assert_eq!(ops[0].kind, IrOpKind::Arith(ArithOp::Constant));
         assert_eq!(ops[0].attrs.get("value"), Some(&crate::ir::Attr::F64(0.0)));
 
         // Op 1: constant(5.0)
-        assert_eq!(ops[1].name, "arith.constant");
+        assert_eq!(ops[1].kind, IrOpKind::Arith(ArithOp::Constant));
         assert_eq!(ops[1].attrs.get("value"), Some(&crate::ir::Attr::F64(5.0)));
 
         // Op 2: constant(2.0) — gain factor
-        assert_eq!(ops[2].name, "arith.constant");
+        assert_eq!(ops[2].kind, IrOpKind::Arith(ArithOp::Constant));
         assert_eq!(ops[2].attrs.get("value"), Some(&crate::ir::Attr::F64(2.0)));
 
         // Op 3: mulf — should wire constant(5) and constant(2)
-        assert_eq!(ops[3].name, "arith.mulf");
+        assert_eq!(ops[3].kind, IrOpKind::Arith(ArithOp::Mulf));
         assert_eq!(ops[3].operands.len(), 2);
         // mulf operand 0 = result of constant(5.0), operand 1 = result of constant(2.0)
         assert_eq!(ops[3].operands[0], ops[1].results[0]);
@@ -1588,24 +1589,15 @@ mod tests {
         let module = lower_graph_ir(&snap).unwrap();
         let ops = &module.funcs[0].ops;
 
-        // Collect op names for verification
-        let op_names: Vec<&str> = ops.iter().map(|op| op.name.as_str()).collect();
-        assert!(
-            op_names.contains(&"dataflow.adc_read"),
-            "expected adc_read op, got: {op_names:?}"
-        );
-        assert!(
-            op_names.contains(&"arith.mulf"),
-            "expected mulf op for gain, got: {op_names:?}"
-        );
-        assert!(
-            op_names.contains(&"dataflow.pwm_write"),
-            "expected pwm_write op, got: {op_names:?}"
-        );
+        use crate::ir::{ArithOp, DataflowOp, IrOpKind};
+        // Verify expected ops exist by kind
+        assert!(ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::AdcRead)), "expected adc_read");
+        assert!(ops.iter().any(|op| op.kind == IrOpKind::Arith(ArithOp::Mulf)), "expected mulf");
+        assert!(ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::PwmWrite)), "expected pwm_write");
 
         // The pwm_write should consume the mulf result
-        let pwm_op = ops.iter().find(|op| op.name == "dataflow.pwm_write").unwrap();
-        let mulf_op = ops.iter().find(|op| op.name == "arith.mulf").unwrap();
+        let pwm_op = ops.iter().find(|op| op.kind == IrOpKind::Dataflow(DataflowOp::PwmWrite)).unwrap();
+        let mulf_op = ops.iter().find(|op| op.kind == IrOpKind::Arith(ArithOp::Mulf)).unwrap();
         assert_eq!(
             pwm_op.operands[0], mulf_op.results[0],
             "pwm_write should consume the gain output"
@@ -1648,13 +1640,14 @@ mod tests {
         let module = lower_graph_ir(&snap).unwrap();
         let ops = &module.funcs[0].ops;
 
-        let sub_op = ops.iter().find(|op| op.name == "func.call @subscribe").unwrap();
+        use crate::ir::{FuncOp, IrOpKind};
+        let sub_op = ops.iter().find(|op| op.kind == IrOpKind::Func(FuncOp::Call { callee: "subscribe".into() })).unwrap();
         assert_eq!(
             sub_op.attrs.get("topic"),
             Some(&crate::ir::Attr::Str("sensor/temp".to_string()))
         );
 
-        let pub_op = ops.iter().find(|op| op.name == "func.call @publish").unwrap();
+        let pub_op = ops.iter().find(|op| op.kind == IrOpKind::Func(FuncOp::Call { callee: "publish".into() })).unwrap();
         assert_eq!(
             pub_op.attrs.get("topic"),
             Some(&crate::ir::Attr::Str("actuator/fan".to_string()))

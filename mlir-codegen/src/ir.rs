@@ -105,8 +105,6 @@ impl IrOpKind {
 pub struct IrOp {
     /// Typed operation kind (dialect-namespaced enum).
     pub kind: IrOpKind,
-    /// Op name string (derived from kind — kept for backward compat during migration).
-    pub name: String,
     /// Input SSA values consumed by this op.
     pub operands: Vec<ValueId>,
     /// Output SSA values produced by this op.
@@ -238,7 +236,6 @@ impl IrBuilder {
             .collect();
         let op = IrOp {
             kind: IrOpKind::Custom(name.to_string()),
-            name: name.to_string(),
             operands: operands.to_vec(),
             results: results.clone(),
             attrs: attr_map,
@@ -258,7 +255,6 @@ impl IrBuilder {
         attrs: &[(&str, Attr)],
         num_results: usize,
     ) -> Vec<ValueId> {
-        let name = kind.mlir_name();
         let results: Vec<ValueId> = (0..num_results).map(|_| self.fresh_value()).collect();
         let result_types = vec![IrType::F64; num_results];
         let attr_map: HashMap<String, Attr> = attrs
@@ -267,7 +263,6 @@ impl IrBuilder {
             .collect();
         let op = IrOp {
             kind,
-            name,
             operands: operands.to_vec(),
             results: results.clone(),
             attrs: attr_map,
@@ -440,7 +435,6 @@ mod tests {
 
         let op = &module.funcs[0].ops[0];
         assert_eq!(op.kind, IrOpKind::Arith(ArithOp::Constant));
-        assert_eq!(op.name, "arith.constant");
         assert_eq!(op.operands.len(), 0);
         assert_eq!(op.results.len(), 1);
         assert_eq!(op.attrs.get("value"), Some(&Attr::F64(42.0)));
@@ -557,7 +551,7 @@ mod tests {
 
         let op = &module.funcs[0].ops[1];
         assert_eq!(op.kind, IrOpKind::Custom("my.custom_op".into()));
-        assert_eq!(op.name, "my.custom_op");
+        assert_eq!(op.kind, IrOpKind::Custom("my.custom_op".into()));
         assert_eq!(op.operands, vec![input]);
         assert_eq!(op.results.len(), 2);
         assert_eq!(op.attrs.get("alpha"), Some(&Attr::F64(0.5)));
