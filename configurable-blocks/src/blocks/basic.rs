@@ -1,4 +1,4 @@
-//! Basic configurable blocks: constant, add, multiply, clamp, subscribe, publish.
+//! Basic configurable blocks: constant, add, multiply, clamp, subscribe, publish, adc.
 
 use dag_core::op::{Dag, DagError};
 use serde::{Deserialize, Serialize};
