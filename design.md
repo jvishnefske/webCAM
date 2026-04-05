@@ -311,6 +311,123 @@ Three frontend paradigms share the same `GraphSnapshot` IR and codegen pipeline:
 
 ---
 
+## Part VII: Configurable Blocks (configurable-blocks)
+
+Higher-order blocks with schema-driven configuration, topic-based wiring, and DAG lowering.
+
+### ConfigurableBlock Trait
+
+```rust
+pub trait ConfigurableBlock {
+    fn block_type(&self) -> &str;
+    fn display_name(&self) -> &str;
+    fn category(&self) -> BlockCategory;
+    fn config_schema(&self) -> Vec<ConfigField>;
+    fn config_json(&self) -> serde_json::Value;
+    fn apply_config(&mut self, config: &serde_json::Value);
+    fn declared_channels(&self) -> Vec<DeclaredChannel>;
+    fn lower(&self) -> Result<LowerResult, DagError>;
+}
+```
+
+### Block Palette (16 blocks)
+
+| Category | Blocks |
+|----------|--------|
+| Math | Constant, Gain, Add, Subtract, Multiply, Clamp, Negate, Map/Scale, Low-Pass Filter |
+| Control | PID Controller |
+| I/O | ADC Input, PWM Output |
+| PubSub | Subscribe, Publish, PubSub Bridge |
+
+### Deployment Codegen
+
+`codegen::generate_all_crates(manifest, dag)` produces complete Embassy firmware crates:
+- `Cargo.toml` with correct Embassy HAL per MCU family
+- `.cargo/config.toml` with target triple + probe-rs runner
+- `memory.x` linker script from MCU inventory memory regions
+- `src/main.rs` with Embassy async main, CBOR-embedded DAG, ticker loop
+- All generated code is `#![forbid(unsafe_code)]`
+
+### Deployment Profile
+
+`DeploymentProfile` maps logical channels to physical hardware:
+- `ChannelMap`: Remap pubsub topic names for deployment context
+- `node_assignments`: Block → MCU node mapping for multi-board deployments
+- `boards`: List of `(node_id, mcu_family)` pairs
+- Validation: missing peripheral bindings, unknown MCU families
+
+---
+
+## Part VIII: Combined Frontend (hil/combined-frontend)
+
+Single Leptos 0.7 CSR app consolidating HIL dashboard + DAG editor + deployment panel. Served from MCU flash or native-server.
+
+### Architecture
+
+- **All safe Rust** — `#![forbid(unsafe_code)]`, no C FFI
+- **Shared types** — `module-traits` and `dag-core` types used directly (no TS mirror types)
+- **Signal-based state** — `WriteSignal<Vec<Request>>` request queue, `AppContext` via Leptos context
+- **In-browser evaluation** — `dag.evaluate()` runs in WASM, no MCU needed
+
+### Tabs
+
+| Tab | Purpose |
+|-----|---------|
+| Buses | I2C bus topology and device enumeration |
+| Telemetry | Temperature, power, fan readings (2s polling) |
+| I2C Console | Manual read/write with transaction log |
+| Firmware | OTA update with ack-based flow control |
+| DAG Editor | Block palette, SVG canvas, config panel, evaluate + deploy |
+| Deploy | Generate firmware crates from deployment config |
+
+### Build Pipeline
+
+```
+trunk build --release → dist/ (WASM + JS + CSS)
+    ↓
+board-support-pico2/build.rs → gzip → include_bytes!
+    ↓
+firmware binary with embedded frontend (~180 KB gzipped)
+```
+
+---
+
+## Part IX: Native Server (hil/native-server)
+
+Host-side development server matching the Pico2 HTTP + WebSocket API:
+
+- Axum HTTP server serving `www-cam/` and `www-dataflow/` frontends
+- DAG API: POST /api/dag, POST /api/tick, GET /api/pubsub, GET /api/status
+- WebSocket CBOR: I2C bus commands (tags 1-35) with simulated buses
+- Mock HAL: `WasmSimPeripherals` with I2C, serial, socket simulation
+- CLI: `cargo run -p native-server -- --port 3000 --www-dir www-cam`
+
+---
+
+## CI / Build System
+
+### Single Source of Truth
+
+CI uses Makefile targets directly — no duplicated commands:
+
+```yaml
+- run: make lint    # cargo clippy with WORKSPACE_EXCLUDES
+- run: make test    # cargo llvm-cov with coverage threshold
+- run: make wasm    # wasm-pack for rustcam + rustsim
+- run: make ts      # npm typecheck + test + build for both frontends
+```
+
+### Crate Structure
+
+```
+crates/rustcam/     — CAM WASM (STL/SVG → G-code)
+crates/rustsim/     — Dataflow WASM (block editor, simulation)
+www-cam/            — CAM TypeScript frontend
+www-dataflow/       — Dataflow TypeScript frontend
+```
+
+---
+
 ## Non-Goals (Out of Scope)
 - Plasma cutter profile
 - Machine communication / serial connection
