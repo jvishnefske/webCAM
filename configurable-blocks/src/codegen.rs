@@ -50,9 +50,25 @@ pub fn generate_node_crate(
 }
 
 /// Generate firmware crates for all nodes in a deployment manifest.
+///
+/// Accepts an optional `per_node_dags` map for partitioned DAGs. When
+/// provided, each node receives only its own DAG subset. When `None`,
+/// the single `dag` is used for all nodes (legacy single-board behavior).
 pub fn generate_all_crates(
     manifest: &DeploymentManifest,
     dag: &Dag,
+) -> Result<GeneratedFiles, String> {
+    generate_all_crates_partitioned(manifest, dag, &std::collections::HashMap::new())
+}
+
+/// Generate firmware crates with per-node DAG partitioning.
+///
+/// Each node receives `per_node_dags[node_id]` if available, otherwise
+/// falls back to `dag`.
+pub fn generate_all_crates_partitioned(
+    manifest: &DeploymentManifest,
+    dag: &Dag,
+    per_node_dags: &std::collections::HashMap<String, Dag>,
 ) -> Result<GeneratedFiles, String> {
     let mut all_files = Vec::new();
 
@@ -66,7 +82,10 @@ pub fn generate_all_crates(
             .cloned()
             .collect();
 
-        let mut files = generate_node_crate(&node.id, &mcu, &node_tasks, dag, manifest)?;
+        // Use the partitioned DAG for this node if available, otherwise the full DAG.
+        let node_dag = per_node_dags.get(&node.id).unwrap_or(dag);
+
+        let mut files = generate_node_crate(&node.id, &mcu, &node_tasks, node_dag, manifest)?;
         all_files.append(&mut files);
     }
 
