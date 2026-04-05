@@ -238,6 +238,9 @@ export function initDataflow(): void {
   // Set up target selection checkboxes
   setupTargetCheckboxes();
 
+  // Multi-board management
+  setupBoardManager();
+
   // Sidebar block palette
   setupSidebarPalette();
 
@@ -492,6 +495,164 @@ function setupSidebarPalette(): void {
   render('');
   filterInput?.addEventListener('input', () => render(filterInput.value));
 }
+
+// ── Multi-board management ─────────────────────────────────────────
+
+const MCU_FAMILIES = [
+  { id: 'Host', label: 'Host (Simulation)' },
+  { id: 'Rp2040', label: 'RP2040 (Pico)' },
+  { id: 'Stm32f4', label: 'STM32F4' },
+  { id: 'Stm32g0b1', label: 'STM32G0B1' },
+  { id: 'Esp32c3', label: 'ESP32-C3' },
+] as const;
+
+interface BoardDef {
+  nodeId: string;
+  mcuFamily: string;
+}
+
+/** Active boards in the current deployment profile. */
+const deployBoards: BoardDef[] = [];
+/** Block-id to node-id assignment. */
+const blockAssignments: Map<number, string> = new Map();
+
+function setupBoardManager(): void {
+  const listEl = document.getElementById('df-board-list');
+  const nameInput = document.getElementById('df-board-name') as HTMLInputElement | null;
+  const mcuSelect = document.getElementById('df-board-mcu') as HTMLSelectElement | null;
+  const addBtn = document.getElementById('df-board-add') as HTMLButtonElement | null;
+  const assignEl = document.getElementById('df-block-assignments');
+
+  if (!listEl || !nameInput || !mcuSelect || !addBtn || !assignEl) return;
+
+  // Populate MCU family dropdown
+  mcuSelect.textContent = '';
+  for (const fam of MCU_FAMILIES) {
+    const opt = document.createElement('option');
+    opt.value = fam.id;
+    opt.textContent = fam.label;
+    mcuSelect.appendChild(opt);
+  }
+
+  // Add board button
+  addBtn.addEventListener('click', () => {
+    const nodeId = nameInput.value.trim();
+    if (!nodeId) return;
+    const mcuFamily = mcuSelect.value;
+    if (deployBoards.some(b => b.nodeId === nodeId)) return; // no dupes
+    deployBoards.push({ nodeId, mcuFamily });
+    nameInput.value = '';
+    renderBoardList();
+    renderBlockAssignments();
+  });
+
+  function renderBoardList(): void {
+    if (!listEl) return;
+    listEl.textContent = '';
+    if (deployBoards.length === 0) {
+      const hint = document.createElement('span');
+      hint.className = 'text-text-dim text-[11px]';
+      hint.textContent = 'No boards added (single-board mode)';
+      listEl.appendChild(hint);
+      return;
+    }
+    for (let i = 0; i < deployBoards.length; i++) {
+      const b = deployBoards[i];
+      const row = document.createElement('div');
+      row.className = 'flex items-center justify-between py-0.5';
+      const info = document.createElement('span');
+      info.textContent = `${b.nodeId} (${b.mcuFamily})`;
+      row.appendChild(info);
+      const removeBtn = document.createElement('button');
+      removeBtn.textContent = '\u00d7';
+      removeBtn.className = 'text-text-dim hover:text-danger text-sm leading-none ml-2 cursor-pointer';
+      removeBtn.addEventListener('click', () => {
+        deployBoards.splice(i, 1);
+        // Remove assignments to this board
+        for (const [blockId, nodeId] of blockAssignments) {
+          if (nodeId === b.nodeId) blockAssignments.delete(blockId);
+        }
+        renderBoardList();
+        renderBlockAssignments();
+      });
+      row.appendChild(removeBtn);
+      listEl.appendChild(row);
+    }
+  }
+
+  function renderBlockAssignments(): void {
+    if (!assignEl || !mgr) return;
+    assignEl.textContent = '';
+
+    if (deployBoards.length === 0) return;
+
+    const snap = mgr.snapshot();
+    if (!snap || snap.blocks.length === 0) {
+      const hint = document.createElement('span');
+      hint.className = 'text-text-dim text-[11px]';
+      hint.textContent = 'Add blocks to assign them to boards';
+      assignEl.appendChild(hint);
+      return;
+    }
+
+    const header = document.createElement('b');
+    header.textContent = 'Block Assignments';
+    header.className = 'text-xs block mb-1';
+    assignEl.appendChild(header);
+
+    for (const block of snap.blocks) {
+      const row = document.createElement('div');
+      row.className = 'flex items-center justify-between py-0.5 gap-1';
+
+      const label = document.createElement('span');
+      label.className = 'truncate flex-1 text-[11px]';
+      label.textContent = `#${block.id} ${block.name}`;
+      row.appendChild(label);
+
+      const select = document.createElement('select');
+      select.className = 'bg-bg border border-border text-text px-1 py-0.5 rounded text-[11px] focus:outline-none focus:border-accent';
+
+      const noneOpt = document.createElement('option');
+      noneOpt.value = '';
+      noneOpt.textContent = '(none)';
+      select.appendChild(noneOpt);
+
+      for (const board of deployBoards) {
+        const opt = document.createElement('option');
+        opt.value = board.nodeId;
+        opt.textContent = board.nodeId;
+        if (blockAssignments.get(block.id) === board.nodeId) {
+          opt.selected = true;
+        }
+        select.appendChild(opt);
+      }
+
+      select.addEventListener('change', () => {
+        if (select.value) {
+          blockAssignments.set(block.id, select.value);
+        } else {
+          blockAssignments.delete(block.id);
+        }
+      });
+
+      row.appendChild(select);
+      assignEl.appendChild(row);
+    }
+  }
+
+  renderBoardList();
+
+  // Re-render assignments when the graph changes
+  if (editor) {
+    const prevOnSelect = editor.onSelect;
+    editor.onSelect = (blockId, snap) => {
+      prevOnSelect?.(blockId, snap);
+      renderBlockAssignments();
+    };
+  }
+}
+
+// ── Target selection ──────────────────────────────────────────────
 
 const TARGET_OPTIONS = [
   { id: 'Host', label: 'Host (Simulation)', checked: true },

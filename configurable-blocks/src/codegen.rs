@@ -872,4 +872,143 @@ mod tests {
             "PWM top value should be derived from frequency_hz"
         );
     }
+
+    // ── Multi-board E2E test ────────────────────────���───────────────────
+
+    #[test]
+    fn multi_board_profile_generates_two_firmware_crates() {
+        use crate::deployment_profile::DeploymentProfile;
+
+        // 1. Set up a profile with 2 boards.
+        let mut profile = DeploymentProfile::new("two_board_test");
+        profile.add_board("motor_ctrl", "Rp2040");
+        profile.add_board("sensor_hub", "Stm32f4");
+
+        // 2. Assign blocks to boards.
+        profile.assign_block(0, "motor_ctrl"); // block 0 on Rp2040
+        profile.assign_block(1, "sensor_hub"); // block 1 on Stm32f4
+
+        // 3. Add peripheral bindings per board.
+        profile.peripheral_assignments.push(PeripheralBinding {
+            block_id: 0,
+            port_name: "adc0".into(),
+            node: "motor_ctrl".into(),
+            peripheral: "ADC".into(),
+            pins: vec![PinBinding {
+                signal: "CH0".into(),
+                pin: "PIN_26".into(),
+                af: None,
+            }],
+            dma: None,
+            config: PeripheralConfig::Adc {
+                channel: 0,
+                resolution_bits: 12,
+                sample_time: 3,
+            },
+        });
+        profile.peripheral_assignments.push(PeripheralBinding {
+            block_id: 1,
+            port_name: "adc1".into(),
+            node: "sensor_hub".into(),
+            peripheral: "ADC1".into(),
+            pins: vec![PinBinding {
+                signal: "IN0".into(),
+                pin: "PA0".into(),
+                af: None,
+            }],
+            dma: None,
+            config: PeripheralConfig::Adc {
+                channel: 0,
+                resolution_bits: 12,
+                sample_time: 3,
+            },
+        });
+
+        // 4. Convert profile → manifest.
+        let manifest = profile.to_manifest(100.0);
+        assert_eq!(manifest.topology.nodes.len(), 2);
+        assert_eq!(manifest.tasks.len(), 2);
+
+        // 5. Generate firmware with a simple DAG.
+        let dag = simple_dag();
+        let files = generate_all_crates(&manifest, &dag).unwrap();
+
+        // 6. Verify 2 different firmware crates were produced.
+        let motor_files: Vec<_> = files
+            .iter()
+            .filter(|(p, _)| p.starts_with("firmware-motor_ctrl/"))
+            .collect();
+        let sensor_files: Vec<_> = files
+            .iter()
+            .filter(|(p, _)| p.starts_with("firmware-sensor_hub/"))
+            .collect();
+
+        assert_eq!(
+            motor_files.len(),
+            5,
+            "expected 5 files for motor_ctrl crate"
+        );
+        assert_eq!(
+            sensor_files.len(),
+            5,
+            "expected 5 files for sensor_hub crate"
+        );
+
+        // 7. Verify target-specific content.
+        let motor_cargo = motor_files
+            .iter()
+            .find(|(p, _)| p.ends_with("Cargo.toml"))
+            .unwrap();
+        let sensor_cargo = sensor_files
+            .iter()
+            .find(|(p, _)| p.ends_with("Cargo.toml"))
+            .unwrap();
+
+        assert!(
+            motor_cargo.1.contains("embassy-rp"),
+            "motor_ctrl (Rp2040) should use embassy-rp"
+        );
+        assert!(
+            sensor_cargo.1.contains("embassy-stm32"),
+            "sensor_hub (Stm32f4) should use embassy-stm32"
+        );
+
+        // 8. Verify different target triples.
+        let motor_config = motor_files
+            .iter()
+            .find(|(p, _)| p.ends_with("config.toml"))
+            .unwrap();
+        let sensor_config = sensor_files
+            .iter()
+            .find(|(p, _)| p.ends_with("config.toml"))
+            .unwrap();
+
+        assert!(
+            motor_config.1.contains("thumbv6m-none-eabi"),
+            "motor_ctrl should target thumbv6m"
+        );
+        assert!(
+            sensor_config.1.contains("thumbv7em-none-eabihf"),
+            "sensor_hub should target thumbv7em"
+        );
+
+        // 9. Verify main.rs contains the node name in defmt output.
+        let motor_main = motor_files
+            .iter()
+            .find(|(p, _)| p.ends_with("main.rs"))
+            .unwrap();
+        let sensor_main = sensor_files
+            .iter()
+            .find(|(p, _)| p.ends_with("main.rs"))
+            .unwrap();
+
+        assert!(
+            motor_main.1.contains("firmware-motor_ctrl"),
+            "motor main should reference motor_ctrl"
+        );
+        assert!(
+            sensor_main.1.contains("firmware-sensor_hub"),
+            "sensor main should reference sensor_hub"
+        );
+    }
 }
