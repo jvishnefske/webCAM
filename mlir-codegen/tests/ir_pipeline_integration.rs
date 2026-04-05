@@ -75,8 +75,8 @@ fn test_ir_constant_to_mlir() {
     let mlir = mlir_codegen::print_mlir(&ir);
 
     assert!(
-        mlir.contains("dataflow.constant"),
-        "MLIR should contain dataflow.constant; got:\n{mlir}"
+        mlir.contains("arith.constant"),
+        "MLIR should contain arith.constant; got:\n{mlir}"
     );
     assert!(
         mlir.contains("42"),
@@ -122,10 +122,10 @@ fn test_ir_chain_to_mlir() {
     let mlir = mlir_codegen::print_mlir(&ir);
 
     // constant appears at least twice: the value 5.0 and the gain factor 2.0
-    let constant_count = mlir.matches("dataflow.constant").count();
+    let constant_count = mlir.matches("arith.constant").count();
     assert!(
         constant_count >= 2,
-        "MLIR should contain at least 2 dataflow.constant ops (value + gain factor); found {constant_count} in:\n{mlir}"
+        "MLIR should contain at least 2 arith.constant ops (value + gain factor); found {constant_count} in:\n{mlir}"
     );
     assert!(
         mlir.contains("arith.mulf"),
@@ -358,8 +358,8 @@ fn test_ir_pipeline_round_trip() {
         "MLIR text should be non-empty"
     );
     assert!(
-        output.mlir_text.contains("dataflow.constant"),
-        "MLIR text should contain dataflow.constant; got:\n{}",
+        output.mlir_text.contains("arith.constant"),
+        "MLIR text should contain arith.constant; got:\n{}",
         output.mlir_text
     );
     assert!(

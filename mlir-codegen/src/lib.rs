@@ -31,7 +31,7 @@ pub mod state_machine;
 use lower::GraphSnapshot;
 
 pub use runtime::{BlockFn, DagRuntime, HardwareBridge, NullHardware};
-pub use ir::{IrModule, IrBuilder, ValueId, IrType, Attr, IrOp, IrFunc};
+pub use ir::{IrModule, IrBuilder, ValueId, IrType, Attr, IrOp, IrFunc, IrOpKind, ArithOp, FuncOp, DataflowOp};
 pub use printer::print_mlir;
 pub use emit_rust::emit_rust;
 
