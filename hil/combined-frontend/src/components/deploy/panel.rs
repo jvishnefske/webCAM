@@ -1,10 +1,19 @@
 //! Deployment panel — generate firmware crates from deployment config.
+//!
+//! Reads the shared block set from the DAG editor (via Leptos context) and
+//! lowers it with [`lower_block_set`] before feeding the result into
+//! [`generate_all_crates`]. If no blocks have been placed in the editor,
+//! the panel shows an informative message.
 
 use leptos::prelude::*;
 
 use configurable_blocks::codegen;
+use configurable_blocks::deployment_profile::DeploymentProfile;
+use configurable_blocks::lower::lower_block_set;
 use module_traits::deployment::*;
 use module_traits::inventory;
+
+use crate::types::BlockSet;
 
 #[component]
 pub fn DeployPanel() -> impl IntoView {
@@ -16,12 +25,43 @@ pub fn DeployPanel() -> impl IntoView {
 
     let families = inventory::supported_families();
 
+    // Read the shared block set from the DAG editor tab.
+    let shared_blocks = use_context::<ReadSignal<BlockSet>>();
+
+    let block_count = Signal::derive(move || {
+        shared_blocks.map(|s| s.get().len()).unwrap_or(0)
+    });
+
     let on_generate = move |_| {
         let family = target_family.get();
         let node = node_id.get();
         let hz: f64 = tick_hz.get().parse().unwrap_or(100.0);
 
-        // Build a minimal deployment manifest for one node
+        // Retrieve blocks from the shared editor state.
+        let editor_blocks: BlockSet = shared_blocks
+            .map(|s| s.get())
+            .unwrap_or_default();
+
+        if editor_blocks.is_empty() {
+            set_gen_status.set("No blocks to deploy. Add blocks in the DAG Editor tab first.".into());
+            set_gen_files.set(vec![]);
+            return;
+        }
+
+        // Build a deployment profile from UI inputs (no channel remapping for now).
+        let profile = DeploymentProfile::new(&node);
+
+        // Lower the editor's block set into a single DAG.
+        let dag = match lower_block_set(&editor_blocks, &profile) {
+            Ok(d) => d,
+            Err(e) => {
+                set_gen_status.set(format!("Lowering error: {e}"));
+                set_gen_files.set(vec![]);
+                return;
+            }
+        };
+
+        // Build a minimal deployment manifest for one node.
         let manifest = DeploymentManifest {
             topology: SystemTopology {
                 nodes: vec![BoardNode {
@@ -44,17 +84,11 @@ pub fn DeployPanel() -> impl IntoView {
             peripheral_bindings: vec![],
         };
 
-        // Build a simple test DAG (const → publish)
-        // In the full version, this would come from the DAG editor's lowered blocks
-        let mut dag = dag_core::op::Dag::new();
-        let c = dag.constant(0.0).unwrap_or(0);
-        let _ = dag.publish("output", c);
-
         match codegen::generate_all_crates(&manifest, &dag) {
             Ok(files) => {
                 set_gen_status.set(format!(
-                    "Generated {} files for {} ({})",
-                    files.len(), node, family
+                    "Generated {} files for {} ({}) from {} editor blocks",
+                    files.len(), node, family, editor_blocks.len()
                 ));
                 set_gen_files.set(files);
             }
@@ -69,6 +103,24 @@ pub fn DeployPanel() -> impl IntoView {
         <h2 class="section-title">"Generate Firmware Crate"</h2>
         <div class="card" style="max-width:600px">
             <div class="card-title">"Deployment Configuration"</div>
+
+            // Block set status from the editor
+            {move || {
+                let count = block_count.get();
+                if count == 0 {
+                    view! {
+                        <div class="info-box" style="margin-bottom:0.75rem;color:#b45309">
+                            "No blocks configured. Add blocks in the DAG Editor tab first."
+                        </div>
+                    }.into_any()
+                } else {
+                    view! {
+                        <div class="info-box" style="margin-bottom:0.75rem">
+                            {format!("{count} block(s) from editor ready for deployment.")}
+                        </div>
+                    }.into_any()
+                }
+            }}
 
             <div class="form-row">
                 <div class="form-group">
