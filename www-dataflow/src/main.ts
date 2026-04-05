@@ -31,7 +31,7 @@ window.addEventListener('resize', () => {
 
 // ── Boot ─────────────────────────────────────────────────────────────
 
-init().then(() => {
+init({ module_or_path: '/pkg/rustsim_bg.wasm' }).then(() => {
   initDataflow();
   initPanel();
   setMode('dataflow');
