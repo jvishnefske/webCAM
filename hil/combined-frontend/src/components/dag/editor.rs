@@ -7,6 +7,8 @@ use configurable_blocks::lower;
 use configurable_blocks::registry;
 use configurable_blocks::schema::ChannelDirection;
 
+use crate::types::BlockSet;
+
 use super::config_panel::ConfigPanel;
 use super::palette::BlockPalette;
 
@@ -37,6 +39,20 @@ pub fn DagEditorPanel() -> impl IntoView {
     // Block instances on the canvas
     let (blocks, set_blocks) = signal(Vec::<PlacedBlock>::new());
     let (next_id, set_next_id) = signal(1_usize);
+
+    // Shared block-set context: push (block_type, config) pairs to deploy panel.
+    let set_shared_blocks = use_context::<WriteSignal<BlockSet>>();
+
+    // Sync local blocks → shared context whenever blocks change.
+    let sync_shared = move |blks: &[PlacedBlock]| {
+        if let Some(setter) = set_shared_blocks {
+            let block_set: BlockSet = blks
+                .iter()
+                .map(|pb| (pb.block_type.clone(), pb.config.clone()))
+                .collect();
+            setter.set(block_set);
+        }
+    };
 
     // Selected block
     let (selected_id, set_selected_id) = signal(None::<usize>);
@@ -139,6 +155,7 @@ pub fn DagEditorPanel() -> impl IntoView {
                     y,
                 });
             });
+            sync_shared(&blocks.get());
             set_selected_id.set(Some(id));
         }
     });
@@ -157,12 +174,14 @@ pub fn DagEditorPanel() -> impl IntoView {
                 }
             }
         });
+        sync_shared(&blocks.get());
     });
 
     // Delete selected block
     let on_delete = move |_| {
         if let Some(sel) = selected_id.get_untracked() {
             set_blocks.update(|v| v.retain(|b| b.id != sel));
+            sync_shared(&blocks.get());
             set_selected_id.set(None);
         }
     };

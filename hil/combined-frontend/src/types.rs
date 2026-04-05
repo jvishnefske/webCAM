@@ -54,6 +54,12 @@ pub struct KnownChannels {
     pub outputs: Vec<String>,
 }
 
+/// Shared block set: a list of `(block_type, config_json)` pairs.
+///
+/// This is the bridge between the DAG editor (which writes) and the deploy
+/// panel (which reads). Both use Leptos context to access the signal.
+pub type BlockSet = Vec<(String, serde_json::Value)>;
+
 /// DAG deployment status.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DagStatus {
