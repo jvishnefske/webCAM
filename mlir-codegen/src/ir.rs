@@ -29,10 +29,83 @@ pub enum Attr {
     Bool(bool),
 }
 
+// ── Dialect-namespaced operation kinds ──────────────────────────────────────
+
+/// Dialect-namespaced operation kind (replaces string-based op identification).
+#[derive(Debug, Clone, PartialEq)]
+pub enum IrOpKind {
+    /// Standard MLIR arithmetic dialect.
+    Arith(ArithOp),
+    /// Standard MLIR function dialect.
+    Func(FuncOp),
+    /// Custom dataflow dialect for hardware I/O.
+    Dataflow(DataflowOp),
+    /// Escape hatch for unknown/custom ops.
+    Custom(String),
+}
+
+/// Standard MLIR `arith` dialect operations.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArithOp {
+    Constant,
+    Addf,
+    Mulf,
+    Subf,
+    Select,
+}
+
+/// Standard MLIR `func` dialect operations.
+#[derive(Debug, Clone, PartialEq)]
+pub enum FuncOp {
+    /// `func.call @callee(args...)` — models pub/sub as function symbol calls.
+    Call { callee: String },
+}
+
+/// Custom `dataflow` dialect for hardware I/O (no standard MLIR equivalent).
+#[derive(Debug, Clone, PartialEq)]
+pub enum DataflowOp {
+    Clamp,
+    AdcRead,
+    PwmWrite,
+    GpioRead,
+    GpioWrite,
+    UartRx,
+    UartTx,
+    EncoderRead,
+    // NOTE: No stepper/stallguard/display — these are channel messages, not IR ops.
+}
+
+impl IrOpKind {
+    /// Return the canonical MLIR op name string for this op kind.
+    pub fn mlir_name(&self) -> String {
+        match self {
+            Self::Arith(ArithOp::Constant) => "arith.constant".into(),
+            Self::Arith(ArithOp::Addf) => "arith.addf".into(),
+            Self::Arith(ArithOp::Mulf) => "arith.mulf".into(),
+            Self::Arith(ArithOp::Subf) => "arith.subf".into(),
+            Self::Arith(ArithOp::Select) => "arith.select".into(),
+            Self::Func(FuncOp::Call { callee }) => format!("func.call @{callee}"),
+            Self::Dataflow(d) => format!("dataflow.{}", match d {
+                DataflowOp::Clamp => "clamp",
+                DataflowOp::AdcRead => "adc_read",
+                DataflowOp::PwmWrite => "pwm_write",
+                DataflowOp::GpioRead => "gpio_read",
+                DataflowOp::GpioWrite => "gpio_write",
+                DataflowOp::UartRx => "uart_rx",
+                DataflowOp::UartTx => "uart_tx",
+                DataflowOp::EncoderRead => "encoder_read",
+            }),
+            Self::Custom(s) => s.clone(),
+        }
+    }
+}
+
 /// A single operation in the IR.
 #[derive(Debug, Clone)]
 pub struct IrOp {
-    /// Op name, e.g. "dataflow.constant", "arith.addf", "dataflow.adc_read"
+    /// Typed operation kind (dialect-namespaced enum).
+    pub kind: IrOpKind,
+    /// Op name string (derived from kind — kept for backward compat during migration).
     pub name: String,
     /// Input SSA values consumed by this op.
     pub operands: Vec<ValueId>,
@@ -164,7 +237,37 @@ impl IrBuilder {
             .map(|(k, v)| (k.to_string(), v.clone()))
             .collect();
         let op = IrOp {
+            kind: IrOpKind::Custom(name.to_string()),
             name: name.to_string(),
+            operands: operands.to_vec(),
+            results: results.clone(),
+            attrs: attr_map,
+            result_types,
+        };
+        let func_idx = self.current_func.expect("no current function");
+        self.funcs[func_idx].ops.push(op);
+        results
+    }
+
+    /// Emit a typed op with a dialect-namespaced [`IrOpKind`].
+    /// The `name` field is derived from `kind.mlir_name()` for backward compat.
+    pub fn typed_op(
+        &mut self,
+        kind: IrOpKind,
+        operands: &[ValueId],
+        attrs: &[(&str, Attr)],
+        num_results: usize,
+    ) -> Vec<ValueId> {
+        let name = kind.mlir_name();
+        let results: Vec<ValueId> = (0..num_results).map(|_| self.fresh_value()).collect();
+        let result_types = vec![IrType::F64; num_results];
+        let attr_map: HashMap<String, Attr> = attrs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.clone()))
+            .collect();
+        let op = IrOp {
+            kind,
+            name,
             operands: operands.to_vec(),
             results: results.clone(),
             attrs: attr_map,
@@ -179,61 +282,55 @@ impl IrBuilder {
 
     /// Emit a constant f64 value. Returns the SSA value.
     pub fn constant_f64(&mut self, value: f64) -> ValueId {
-        let results = self.custom_op(
-            "dataflow.constant",
+        self.typed_op(
+            IrOpKind::Arith(ArithOp::Constant),
             &[],
             &[("value", Attr::F64(value))],
             1,
-        );
-        results[0]
+        )[0]
     }
 
     /// Emit f64 addition: result = lhs + rhs.
     pub fn addf(&mut self, lhs: ValueId, rhs: ValueId) -> ValueId {
-        let results = self.custom_op("arith.addf", &[lhs, rhs], &[], 1);
-        results[0]
+        self.typed_op(IrOpKind::Arith(ArithOp::Addf), &[lhs, rhs], &[], 1)[0]
     }
 
     /// Emit f64 multiplication: result = lhs * rhs.
     pub fn mulf(&mut self, lhs: ValueId, rhs: ValueId) -> ValueId {
-        let results = self.custom_op("arith.mulf", &[lhs, rhs], &[], 1);
-        results[0]
+        self.typed_op(IrOpKind::Arith(ArithOp::Mulf), &[lhs, rhs], &[], 1)[0]
     }
 
     /// Emit f64 subtraction: result = lhs - rhs.
     pub fn subf(&mut self, lhs: ValueId, rhs: ValueId) -> ValueId {
-        let results = self.custom_op("arith.subf", &[lhs, rhs], &[], 1);
-        results[0]
+        self.typed_op(IrOpKind::Arith(ArithOp::Subf), &[lhs, rhs], &[], 1)[0]
     }
 
     /// Emit clamp: result = max(lo, min(hi, value)).
     pub fn clamp(&mut self, value: ValueId, lo: f64, hi: f64) -> ValueId {
-        let results = self.custom_op(
-            "dataflow.clamp",
+        self.typed_op(
+            IrOpKind::Dataflow(DataflowOp::Clamp),
             &[value],
             &[("lo", Attr::F64(lo)), ("hi", Attr::F64(hi))],
             1,
-        );
-        results[0]
+        )[0]
     }
 
     // ── Hardware I/O ops ───────────────────────────────────────────
 
     /// ADC read: result = hw.adc_read(channel).
     pub fn adc_read(&mut self, channel: u8) -> ValueId {
-        let results = self.custom_op(
-            "dataflow.adc_read",
+        self.typed_op(
+            IrOpKind::Dataflow(DataflowOp::AdcRead),
             &[],
             &[("channel", Attr::I64(channel as i64))],
             1,
-        );
-        results[0]
+        )[0]
     }
 
     /// PWM write: hw.pwm_write(channel, duty).
     pub fn pwm_write(&mut self, channel: u8, duty: ValueId) {
-        self.custom_op(
-            "dataflow.pwm_write",
+        self.typed_op(
+            IrOpKind::Dataflow(DataflowOp::PwmWrite),
             &[duty],
             &[("channel", Attr::I64(channel as i64))],
             0,
@@ -242,19 +339,18 @@ impl IrBuilder {
 
     /// GPIO read: result = hw.gpio_read(pin).
     pub fn gpio_read(&mut self, pin: u8) -> ValueId {
-        let results = self.custom_op(
-            "dataflow.gpio_read",
+        self.typed_op(
+            IrOpKind::Dataflow(DataflowOp::GpioRead),
             &[],
             &[("pin", Attr::I64(pin as i64))],
             1,
-        );
-        results[0]
+        )[0]
     }
 
     /// GPIO write: hw.gpio_write(pin, value).
     pub fn gpio_write(&mut self, pin: u8, value: ValueId) {
-        self.custom_op(
-            "dataflow.gpio_write",
+        self.typed_op(
+            IrOpKind::Dataflow(DataflowOp::GpioWrite),
             &[value],
             &[("pin", Attr::I64(pin as i64))],
             0,
@@ -263,19 +359,18 @@ impl IrBuilder {
 
     /// UART receive: result = hw.uart_read(port).
     pub fn uart_rx(&mut self, port: u8) -> ValueId {
-        let results = self.custom_op(
-            "dataflow.uart_rx",
+        self.typed_op(
+            IrOpKind::Dataflow(DataflowOp::UartRx),
             &[],
             &[("port", Attr::I64(port as i64))],
             1,
-        );
-        results[0]
+        )[0]
     }
 
     /// UART transmit: hw.uart_write(port, value).
     pub fn uart_tx(&mut self, port: u8, value: ValueId) {
-        self.custom_op(
-            "dataflow.uart_tx",
+        self.typed_op(
+            IrOpKind::Dataflow(DataflowOp::UartTx),
             &[value],
             &[("port", Attr::I64(port as i64))],
             0,
@@ -284,8 +379,8 @@ impl IrBuilder {
 
     /// Encoder read: (position, velocity) = hw.encoder_read(channel).
     pub fn encoder_read(&mut self, channel: u8) -> (ValueId, ValueId) {
-        let results = self.custom_op(
-            "dataflow.encoder_read",
+        let results = self.typed_op(
+            IrOpKind::Dataflow(DataflowOp::EncoderRead),
             &[],
             &[("channel", Attr::I64(channel as i64))],
             2,
@@ -293,23 +388,22 @@ impl IrBuilder {
         (results[0], results[1])
     }
 
-    // ── Pub/Sub ops ────────────────────────────────────────────────
+    // ── Pub/Sub ops (modeled as func.call) ─────────────────────────
 
-    /// Subscribe: result = hw.subscribe(topic).
+    /// Subscribe: result = func.call @subscribe(topic).
     pub fn subscribe(&mut self, topic: &str) -> ValueId {
-        let results = self.custom_op(
-            "dataflow.subscribe",
+        self.typed_op(
+            IrOpKind::Func(FuncOp::Call { callee: "subscribe".into() }),
             &[],
             &[("topic", Attr::Str(topic.to_string()))],
             1,
-        );
-        results[0]
+        )[0]
     }
 
-    /// Publish: hw.publish(topic, value).
+    /// Publish: func.call @publish(topic, value).
     pub fn publish(&mut self, topic: &str, value: ValueId) {
-        self.custom_op(
-            "dataflow.publish",
+        self.typed_op(
+            IrOpKind::Func(FuncOp::Call { callee: "publish".into() }),
             &[value],
             &[("topic", Attr::Str(topic.to_string()))],
             0,
@@ -345,7 +439,8 @@ mod tests {
         assert_eq!(module.funcs[0].ops.len(), 1);
 
         let op = &module.funcs[0].ops[0];
-        assert_eq!(op.name, "dataflow.constant");
+        assert_eq!(op.kind, IrOpKind::Arith(ArithOp::Constant));
+        assert_eq!(op.name, "arith.constant");
         assert_eq!(op.operands.len(), 0);
         assert_eq!(op.results.len(), 1);
         assert_eq!(op.attrs.get("value"), Some(&Attr::F64(42.0)));
@@ -364,12 +459,12 @@ mod tests {
         assert_eq!(module.funcs[0].ops.len(), 3);
 
         // Op 0: constant 5.0
-        assert_eq!(module.funcs[0].ops[0].name, "dataflow.constant");
+        assert_eq!(module.funcs[0].ops[0].kind, IrOpKind::Arith(ArithOp::Constant));
         // Op 1: constant 2.0 (gain factor)
-        assert_eq!(module.funcs[0].ops[1].name, "dataflow.constant");
+        assert_eq!(module.funcs[0].ops[1].kind, IrOpKind::Arith(ArithOp::Constant));
         // Op 2: mulf
         let mulf_op = &module.funcs[0].ops[2];
-        assert_eq!(mulf_op.name, "arith.mulf");
+        assert_eq!(mulf_op.kind, IrOpKind::Arith(ArithOp::Mulf));
         assert_eq!(mulf_op.operands.len(), 2);
         // The mulf should consume the results of the two constants
         assert_eq!(mulf_op.operands[0], module.funcs[0].ops[0].results[0]);
@@ -387,12 +482,12 @@ mod tests {
         assert_eq!(module.funcs[0].ops.len(), 2);
 
         let adc_op = &module.funcs[0].ops[0];
-        assert_eq!(adc_op.name, "dataflow.adc_read");
+        assert_eq!(adc_op.kind, IrOpKind::Dataflow(DataflowOp::AdcRead));
         assert_eq!(adc_op.attrs.get("channel"), Some(&Attr::I64(3)));
         assert_eq!(adc_op.results.len(), 1);
 
         let pwm_op = &module.funcs[0].ops[1];
-        assert_eq!(pwm_op.name, "dataflow.pwm_write");
+        assert_eq!(pwm_op.kind, IrOpKind::Dataflow(DataflowOp::PwmWrite));
         assert_eq!(pwm_op.attrs.get("channel"), Some(&Attr::I64(1)));
         assert_eq!(pwm_op.operands.len(), 1);
         assert_eq!(pwm_op.operands[0], adc_val);
@@ -410,14 +505,14 @@ mod tests {
         assert_eq!(module.funcs[0].ops.len(), 2);
 
         let sub_op = &module.funcs[0].ops[0];
-        assert_eq!(sub_op.name, "dataflow.subscribe");
+        assert_eq!(sub_op.kind, IrOpKind::Func(FuncOp::Call { callee: "subscribe".into() }));
         assert_eq!(
             sub_op.attrs.get("topic"),
             Some(&Attr::Str("sensor/temp".to_string()))
         );
 
         let pub_op = &module.funcs[0].ops[1];
-        assert_eq!(pub_op.name, "dataflow.publish");
+        assert_eq!(pub_op.kind, IrOpKind::Func(FuncOp::Call { callee: "publish".into() }));
         assert_eq!(
             pub_op.attrs.get("topic"),
             Some(&Attr::Str("actuator/fan".to_string()))
@@ -434,7 +529,7 @@ mod tests {
         let module = b.build();
 
         let clamp_op = &module.funcs[0].ops[1];
-        assert_eq!(clamp_op.name, "dataflow.clamp");
+        assert_eq!(clamp_op.kind, IrOpKind::Dataflow(DataflowOp::Clamp));
         assert_eq!(clamp_op.attrs.get("lo"), Some(&Attr::F64(0.0)));
         assert_eq!(clamp_op.attrs.get("hi"), Some(&Attr::F64(100.0)));
         assert_eq!(clamp_op.operands.len(), 1);
@@ -461,6 +556,7 @@ mod tests {
         assert_eq!(results.len(), 2);
 
         let op = &module.funcs[0].ops[1];
+        assert_eq!(op.kind, IrOpKind::Custom("my.custom_op".into()));
         assert_eq!(op.name, "my.custom_op");
         assert_eq!(op.operands, vec![input]);
         assert_eq!(op.results.len(), 2);
@@ -489,7 +585,7 @@ mod tests {
         let module = b.build();
 
         let sub_op = &module.funcs[0].ops[2];
-        assert_eq!(sub_op.name, "arith.subf");
+        assert_eq!(sub_op.kind, IrOpKind::Arith(ArithOp::Subf));
         assert_eq!(sub_op.operands, vec![a, c]);
         assert_eq!(sub_op.results, vec![result]);
     }
@@ -502,7 +598,7 @@ mod tests {
         let module = b.build();
 
         let op = &module.funcs[0].ops[0];
-        assert_eq!(op.name, "dataflow.gpio_read");
+        assert_eq!(op.kind, IrOpKind::Dataflow(DataflowOp::GpioRead));
         assert_eq!(op.attrs.get("pin"), Some(&Attr::I64(5)));
         assert_eq!(op.results.len(), 1);
         assert_eq!(op.results[0], val);
@@ -517,7 +613,7 @@ mod tests {
         let module = b.build();
 
         let op = &module.funcs[0].ops[1];
-        assert_eq!(op.name, "dataflow.gpio_write");
+        assert_eq!(op.kind, IrOpKind::Dataflow(DataflowOp::GpioWrite));
         assert_eq!(op.attrs.get("pin"), Some(&Attr::I64(7)));
         assert_eq!(op.operands, vec![val]);
         assert_eq!(op.results.len(), 0);
@@ -531,7 +627,7 @@ mod tests {
         let module = b.build();
 
         let op = &module.funcs[0].ops[0];
-        assert_eq!(op.name, "dataflow.uart_rx");
+        assert_eq!(op.kind, IrOpKind::Dataflow(DataflowOp::UartRx));
         assert_eq!(op.attrs.get("port"), Some(&Attr::I64(2)));
         assert_eq!(op.results.len(), 1);
         assert_eq!(op.results[0], val);
@@ -546,7 +642,7 @@ mod tests {
         let module = b.build();
 
         let op = &module.funcs[0].ops[1];
-        assert_eq!(op.name, "dataflow.uart_tx");
+        assert_eq!(op.kind, IrOpKind::Dataflow(DataflowOp::UartTx));
         assert_eq!(op.attrs.get("port"), Some(&Attr::I64(3)));
         assert_eq!(op.operands, vec![val]);
         assert_eq!(op.results.len(), 0);
@@ -560,7 +656,7 @@ mod tests {
         let module = b.build();
 
         let op = &module.funcs[0].ops[0];
-        assert_eq!(op.name, "dataflow.encoder_read");
+        assert_eq!(op.kind, IrOpKind::Dataflow(DataflowOp::EncoderRead));
         assert_eq!(op.attrs.get("channel"), Some(&Attr::I64(4)));
         assert_eq!(op.results.len(), 2);
         assert_eq!(op.results[0], pos);
