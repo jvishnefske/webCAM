@@ -215,6 +215,46 @@ pub fn lower_block_set(
     Ok(combined)
 }
 
+/// Lower a block set into per-node DAGs, partitioned by the profile's
+/// `node_assignments`.
+///
+/// Blocks that have no node assignment are placed in a `"_default"` DAG.
+/// Each node gets its own independent DAG with ops offset from zero.
+pub fn lower_block_set_per_node(
+    blocks: &[(String, serde_json::Value)],
+    profile: &DeploymentProfile,
+) -> Result<std::collections::HashMap<String, Dag>, String> {
+    use std::collections::HashMap;
+
+    let mut node_dags: HashMap<String, Dag> = HashMap::new();
+
+    for (block_idx, (block_type, config)) in blocks.iter().enumerate() {
+        let mut block = crate::registry::create_block(block_type)
+            .ok_or_else(|| format!("unknown block type: {block_type}"))?;
+        block.apply_config(config);
+
+        let result = lower_with_profile(block.as_ref(), profile)
+            .map_err(|e| format!("lower failed for {block_type}: {e}"))?;
+
+        let node_id = profile
+            .node_assignments
+            .get(&(block_idx as u32))
+            .cloned()
+            .unwrap_or_else(|| "_default".to_string());
+
+        let dag = node_dags.entry(node_id).or_insert_with(Dag::new);
+        let offset = dag.len() as NodeId;
+
+        for op in result.dag.nodes() {
+            let adjusted = offset_op(op, offset);
+            dag.add_op(adjusted)
+                .map_err(|e| format!("merge failed for {block_type}: {e}"))?;
+        }
+    }
+
+    Ok(node_dags)
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -447,6 +487,29 @@ mod tests {
         let profile = DeploymentProfile::new("bench");
         let combined = lower_block_set(&[], &profile).expect("should succeed");
         assert!(combined.is_empty());
+    }
+
+    #[test]
+    fn test_lower_block_set_per_node_partitions_by_assignment() {
+        let mut profile = DeploymentProfile::new("multi");
+        profile.add_board("board_a", "Rp2040");
+        profile.add_board("board_b", "Stm32f4");
+        profile.assign_block(0, "board_a");
+        profile.assign_block(1, "board_b");
+
+        let blocks: Vec<(String, serde_json::Value)> = vec![
+            ("constant".into(), serde_json::json!({"value": 1.0})),
+            ("constant".into(), serde_json::json!({"value": 2.0})),
+        ];
+
+        let node_dags = lower_block_set_per_node(&blocks, &profile).expect("should succeed");
+
+        assert!(node_dags.contains_key("board_a"), "should have board_a DAG");
+        assert!(node_dags.contains_key("board_b"), "should have board_b DAG");
+        assert!(!node_dags.get("board_a").unwrap().is_empty());
+        assert!(!node_dags.get("board_b").unwrap().is_empty());
+        // Each node gets only its own block, not both
+        assert!(!node_dags.contains_key("_default"), "no unassigned blocks");
     }
 
     #[test]
