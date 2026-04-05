@@ -2,12 +2,16 @@ import * as esbuild from 'esbuild';
 
 const watch = process.argv.includes('--watch');
 
-// Rewrite all rustcam.js imports to the correct path relative to dist/
+// Rewrite WASM module imports to correct paths relative to dist/
 const wasmExternalPlugin = {
   name: 'wasm-external',
   setup(build) {
     build.onResolve({ filter: /rustcam\.js$/ }, () => ({
       path: '../pkg/rustcam.js',
+      external: true,
+    }));
+    build.onResolve({ filter: /rustsim\.js$/ }, () => ({
+      path: '../pkg/rustsim.js',
       external: true,
     }));
   },
