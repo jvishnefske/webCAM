@@ -353,6 +353,75 @@ impl ConfigurableBlock for PublishBlock {
 }
 
 // ---------------------------------------------------------------------------
+// Adc (hardware input)
+// ---------------------------------------------------------------------------
+
+/// Minimal ADC input block that declares a single `Hardware`-kind input channel.
+///
+/// Used by the deployment profile validation machinery and its tests to exercise
+/// the `MissingPeripheralBinding` check.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdcBlock {
+    /// Channel name used as both the declared hardware port and the pubsub topic
+    /// to which the sampled value is published.
+    pub channel_name: String,
+}
+
+impl Default for AdcBlock {
+    fn default() -> Self {
+        Self {
+            channel_name: "adc0".into(),
+        }
+    }
+}
+
+impl ConfigurableBlock for AdcBlock {
+    fn block_type(&self) -> &str { "adc" }
+    fn display_name(&self) -> &str { "ADC Input" }
+    fn category(&self) -> BlockCategory { BlockCategory::Io }
+
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![ConfigField {
+            key: "channel_name".into(),
+            label: "Channel Name".into(),
+            kind: FieldKind::Text,
+            default: self.channel_name.clone().into(),
+        }]
+    }
+
+    fn config_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_default()
+    }
+
+    fn apply_config(&mut self, config: &serde_json::Value) {
+        if let Some(s) = config.get("channel_name").and_then(|v| v.as_str()) {
+            self.channel_name = s.into();
+        }
+    }
+
+    fn declared_channels(&self) -> Vec<DeclaredChannel> {
+        vec![DeclaredChannel {
+            name: self.channel_name.clone(),
+            direction: ChannelDirection::Input,
+            kind: ChannelKind::Hardware,
+        }]
+    }
+
+    fn lower(&self) -> Result<LowerResult, DagError> {
+        let mut dag = Dag::new();
+        // Hardware input is modelled as a DAG Input op.
+        let node = dag.input(&self.channel_name)?;
+        Ok(LowerResult {
+            dag,
+            ports: dag_core::templates::BlockPorts {
+                inputs: vec![("hw_in".into(), node)],
+                outputs: vec![],
+            },
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
