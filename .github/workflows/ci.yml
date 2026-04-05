@@ -34,7 +34,6 @@ jobs:
           --exclude board-support-pico
           --exclude board-support-pico2
           --exclude board-support-stm32
-          --exclude board-support-pi-zero
           --exclude pico-bootloader
           --exclude combined-frontend
           --exclude hil-frontend
@@ -44,24 +43,11 @@ jobs:
           --exclude board-support-pico
           --exclude board-support-pico2
           --exclude board-support-stm32
-          --exclude board-support-pi-zero
           --exclude pico-bootloader
           --exclude combined-frontend
           --exclude hil-frontend
-      - run: cd crates/rustcam && wasm-pack build --target web --out-dir ../../www/pkg --release
-      - run: cd crates/rustsim && wasm-pack build --target web --out-dir ../../www/pkg --release
+      - run: wasm-pack build --target web --out-dir www/pkg --release
       - run: cd www && npm ci && npm run typecheck && npm run test && npm run build
-      - name: Build rustdoc
-        run: >-
-          cargo doc --no-deps --workspace
-          --exclude board-support-pico
-          --exclude board-support-pico2
-          --exclude board-support-stm32
-          --exclude board-support-pi-zero
-          --exclude pico-bootloader
-          --exclude combined-frontend
-          --exclude hil-frontend
-      - run: cp -r target/doc www/doc
       - name: Remove build-only files from www
         run: rm -rf www/node_modules www/src www/package.json www/package-lock.json www/tsconfig.json www/esbuild.config.mjs
       - run: cd www && zip -r ../rustcam.zip .
@@ -180,8 +166,6 @@ jobs:
           PR=${{ github.event.pull_request.number }}
           mkdir -p ~/.ssh && echo "$DEPLOY_KEY" > ~/.ssh/key && chmod 600 ~/.ssh/key
           export GIT_SSH_COMMAND="ssh -i ~/.ssh/key -o StrictHostKeyChecking=no"
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git clone --branch gh-pages --depth 1 git@github.com:jvishnefske/cam.git _cam
           cd _cam
           if [ -d "pr-preview/pr-$PR" ]; then
