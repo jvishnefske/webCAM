@@ -14,6 +14,7 @@
 
 pub mod blocks;
 pub mod codegen;
+pub mod deployment_profile;
 pub mod lower;
 pub mod registry;
 pub mod schema;
