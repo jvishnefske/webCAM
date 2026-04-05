@@ -95,8 +95,8 @@ $('sketch-to-cam').addEventListener('click', () => {
 
 async function boot(): Promise<void> {
   try {
-    await init();
-    await initSim();
+    await init({ module_or_path: '/pkg/rustcam_bg.wasm' });
+    await initSim({ module_or_path: '/pkg/rustsim_bg.wasm' });
     cam.setWasmReady(true);
     initDataflow();
     initPanel();
