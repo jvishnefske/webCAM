@@ -1,8 +1,9 @@
 //! Lower a [`ConfigurableBlock`] to DAG IL.
 
-use dag_core::op::{Dag, DagError};
+use dag_core::op::{Dag, DagError, NodeId, Op};
 use dag_core::templates::BlockPorts;
 
+use crate::deployment_profile::{ChannelMap, DeploymentProfile};
 use crate::schema::{ChannelDirection, ChannelKind, ConfigField, DeclaredChannel};
 
 /// Result of lowering a configurable block into DAG ops.
@@ -117,6 +118,105 @@ pub fn lower_to_il_text(block: &dyn ConfigurableBlock) -> Result<String, String>
     Ok(text)
 }
 
+// ── Channel remapping ────────────────────────────────────────────────────────
+
+/// Rebuild a DAG with Subscribe/Publish topic names remapped through `channel_map`.
+///
+/// All other ops are copied unchanged. NodeId references are preserved as-is
+/// (no offsetting — this is a pure topic-rename pass).
+pub fn remap_dag_channels(dag: &Dag, channel_map: &ChannelMap) -> Result<Dag, DagError> {
+    let mut remapped = Dag::new();
+    for op in dag.nodes() {
+        let new_op = match op {
+            Op::Subscribe(topic) => Op::Subscribe(channel_map.remap(topic).to_string()),
+            Op::Publish(topic, src) => {
+                Op::Publish(channel_map.remap(topic).to_string(), *src)
+            }
+            other => other.clone(),
+        };
+        remapped.add_op(new_op)?;
+    }
+    Ok(remapped)
+}
+
+// ── Profile-aware lowering ───────────────────────────────────────────────────
+
+/// Lower a block and remap its channels using the profile's channel map.
+pub fn lower_with_profile(
+    block: &dyn ConfigurableBlock,
+    profile: &DeploymentProfile,
+) -> Result<LowerResult, DagError> {
+    let result = block.lower()?;
+    let remapped_dag = remap_dag_channels(&result.dag, &profile.channel_map)?;
+    Ok(LowerResult {
+        ports: result.ports,
+        dag: remapped_dag,
+    })
+}
+
+// ── Block set merging ────────────────────────────────────────────────────────
+
+/// Offset all NodeId references in an Op by `offset`.
+///
+/// Source ops (Const, Input, Subscribe) have no references and are cloned as-is.
+fn offset_op(op: &Op, offset: NodeId) -> Op {
+    match op {
+        Op::Const(v) => Op::Const(*v),
+        Op::Input(name) => Op::Input(name.clone()),
+        Op::Output(name, src) => Op::Output(name.clone(), src + offset),
+        Op::Add(a, b) => Op::Add(a + offset, b + offset),
+        Op::Mul(a, b) => Op::Mul(a + offset, b + offset),
+        Op::Sub(a, b) => Op::Sub(a + offset, b + offset),
+        Op::Div(a, b) => Op::Div(a + offset, b + offset),
+        Op::Pow(a, b) => Op::Pow(a + offset, b + offset),
+        Op::Neg(a) => Op::Neg(a + offset),
+        Op::Relu(a) => Op::Relu(a + offset),
+        Op::Subscribe(topic) => Op::Subscribe(topic.clone()),
+        Op::Publish(topic, src) => Op::Publish(topic.clone(), src + offset),
+    }
+}
+
+/// Lower a set of `(block_type, config_json)` pairs and merge them into a single DAG.
+///
+/// For each block:
+/// 1. Creates the block instance via the registry.
+/// 2. Applies the provided JSON config.
+/// 3. Lowers with `lower_with_profile` (channel remapping applied).
+/// 4. Appends ops to the combined DAG, adjusting all NodeId references by the
+///    current offset (number of nodes already in the combined DAG).
+///
+/// Returns `Err(String)` if any block type is unknown, lowering fails, or the
+/// combined DAG would exceed the NodeId address space.
+pub fn lower_block_set(
+    blocks: &[(String, serde_json::Value)],
+    profile: &DeploymentProfile,
+) -> Result<Dag, String> {
+    let mut combined = Dag::new();
+
+    for (block_type, config) in blocks {
+        let mut block = crate::registry::create_block(block_type)
+            .ok_or_else(|| format!("unknown block type: {block_type}"))?;
+
+        block.apply_config(config);
+
+        let result = lower_with_profile(block.as_ref(), profile)
+            .map_err(|e| format!("lower failed for {block_type}: {e}"))?;
+
+        let offset = combined.len() as NodeId;
+
+        for op in result.dag.nodes() {
+            let adjusted = offset_op(op, offset);
+            combined
+                .add_op(adjusted)
+                .map_err(|e| format!("merge failed for {block_type}: {e}"))?;
+        }
+    }
+
+    Ok(combined)
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -137,5 +237,221 @@ mod tests {
         // Should produce valid CBOR
         let decoded = dag_core::cbor::decode_dag(&bytes).expect("decode failed");
         assert!(!decoded.is_empty());
+    }
+
+    // ── remap_dag_channels ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_remap_dag_channels_remaps_subscribe_and_publish() {
+        let mut dag = Dag::new();
+        dag.add_op(Op::Subscribe("motor/setpoint".into())).unwrap(); // node 0
+        dag.add_op(Op::Const(1.0)).unwrap();                         // node 1
+        dag.add_op(Op::Publish("motor/output".into(), 1)).unwrap();  // node 2
+
+        let mut map = ChannelMap::new();
+        map.insert("motor/setpoint".into(), "robot/joint1/setpoint".into());
+        map.insert("motor/output".into(), "robot/joint1/output".into());
+
+        let remapped = remap_dag_channels(&dag, &map).expect("remap failed");
+        assert_eq!(remapped.len(), 3);
+
+        match &remapped.nodes()[0] {
+            Op::Subscribe(t) => assert_eq!(t, "robot/joint1/setpoint"),
+            other => panic!("expected Subscribe, got {:?}", other),
+        }
+        match &remapped.nodes()[2] {
+            Op::Publish(t, src) => {
+                assert_eq!(t, "robot/joint1/output");
+                assert_eq!(*src, 1);
+            }
+            other => panic!("expected Publish, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_remap_dag_channels_leaves_non_pubsub_ops_unchanged() {
+        let mut dag = Dag::new();
+        dag.add_op(Op::Const(42.0)).unwrap();  // node 0
+        dag.add_op(Op::Const(10.0)).unwrap();  // node 1
+        dag.add_op(Op::Add(0, 1)).unwrap();    // node 2
+        dag.add_op(Op::Mul(0, 2)).unwrap();    // node 3
+        dag.add_op(Op::Sub(3, 1)).unwrap();    // node 4
+        dag.add_op(Op::Div(4, 1)).unwrap();    // node 5
+        dag.add_op(Op::Neg(5)).unwrap();       // node 6
+        dag.add_op(Op::Relu(6)).unwrap();      // node 7
+        dag.add_op(Op::Input("sensor".into())).unwrap(); // node 8
+        dag.add_op(Op::Output("out".into(), 7)).unwrap(); // node 9
+
+        let map = ChannelMap::new(); // empty — no remappings
+        let remapped = remap_dag_channels(&dag, &map).expect("remap failed");
+
+        assert_eq!(remapped.len(), dag.len());
+        // All ops should be identical since map is empty
+        for (orig, new) in dag.nodes().iter().zip(remapped.nodes().iter()) {
+            assert_eq!(orig, new);
+        }
+    }
+
+    // ── lower_with_profile ───────────────────────────────────────────────────
+
+    #[test]
+    fn test_lower_with_profile_applies_channel_remapping() {
+        let pid = crate::blocks::pid::PidBlock::default();
+
+        // Find what topics PID uses by lowering without a profile first
+        let base = pid.lower().expect("lower failed");
+        let base_topics: Vec<String> = base
+            .dag
+            .nodes()
+            .iter()
+            .filter_map(|op| match op {
+                Op::Subscribe(t) => Some(t.clone()),
+                Op::Publish(t, _) => Some(t.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(!base_topics.is_empty(), "PID should have pub/sub topics");
+
+        // Build a profile that remaps the first subscribe topic
+        let first_sub = base
+            .dag
+            .nodes()
+            .iter()
+            .find_map(|op| if let Op::Subscribe(t) = op { Some(t.clone()) } else { None })
+            .expect("no Subscribe in PID DAG");
+
+        let mut profile = DeploymentProfile::new("test");
+        profile
+            .channel_map
+            .insert(first_sub.clone(), "remapped/topic".into());
+
+        let result =
+            lower_with_profile(&pid, &profile).expect("lower_with_profile failed");
+
+        // The remapped DAG should have the new topic name
+        let has_remapped = result.dag.nodes().iter().any(|op| {
+            matches!(op, Op::Subscribe(t) if t == "remapped/topic")
+        });
+        assert!(has_remapped, "expected remapped Subscribe topic in output DAG");
+
+        // The original topic name should no longer appear
+        let has_original = result.dag.nodes().iter().any(|op| {
+            matches!(op, Op::Subscribe(t) if *t == first_sub)
+        });
+        assert!(!has_original, "original topic should have been remapped away");
+    }
+
+    // ── lower_block_set ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_lower_block_set_merges_multiple_blocks() {
+        let profile = DeploymentProfile::new("bench");
+
+        // Two blocks: a gain block and a pid block
+        let blocks: Vec<(String, serde_json::Value)> = vec![
+            ("gain".into(), serde_json::json!({})),
+            ("pid".into(), serde_json::json!({})),
+        ];
+
+        let combined = lower_block_set(&blocks, &profile).expect("lower_block_set failed");
+
+        // Get individual sizes
+        let gain_block = crate::registry::create_block("gain").unwrap();
+        let gain_len = gain_block.lower().unwrap().dag.len();
+
+        let pid_block = crate::registry::create_block("pid").unwrap();
+        let pid_len = pid_block.lower().unwrap().dag.len();
+
+        assert_eq!(
+            combined.len(),
+            gain_len + pid_len,
+            "merged DAG should have sum of individual sizes"
+        );
+    }
+
+    #[test]
+    fn test_lower_block_set_correct_node_id_offsets() {
+        let profile = DeploymentProfile::new("bench");
+
+        // Two constant blocks — simplest possible blocks
+        let blocks: Vec<(String, serde_json::Value)> = vec![
+            ("constant".into(), serde_json::json!({"value": 1.0})),
+            ("constant".into(), serde_json::json!({"value": 2.0})),
+        ];
+
+        let combined = lower_block_set(&blocks, &profile).expect("lower_block_set failed");
+
+        // All NodeId references must be valid (Dag::add_op validates this)
+        // If we got here without error, offsets are correct.
+        assert!(combined.len() > 0, "combined DAG should be non-empty");
+
+        // Verify no invalid cross-references exist by checking each op is well-formed
+        for (i, op) in combined.nodes().iter().enumerate() {
+            let refs: Vec<u16> = match op {
+                Op::Output(_, src) | Op::Neg(src) | Op::Relu(src) | Op::Publish(_, src) => {
+                    vec![*src]
+                }
+                Op::Add(a, b)
+                | Op::Mul(a, b)
+                | Op::Sub(a, b)
+                | Op::Div(a, b)
+                | Op::Pow(a, b) => vec![*a, *b],
+                _ => vec![],
+            };
+            for r in refs {
+                assert!(
+                    (r as usize) < i,
+                    "op {i} references node {r} which is not before it"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_lower_block_set_applies_channel_remapping() {
+        let mut profile = DeploymentProfile::new("remapped");
+
+        // Find PID's default setpoint topic and remap it
+        let pid_block = crate::registry::create_block("pid").unwrap();
+        let pid_lower = pid_block.lower().unwrap();
+        let default_sub = pid_lower
+            .dag
+            .nodes()
+            .iter()
+            .find_map(|op| if let Op::Subscribe(t) = op { Some(t.clone()) } else { None })
+            .expect("pid should have Subscribe");
+
+        profile
+            .channel_map
+            .insert(default_sub.clone(), "deployed/setpoint".into());
+
+        let blocks: Vec<(String, serde_json::Value)> = vec![
+            ("pid".into(), serde_json::json!({})),
+        ];
+
+        let combined = lower_block_set(&blocks, &profile).expect("lower_block_set failed");
+
+        let has_remapped = combined.nodes().iter().any(|op| {
+            matches!(op, Op::Subscribe(t) if t == "deployed/setpoint")
+        });
+        assert!(has_remapped, "combined DAG should contain remapped topic");
+
+        let has_original = combined.nodes().iter().any(|op| {
+            matches!(op, Op::Subscribe(t) if *t == default_sub)
+        });
+        assert!(!has_original, "original topic should be remapped away");
+    }
+
+    #[test]
+    fn test_lower_block_set_unknown_block_type_returns_error() {
+        let profile = DeploymentProfile::new("bench");
+        let blocks: Vec<(String, serde_json::Value)> = vec![
+            ("nonexistent_block_xyz".into(), serde_json::json!({})),
+        ];
+        let result = lower_block_set(&blocks, &profile);
+        match result {
+            Err(e) => assert!(e.contains("unknown block type"), "unexpected error: {e}"),
+            Ok(_) => panic!("expected an error for unknown block type"),
+        }
     }
 }
