@@ -63,6 +63,14 @@ pub fn registry() -> Vec<BlockEntry> {
             description: "PID controller with configurable gains, pubsub I/O, and output clamping",
             create: || Box::new(pid::PidBlock::default()),
         },
+        // I/O
+        BlockEntry {
+            block_type: "adc",
+            display_name: "ADC Input",
+            category: BlockCategory::Io,
+            description: "Read a hardware ADC channel and expose as a hardware input port",
+            create: || Box::new(basic::AdcBlock::default()),
+        },
         // PubSub
         BlockEntry {
             block_type: "subscribe",

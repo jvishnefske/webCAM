@@ -383,7 +383,7 @@ mod tests {
 
         // All NodeId references must be valid (Dag::add_op validates this)
         // If we got here without error, offsets are correct.
-        assert!(combined.len() > 0, "combined DAG should be non-empty");
+        assert!(!combined.is_empty(), "combined DAG should be non-empty");
 
         // Verify no invalid cross-references exist by checking each op is well-formed
         for (i, op) in combined.nodes().iter().enumerate() {
