@@ -9,7 +9,7 @@
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
 
-use crate::ir::{Attr, IrModule, IrOp};
+use crate::ir::{ArithOp, Attr, DataflowOp, FuncOp, IrModule, IrOp, IrOpKind};
 
 /// Emit safe Rust source code from an IrModule.
 ///
@@ -162,160 +162,103 @@ fn attr_str<'a>(op: &'a IrOp, key: &str) -> &'a str {
 
 /// Emit Rust code for a single IrOp.
 fn emit_op(out: &mut String, idx: usize, op: &IrOp) {
-    let name = op.name.as_str();
-
     // Helper closures for common patterns
     let r = |i: usize| -> u32 { op.results.get(i).map(|v| v.0).unwrap_or(0) };
     let a = |i: usize| -> u32 { op.operands.get(i).map(|v| v.0).unwrap_or(0) };
 
-    match name {
-        "dataflow.constant" => {
+    match &op.kind {
+        IrOpKind::Arith(ArithOp::Constant) => {
             let val = attr_f64(op, "value");
-            let _ = writeln!(
-                out,
-                "    // Op {idx}: dataflow.constant {{value = {val}}}"
-            );
+            let _ = writeln!(out, "    // Op {idx}: arith.constant {{value = {val}}}");
             let _ = writeln!(out, "    state.v{} = {};", r(0), fmt_f64(val));
         }
 
-        "arith.addf" => {
-            let _ = writeln!(
-                out,
-                "    // Op {idx}: arith.addf(%{}, %{})",
-                a(0),
-                a(1)
-            );
-            let _ = writeln!(
-                out,
-                "    state.v{} = state.v{} + state.v{};",
-                r(0),
-                a(0),
-                a(1)
-            );
+        IrOpKind::Arith(ArithOp::Addf) => {
+            let _ = writeln!(out, "    // Op {idx}: arith.addf(%{}, %{})", a(0), a(1));
+            let _ = writeln!(out, "    state.v{} = state.v{} + state.v{};", r(0), a(0), a(1));
         }
 
-        "arith.mulf" => {
-            let _ = writeln!(
-                out,
-                "    // Op {idx}: arith.mulf(%{}, %{})",
-                a(0),
-                a(1)
-            );
-            let _ = writeln!(
-                out,
-                "    state.v{} = state.v{} * state.v{};",
-                r(0),
-                a(0),
-                a(1)
-            );
+        IrOpKind::Arith(ArithOp::Mulf) => {
+            let _ = writeln!(out, "    // Op {idx}: arith.mulf(%{}, %{})", a(0), a(1));
+            let _ = writeln!(out, "    state.v{} = state.v{} * state.v{};", r(0), a(0), a(1));
         }
 
-        "arith.subf" => {
-            let _ = writeln!(
-                out,
-                "    // Op {idx}: arith.subf(%{}, %{})",
-                a(0),
-                a(1)
-            );
-            let _ = writeln!(
-                out,
-                "    state.v{} = state.v{} - state.v{};",
-                r(0),
-                a(0),
-                a(1)
-            );
+        IrOpKind::Arith(ArithOp::Subf) => {
+            let _ = writeln!(out, "    // Op {idx}: arith.subf(%{}, %{})", a(0), a(1));
+            let _ = writeln!(out, "    state.v{} = state.v{} - state.v{};", r(0), a(0), a(1));
         }
 
-        "dataflow.clamp" => {
+        IrOpKind::Arith(ArithOp::Select) => {
+            let _ = writeln!(out, "    // Op {idx}: arith.select (not yet implemented)");
+        }
+
+        IrOpKind::Dataflow(DataflowOp::Clamp) => {
             let lo = attr_f64(op, "lo");
             let hi = attr_f64(op, "hi");
-            let _ = writeln!(
-                out,
-                "    // Op {idx}: dataflow.clamp {{lo = {lo}, hi = {hi}}}"
-            );
-            let _ = writeln!(
-                out,
-                "    state.v{} = state.v{}.max({}).min({});",
-                r(0),
-                a(0),
-                fmt_f64(lo),
-                fmt_f64(hi)
-            );
+            let _ = writeln!(out, "    // Op {idx}: dataflow.clamp {{lo = {lo}, hi = {hi}}}");
+            let _ = writeln!(out, "    state.v{} = state.v{}.max({}).min({});", r(0), a(0), fmt_f64(lo), fmt_f64(hi));
         }
 
-        "dataflow.adc_read" => {
+        IrOpKind::Dataflow(DataflowOp::AdcRead) => {
             let ch = attr_u8(op, "channel");
             let _ = writeln!(out, "    // Op {idx}: dataflow.adc_read {{channel = {ch}}}");
             let _ = writeln!(out, "    state.v{} = hw.adc_read({ch});", r(0));
         }
 
-        "dataflow.pwm_write" => {
+        IrOpKind::Dataflow(DataflowOp::PwmWrite) => {
             let ch = attr_u8(op, "channel");
-            let _ = writeln!(
-                out,
-                "    // Op {idx}: dataflow.pwm_write {{channel = {ch}}}"
-            );
+            let _ = writeln!(out, "    // Op {idx}: dataflow.pwm_write {{channel = {ch}}}");
             let _ = writeln!(out, "    hw.pwm_write({ch}, state.v{});", a(0));
         }
 
-        "dataflow.gpio_read" => {
+        IrOpKind::Dataflow(DataflowOp::GpioRead) => {
             let pin = attr_u8(op, "pin");
             let _ = writeln!(out, "    // Op {idx}: dataflow.gpio_read {{pin = {pin}}}");
             let _ = writeln!(out, "    state.v{} = hw.gpio_read({pin});", r(0));
         }
 
-        "dataflow.gpio_write" => {
+        IrOpKind::Dataflow(DataflowOp::GpioWrite) => {
             let pin = attr_u8(op, "pin");
             let _ = writeln!(out, "    // Op {idx}: dataflow.gpio_write {{pin = {pin}}}");
             let _ = writeln!(out, "    hw.gpio_write({pin}, state.v{});", a(0));
         }
 
-        "dataflow.uart_rx" => {
+        IrOpKind::Dataflow(DataflowOp::UartRx) => {
             let port = attr_u8(op, "port");
             let _ = writeln!(out, "    // Op {idx}: dataflow.uart_rx {{port = {port}}}");
             let _ = writeln!(out, "    state.v{} = hw.uart_read({port});", r(0));
         }
 
-        "dataflow.uart_tx" => {
+        IrOpKind::Dataflow(DataflowOp::UartTx) => {
             let port = attr_u8(op, "port");
             let _ = writeln!(out, "    // Op {idx}: dataflow.uart_tx {{port = {port}}}");
             let _ = writeln!(out, "    hw.uart_write({port}, state.v{});", a(0));
         }
 
-        "dataflow.encoder_read" => {
+        IrOpKind::Dataflow(DataflowOp::EncoderRead) => {
             let ch = attr_u8(op, "channel");
-            let _ = writeln!(
-                out,
-                "    // Op {idx}: dataflow.encoder_read {{channel = {ch}}}"
-            );
-            let _ = writeln!(
-                out,
-                "    let (p, v) = hw.encoder_read({ch}); state.v{} = p; state.v{} = v;",
-                r(0),
-                r(1)
-            );
+            let _ = writeln!(out, "    // Op {idx}: dataflow.encoder_read {{channel = {ch}}}");
+            let _ = writeln!(out, "    let (p, v) = hw.encoder_read({ch}); state.v{} = p; state.v{} = v;", r(0), r(1));
         }
 
-        "dataflow.subscribe" => {
+        IrOpKind::Func(FuncOp::Call { callee }) if callee == "subscribe" => {
             let topic = attr_str(op, "topic");
-            let _ = writeln!(
-                out,
-                "    // Op {idx}: dataflow.subscribe {{topic = \"{topic}\"}}"
-            );
+            let _ = writeln!(out, "    // Op {idx}: func.call @subscribe {{topic = \"{topic}\"}}");
             let _ = writeln!(out, "    state.v{} = hw.subscribe(\"{topic}\");", r(0));
         }
 
-        "dataflow.publish" => {
+        IrOpKind::Func(FuncOp::Call { callee }) if callee == "publish" => {
             let topic = attr_str(op, "topic");
-            let _ = writeln!(
-                out,
-                "    // Op {idx}: dataflow.publish {{topic = \"{topic}\"}}"
-            );
+            let _ = writeln!(out, "    // Op {idx}: func.call @publish {{topic = \"{topic}\"}}");
             let _ = writeln!(out, "    hw.publish(\"{topic}\", state.v{});", a(0));
         }
 
-        _ => {
-            let _ = writeln!(out, "    // unsupported: {name}");
+        IrOpKind::Func(FuncOp::Call { callee }) => {
+            let _ = writeln!(out, "    // Op {idx}: func.call @{callee} (unsupported callee)");
+        }
+
+        IrOpKind::Custom(s) => {
+            let _ = writeln!(out, "    // unsupported: {s}");
         }
     }
 }
