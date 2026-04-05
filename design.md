@@ -116,10 +116,11 @@ Module ─── identity, ports, config, capability queries
 
 ### Multi-Target Code Generation
 
-Two codegen backends:
+Three codegen backends:
 
-1. **Rust emit** (legacy) — string-interpolation Rust code generation
-2. **MLIR emit** — MLIR pipeline → C via mlir-opt/mlir-translate
+1. **Rust emit** (legacy) — string-interpolation Rust code generation (`emit.rs`, `targets/`)
+2. **MLIR text** (tier 1) — textual `.mlir` via string concatenation → mlir-opt/mlir-translate → C
+3. **Typed IR** (tier 2) — `IrOpKind` enum AST → `emit_rust.rs` safe Rust / `printer.rs` MLIR text
 
 ```
 GraphSnapshot ──► partition.rs ──► per-target subgraphs
@@ -239,20 +240,37 @@ Compact `no_std` expression DAG for signal processing, distinct from the dataflo
 
 ## Part VI: MLIR Codegen Pipeline (mlir-codegen)
 
-### Pipeline
+Three parallel IR representations generated from the same `GraphSnapshot`:
 
 ```
 GraphSnapshot (JSON)
-  → lower.rs     → .mlir text (block lowering, FSM regions)
-  → mlir-opt     → optimized .mlir
-  → mlir-translate → .c / .h files
+  ├─ Tier 1: lower.rs → .mlir text → mlir-opt → mlir-translate → .c/.h
+  ├─ Tier 2: ir.rs    → IrModule (typed AST) → printer.rs → .mlir
+  │                                           → emit_rust.rs → safe Rust
+  └─ Tier 3: runtime.rs → BlockFn enum → DagRuntime (in-MCU execution)
 ```
+
+### Typed IR Dialect System (ir.rs)
+
+Operations use dialect-namespaced Rust enums (`IrOpKind`), not strings:
+
+| Dialect | Enum | Ops | MLIR Standard |
+|---------|------|-----|---------------|
+| `arith` | `ArithOp` | `Constant`, `Addf`, `Mulf`, `Subf`, `Select` | Yes — standard MLIR arith |
+| `func` | `FuncOp` | `Call { callee }` | Yes — standard MLIR func |
+| `dataflow` | `DataflowOp` | `Clamp`, `AdcRead`, `PwmWrite`, `GpioRead`, `GpioWrite`, `UartRx`, `UartTx`, `EncoderRead` | No — custom hardware I/O |
+
+**Pub/sub as function calls**: Subscribe/publish are modeled as `FuncOp::Call { callee: "subscribe"/"publish" }` with a topic attribute, aligning with MLIR's `func.call @symbol` pattern.
+
+**Stepper/stallguard excluded from IR**: Motor control ops are custom message structs over channels, not language-level IR operations. They exist only in the runtime tier (`BlockFn::Stepper`, `BlockFn::StallGuard`).
+
+See [mlir-codegen/MLIR.md](mlir-codegen/MLIR.md) for the full dialect reference.
 
 ### Runtime (mlir-codegen/runtime.rs)
 
-- `BlockFn` enum: Captures config via partial application (Constant, Gain, Add, AdcRead, PwmWrite, ...)
-- `DagRuntime`: Deserialize graph, build tickable object
-- `HardwareBridge` trait: Hardware abstraction
+- `BlockFn` enum: Captures config via partial application (19 variants including Stepper, StallGuard)
+- `DagRuntime`: Deserialize graph JSON, topologically sort, build tickable object with flat `Vec<f64>` state
+- `HardwareBridge` trait: Hardware abstraction (ADC, PWM, GPIO, UART, Encoder, Stepper, PubSub)
 - `NullHardware`: No-op bridge for pure-logic testing
 
 ---
