@@ -151,8 +151,9 @@ impl DeploymentProfile {
             seen.into_keys()
                 .map(|node_id| BoardEntry {
                     node_id: node_id.clone(),
-                    // Use the node_id as family name when inferring (legacy compat)
-                    mcu_family: node_id,
+                    // When boards are not explicitly configured, default to Host
+                    // simulation. Users should call add_board() for real targets.
+                    mcu_family: "Host".to_string(),
                 })
                 .collect()
         } else {
@@ -361,15 +362,18 @@ pub fn validate_profile(
     }
 
     // ── 2. UnknownMcu ────────────────────────────────────────────────────────
-    let unique_nodes: std::collections::HashSet<&String> =
-        profile.node_assignments.values().collect();
-
-    for node in &unique_nodes {
-        if module_traits::inventory::mcu_for(node).is_none() {
-            errors.push(ValidationError::UnknownMcu {
-                family: node.to_string(),
-            });
+    // Look up MCU family via profile.boards (node_id → mcu_family), not the
+    // raw node_id string which is a logical name like "motor_ctrl".
+    for (_, node_id) in &profile.node_assignments {
+        if let Some(board) = profile.boards.iter().find(|b| b.node_id == *node_id) {
+            if module_traits::inventory::mcu_for(&board.mcu_family).is_none() {
+                errors.push(ValidationError::UnknownMcu {
+                    family: board.mcu_family.clone(),
+                });
+            }
         }
+        // If no board entry exists, validate_multi_board covers that case.
+        // For legacy single-board profiles without boards, skip this check.
     }
 
     // ── 3. PinConflict ───────────────────────────────────────────────────────
@@ -653,7 +657,9 @@ mod tests {
     #[test]
     fn validate_profile_unknown_mcu_error() {
         let mut profile = DeploymentProfile::new("test");
-        profile.node_assignments.insert(0, "UnknownChip9000".into());
+        // Node assigned with a board that has an unknown MCU family.
+        profile.add_board("my_node", "UnknownChip9000");
+        profile.node_assignments.insert(0, "my_node".into());
         let blocks: Vec<(String, serde_json::Value)> = vec![];
         let errors = validate_profile(&profile, &blocks).unwrap_err();
         assert!(
@@ -670,12 +676,13 @@ mod tests {
     #[test]
     fn validate_profile_pin_conflict_error() {
         let mut profile = DeploymentProfile::new("test");
-        // Two ADC blocks (block 0 and block 1), both assigned pin "PA0" on node "Rp2040".
-        profile.node_assignments.insert(0, "Rp2040".into());
-        profile.node_assignments.insert(1, "Rp2040".into());
+        profile.add_board("motor_ctrl", "Rp2040");
+        // Two ADC blocks (block 0 and block 1), both assigned pin "PA0" on node "motor_ctrl".
+        profile.node_assignments.insert(0, "motor_ctrl".into());
+        profile.node_assignments.insert(1, "motor_ctrl".into());
 
-        let binding_a = make_binding(0, "adc0", "Rp2040", vec!["PA0"]);
-        let binding_b = make_binding(1, "adc1", "Rp2040", vec!["PA0"]);
+        let binding_a = make_binding(0, "adc0", "motor_ctrl", vec!["PA0"]);
+        let binding_b = make_binding(1, "adc1", "motor_ctrl", vec!["PA0"]);
         profile.peripheral_assignments.push(binding_a);
         profile.peripheral_assignments.push(binding_b);
 
@@ -689,7 +696,7 @@ mod tests {
             errors.iter().any(|e| matches!(
                 e,
                 ValidationError::PinConflict { pin, node, .. }
-                    if pin == "PA0" && node == "Rp2040"
+                    if pin == "PA0" && node == "motor_ctrl"
             )),
             "expected PinConflict, got: {:?}",
             errors
@@ -700,10 +707,11 @@ mod tests {
     #[test]
     fn validate_profile_valid_with_correct_bindings_ok() {
         let mut profile = DeploymentProfile::new("test");
-        profile.node_assignments.insert(0, "Rp2040".into());
+        profile.add_board("motor_ctrl", "Rp2040");
+        profile.node_assignments.insert(0, "motor_ctrl".into());
 
         // Provide a binding for block_id=0, port_name="adc0" (matches the adc block's declared channel).
-        let binding = make_binding(0, "adc0", "Rp2040", vec!["GP26"]);
+        let binding = make_binding(0, "adc0", "motor_ctrl", vec!["GP26"]);
         profile.peripheral_assignments.push(binding);
 
         let blocks: Vec<(String, serde_json::Value)> = vec![
