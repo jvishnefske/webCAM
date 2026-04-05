@@ -34,6 +34,7 @@ jobs:
           --exclude board-support-pico
           --exclude board-support-pico2
           --exclude board-support-stm32
+          --exclude board-support-pi-zero
           --exclude pico-bootloader
           --exclude combined-frontend
           --exclude hil-frontend
@@ -43,6 +44,7 @@ jobs:
           --exclude board-support-pico
           --exclude board-support-pico2
           --exclude board-support-stm32
+          --exclude board-support-pi-zero
           --exclude pico-bootloader
           --exclude combined-frontend
           --exclude hil-frontend
