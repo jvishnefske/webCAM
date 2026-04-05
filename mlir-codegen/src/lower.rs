@@ -1498,7 +1498,7 @@ mod tests {
         let ops = &module.funcs[0].ops;
         assert_eq!(ops.len(), 2, "expected 2 ops (zero + constant), got {}", ops.len());
         // The second op should be the constant(42.0)
-        assert_eq!(ops[1].name, "dataflow.constant");
+        assert_eq!(ops[1].name, "arith.constant");
         assert_eq!(
             ops[1].attrs.get("value"),
             Some(&crate::ir::Attr::F64(42.0))
@@ -1532,15 +1532,15 @@ mod tests {
         assert_eq!(ops.len(), 4, "expected 4 ops, got {}", ops.len());
 
         // Op 0: zero constant
-        assert_eq!(ops[0].name, "dataflow.constant");
+        assert_eq!(ops[0].name, "arith.constant");
         assert_eq!(ops[0].attrs.get("value"), Some(&crate::ir::Attr::F64(0.0)));
 
         // Op 1: constant(5.0)
-        assert_eq!(ops[1].name, "dataflow.constant");
+        assert_eq!(ops[1].name, "arith.constant");
         assert_eq!(ops[1].attrs.get("value"), Some(&crate::ir::Attr::F64(5.0)));
 
         // Op 2: constant(2.0) — gain factor
-        assert_eq!(ops[2].name, "dataflow.constant");
+        assert_eq!(ops[2].name, "arith.constant");
         assert_eq!(ops[2].attrs.get("value"), Some(&crate::ir::Attr::F64(2.0)));
 
         // Op 3: mulf — should wire constant(5) and constant(2)
@@ -1648,13 +1648,13 @@ mod tests {
         let module = lower_graph_ir(&snap).unwrap();
         let ops = &module.funcs[0].ops;
 
-        let sub_op = ops.iter().find(|op| op.name == "dataflow.subscribe").unwrap();
+        let sub_op = ops.iter().find(|op| op.name == "func.call @subscribe").unwrap();
         assert_eq!(
             sub_op.attrs.get("topic"),
             Some(&crate::ir::Attr::Str("sensor/temp".to_string()))
         );
 
-        let pub_op = ops.iter().find(|op| op.name == "dataflow.publish").unwrap();
+        let pub_op = ops.iter().find(|op| op.name == "func.call @publish").unwrap();
         assert_eq!(
             pub_op.attrs.get("topic"),
             Some(&crate::ir::Attr::Str("actuator/fan".to_string()))
