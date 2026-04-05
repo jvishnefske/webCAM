@@ -8,7 +8,10 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use module_traits::deployment::PeripheralBinding;
+use module_traits::deployment::{
+    BoardNode, ChannelBinding, DeploymentManifest, PeripheralBinding, SystemTopology, TaskBinding,
+    TaskTrigger,
+};
 use serde::{Deserialize, Serialize};
 
 /// Maps logical channel names to deployment-specific channel names.
@@ -58,11 +61,21 @@ impl FromIterator<(String, String)> for ChannelMap {
     }
 }
 
+/// A board entry in a deployment profile.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BoardEntry {
+    /// Unique node identifier (e.g. "motor_ctrl", "sensor_hub").
+    pub node_id: String,
+    /// MCU family (must match [`module_traits::inventory::mcu_for`]).
+    pub mcu_family: String,
+}
+
 /// Describes one complete deployment of a configurable block set.
 ///
 /// A deployment profile captures everything needed to take an abstract set of
 /// configurable blocks and place them onto specific hardware:
 ///
+/// - **boards** — MCU boards in the deployment (node_id + MCU family)
 /// - **channel_map** — remaps logical channel names to deployment-specific ones
 /// - **node_assignments** — maps block IDs to the node (MCU/board) they run on
 /// - **peripheral_assignments** — binds block ports to hardware peripherals
@@ -70,6 +83,9 @@ impl FromIterator<(String, String)> for ChannelMap {
 pub struct DeploymentProfile {
     /// Human-readable name for this deployment (e.g. "robot_arm_v1", "bench_test").
     pub name: String,
+    /// Boards in this deployment. Empty means single-board / legacy mode.
+    #[serde(default)]
+    pub boards: Vec<BoardEntry>,
     /// Logical → deployment-specific channel name remappings.
     pub channel_map: ChannelMap,
     /// Maps block_id → node_id (which MCU/board runs this block).
@@ -83,9 +99,130 @@ impl DeploymentProfile {
     pub fn new(name: &str) -> Self {
         Self {
             name: name.to_string(),
+            boards: Vec::new(),
             channel_map: ChannelMap::new(),
             node_assignments: HashMap::new(),
             peripheral_assignments: Vec::new(),
+        }
+    }
+
+    /// Add a board to this deployment profile.
+    ///
+    /// The `node_id` must be unique within the profile and `mcu_family` must
+    /// be a recognised family (e.g. "Rp2040", "Stm32f4").
+    pub fn add_board(&mut self, node_id: &str, mcu_family: &str) {
+        // Avoid duplicates
+        if !self.boards.iter().any(|b| b.node_id == node_id) {
+            self.boards.push(BoardEntry {
+                node_id: node_id.to_string(),
+                mcu_family: mcu_family.to_string(),
+            });
+        }
+    }
+
+    /// Assign a block to a specific board node.
+    pub fn assign_block(&mut self, block_id: u32, node_id: &str) {
+        self.node_assignments
+            .insert(block_id, node_id.to_string());
+    }
+
+    /// Convert this profile into a [`DeploymentManifest`] suitable for codegen.
+    ///
+    /// - Creates a [`BoardNode`] for each board entry.
+    /// - Creates a single [`TaskBinding`] per node, grouping all assigned blocks.
+    /// - Copies `peripheral_assignments` as-is.
+    /// - Creates placeholder [`ChannelBinding`] entries as `Simulated`.
+    ///
+    /// If no boards have been added, falls back to inferring boards from
+    /// unique node values in `node_assignments` and `peripheral_assignments`.
+    pub fn to_manifest(&self, tick_hz: f64) -> DeploymentManifest {
+        // Resolve boards: explicit boards or inferred from assignments.
+        let boards: Vec<BoardEntry> = if self.boards.is_empty() {
+            // Infer from node_assignments + peripheral_assignments
+            let mut seen: HashMap<String, String> = HashMap::new();
+            for node_id in self.node_assignments.values() {
+                seen.entry(node_id.clone())
+                    .or_insert_with(|| node_id.clone());
+            }
+            for pb in &self.peripheral_assignments {
+                seen.entry(pb.node.clone())
+                    .or_insert_with(|| pb.node.clone());
+            }
+            seen.into_keys()
+                .map(|node_id| BoardEntry {
+                    node_id: node_id.clone(),
+                    // Use the node_id as family name when inferring (legacy compat)
+                    mcu_family: node_id,
+                })
+                .collect()
+        } else {
+            self.boards.clone()
+        };
+
+        let nodes: Vec<BoardNode> = boards
+            .iter()
+            .map(|b| {
+                let mcu = module_traits::inventory::mcu_for(&b.mcu_family);
+                BoardNode {
+                    id: b.node_id.clone(),
+                    mcu_family: b.mcu_family.clone(),
+                    board: None,
+                    rust_target: mcu.map(|m| {
+                        match m.core {
+                            module_traits::inventory::CpuCore::CortexM0Plus => {
+                                "thumbv6m-none-eabi".to_string()
+                            }
+                            module_traits::inventory::CpuCore::CortexM4
+                            | module_traits::inventory::CpuCore::CortexM4F => {
+                                "thumbv7em-none-eabihf".to_string()
+                            }
+                            module_traits::inventory::CpuCore::CortexM7 => {
+                                "thumbv7em-none-eabihf".to_string()
+                            }
+                            module_traits::inventory::CpuCore::RiscV32IMC => {
+                                "riscv32imc-unknown-none-elf".to_string()
+                            }
+                            module_traits::inventory::CpuCore::HostSim => {
+                                "x86_64-unknown-linux-gnu".to_string()
+                            }
+                        }
+                    }),
+                }
+            })
+            .collect();
+
+        // One task per node, grouping all assigned blocks.
+        let tasks: Vec<TaskBinding> = boards
+            .iter()
+            .map(|b| {
+                let block_ids: Vec<u32> = self
+                    .node_assignments
+                    .iter()
+                    .filter(|(_, n)| *n == &b.node_id)
+                    .map(|(id, _)| *id)
+                    .collect();
+                TaskBinding {
+                    name: format!("{}_task", b.node_id),
+                    node: b.node_id.clone(),
+                    blocks: block_ids,
+                    trigger: TaskTrigger::Periodic { hz: tick_hz },
+                    priority: 1,
+                    stack_size: None,
+                }
+            })
+            .collect();
+
+        // Placeholder channel bindings (Simulated transport).
+        let channels: Vec<ChannelBinding> = Vec::new();
+
+        DeploymentManifest {
+            topology: SystemTopology {
+                nodes,
+                links: Vec::new(),
+            },
+            tasks,
+            channels,
+            peripheral_bindings: self.peripheral_assignments.clone(),
         }
     }
 }
@@ -110,6 +247,19 @@ pub enum ValidationError {
         node: String,
         binding_a: String,
         binding_b: String,
+    },
+    /// A block assigned to a board has a hardware channel but no
+    /// [`PeripheralBinding`] scoped to that specific board/node.
+    MissingBoardBinding {
+        block_id: u32,
+        channel_name: String,
+        block_type: String,
+        node_id: String,
+    },
+    /// A block references a node_id that is not listed in `boards`.
+    UnknownBoard {
+        block_id: u32,
+        node_id: String,
     },
 }
 
@@ -136,6 +286,24 @@ impl fmt::Display for ValidationError {
                 f,
                 "pin conflict on node '{}': pin '{}' used by both '{}' and '{}'",
                 node, pin, binding_a, binding_b
+            ),
+            ValidationError::MissingBoardBinding {
+                block_id,
+                channel_name,
+                block_type,
+                node_id,
+            } => write!(
+                f,
+                "block {}('{}') has hardware channel '{}' but no PeripheralBinding for node '{}'",
+                block_id, block_type, channel_name, node_id
+            ),
+            ValidationError::UnknownBoard {
+                block_id,
+                node_id,
+            } => write!(
+                f,
+                "block {} is assigned to node '{}' which is not in the boards list",
+                block_id, node_id
             ),
         }
     }
@@ -233,6 +401,94 @@ pub fn validate_profile(
                         binding_b: pin_owners[j].1.clone(),
                     });
                 }
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+/// Validate multi-board channel alignment in a [`DeploymentProfile`].
+///
+/// Checks that:
+/// 1. **UnknownBoard** — every block's assigned node must appear in `profile.boards`.
+/// 2. **MissingBoardBinding** — every hardware-channel block assigned to a board
+///    must have a [`PeripheralBinding`] scoped to that specific node.
+/// 3. **UnknownMcu** — every board's `mcu_family` must be a recognised MCU family.
+///
+/// This extends [`validate_profile`] with board-aware checks. If the profile has
+/// no explicit boards, validation passes (legacy single-board mode).
+pub fn validate_multi_board(
+    profile: &DeploymentProfile,
+    blocks: &[(String, serde_json::Value)],
+) -> Result<(), Vec<ValidationError>> {
+    // If no explicit boards, nothing to check (legacy single-board mode).
+    if profile.boards.is_empty() {
+        return Ok(());
+    }
+
+    let mut errors: Vec<ValidationError> = Vec::new();
+
+    let board_ids: Vec<&str> = profile.boards.iter().map(|b| b.node_id.as_str()).collect();
+
+    // 1. Every board's MCU family must be known.
+    for board in &profile.boards {
+        if module_traits::inventory::mcu_for(&board.mcu_family).is_none() {
+            errors.push(ValidationError::UnknownMcu {
+                family: board.mcu_family.clone(),
+            });
+        }
+    }
+
+    // 2. Every assigned block must reference a known board.
+    for (block_id, node_id) in &profile.node_assignments {
+        if !board_ids.contains(&node_id.as_str()) {
+            errors.push(ValidationError::UnknownBoard {
+                block_id: *block_id,
+                node_id: node_id.clone(),
+            });
+        }
+    }
+
+    // 3. Every hardware-channel block on a board must have a binding for that board.
+    for (block_idx, (block_type, config)) in blocks.iter().enumerate() {
+        let block_id = block_idx as u32;
+
+        // Only check blocks that are assigned to a board.
+        let node_id = match profile.node_assignments.get(&block_id) {
+            Some(n) => n,
+            None => continue,
+        };
+
+        let mut block_instance = match crate::registry::create_block(block_type) {
+            Some(b) => b,
+            None => continue,
+        };
+        block_instance.apply_config(config);
+
+        for channel in block_instance.declared_channels() {
+            if channel.kind != crate::schema::ChannelKind::Hardware {
+                continue;
+            }
+
+            // Check that a binding exists for this block+port+node combination.
+            let has_binding = profile.peripheral_assignments.iter().any(|pb| {
+                pb.block_id == block_id
+                    && pb.port_name == channel.name
+                    && pb.node == *node_id
+            });
+
+            if !has_binding {
+                errors.push(ValidationError::MissingBoardBinding {
+                    block_id,
+                    channel_name: channel.name.clone(),
+                    block_type: block_type.clone(),
+                    node_id: node_id.clone(),
+                });
             }
         }
     }
@@ -457,6 +713,199 @@ mod tests {
         assert!(
             validate_profile(&profile, &blocks).is_ok(),
             "expected Ok for valid profile"
+        );
+    }
+
+    // ── Multi-board tests ──────────────────────────────────────────────
+
+    #[test]
+    fn add_board_and_assign_block() {
+        let mut profile = DeploymentProfile::new("multi");
+        profile.add_board("board_a", "Rp2040");
+        profile.add_board("board_b", "Stm32f4");
+        profile.assign_block(0, "board_a");
+        profile.assign_block(1, "board_b");
+
+        assert_eq!(profile.boards.len(), 2);
+        assert_eq!(
+            profile.node_assignments.get(&0).map(String::as_str),
+            Some("board_a")
+        );
+        assert_eq!(
+            profile.node_assignments.get(&1).map(String::as_str),
+            Some("board_b")
+        );
+    }
+
+    #[test]
+    fn add_board_deduplicates() {
+        let mut profile = DeploymentProfile::new("dedup");
+        profile.add_board("board_a", "Rp2040");
+        profile.add_board("board_a", "Stm32f4"); // same node_id, should be ignored
+        assert_eq!(profile.boards.len(), 1);
+        assert_eq!(profile.boards[0].mcu_family, "Rp2040");
+    }
+
+    #[test]
+    fn to_manifest_produces_correct_topology() {
+        let mut profile = DeploymentProfile::new("two_boards");
+        profile.add_board("motor_ctrl", "Rp2040");
+        profile.add_board("sensor_hub", "Stm32f4");
+        profile.assign_block(0, "motor_ctrl");
+        profile.assign_block(1, "motor_ctrl");
+        profile.assign_block(2, "sensor_hub");
+
+        let manifest = profile.to_manifest(100.0);
+
+        assert_eq!(manifest.topology.nodes.len(), 2);
+        assert!(manifest.topology.nodes.iter().any(|n| n.id == "motor_ctrl" && n.mcu_family == "Rp2040"));
+        assert!(manifest.topology.nodes.iter().any(|n| n.id == "sensor_hub" && n.mcu_family == "Stm32f4"));
+        assert_eq!(manifest.tasks.len(), 2);
+
+        let motor_task = manifest.tasks.iter().find(|t| t.node == "motor_ctrl").unwrap();
+        assert!(motor_task.blocks.contains(&0));
+        assert!(motor_task.blocks.contains(&1));
+
+        let sensor_task = manifest.tasks.iter().find(|t| t.node == "sensor_hub").unwrap();
+        assert_eq!(sensor_task.blocks, vec![2]);
+    }
+
+    #[test]
+    fn to_manifest_uses_tick_hz() {
+        let mut profile = DeploymentProfile::new("tick_test");
+        profile.add_board("node0", "Host");
+        profile.assign_block(0, "node0");
+
+        let manifest = profile.to_manifest(200.0);
+        let task = &manifest.tasks[0];
+        match &task.trigger {
+            module_traits::deployment::TaskTrigger::Periodic { hz } => {
+                assert!((hz - 200.0).abs() < f64::EPSILON);
+            }
+            _ => panic!("expected Periodic trigger"),
+        }
+    }
+
+    #[test]
+    fn to_manifest_copies_peripheral_bindings() {
+        let mut profile = DeploymentProfile::new("bindings_test");
+        profile.add_board("board_a", "Rp2040");
+        profile.assign_block(0, "board_a");
+        let binding = make_binding(0, "adc0", "board_a", vec!["GP26"]);
+        profile.peripheral_assignments.push(binding);
+
+        let manifest = profile.to_manifest(50.0);
+        assert_eq!(manifest.peripheral_bindings.len(), 1);
+        assert_eq!(manifest.peripheral_bindings[0].node, "board_a");
+    }
+
+    #[test]
+    fn serde_backward_compat_no_boards_field() {
+        // Simulate a legacy profile JSON without "boards" field.
+        let json = r#"{"name":"legacy","channel_map":{},"node_assignments":{},"peripheral_assignments":[]}"#;
+        let profile: DeploymentProfile = serde_json::from_str(json).expect("deserialize legacy");
+        assert!(profile.boards.is_empty());
+        assert_eq!(profile.name, "legacy");
+    }
+
+    #[test]
+    fn serde_roundtrip_with_boards() {
+        let mut profile = DeploymentProfile::new("roundtrip");
+        profile.add_board("node_a", "Rp2040");
+        profile.add_board("node_b", "Stm32f4");
+        profile.assign_block(0, "node_a");
+
+        let json = serde_json::to_string(&profile).expect("serialize");
+        let decoded: DeploymentProfile = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(decoded.boards.len(), 2);
+        assert_eq!(decoded.boards[0].node_id, "node_a");
+        assert_eq!(decoded.boards[1].mcu_family, "Stm32f4");
+    }
+
+    // ── validate_multi_board tests ─────────────────────────────────────
+
+    #[test]
+    fn validate_multi_board_empty_boards_passes() {
+        let profile = DeploymentProfile::new("empty");
+        let blocks: Vec<(String, serde_json::Value)> = vec![
+            ("adc".into(), serde_json::json!({"channel_name": "adc0"})),
+        ];
+        // No boards → legacy mode → always passes.
+        assert!(validate_multi_board(&profile, &blocks).is_ok());
+    }
+
+    #[test]
+    fn validate_multi_board_unknown_mcu_error() {
+        let mut profile = DeploymentProfile::new("bad_mcu");
+        profile.add_board("node0", "FakeChip");
+        let blocks: Vec<(String, serde_json::Value)> = vec![];
+        let errors = validate_multi_board(&profile, &blocks).unwrap_err();
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ValidationError::UnknownMcu { family } if family == "FakeChip"
+        )));
+    }
+
+    #[test]
+    fn validate_multi_board_unknown_board_error() {
+        let mut profile = DeploymentProfile::new("bad_board");
+        profile.add_board("board_a", "Rp2040");
+        profile.assign_block(0, "nonexistent");
+        let blocks: Vec<(String, serde_json::Value)> = vec![
+            ("pid".into(), serde_json::json!({})),
+        ];
+        let errors = validate_multi_board(&profile, &blocks).unwrap_err();
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ValidationError::UnknownBoard { block_id: 0, ref node_id } if node_id == "nonexistent"
+        )));
+    }
+
+    #[test]
+    fn validate_multi_board_missing_binding_for_board() {
+        let mut profile = DeploymentProfile::new("missing_binding");
+        profile.add_board("board_a", "Rp2040");
+        profile.add_board("board_b", "Stm32f4");
+        // Assign ADC block to board_b but only provide binding for board_a.
+        profile.assign_block(0, "board_b");
+        let binding = make_binding(0, "adc0", "board_a", vec!["GP26"]);
+        profile.peripheral_assignments.push(binding);
+
+        let blocks: Vec<(String, serde_json::Value)> = vec![
+            ("adc".into(), serde_json::json!({"channel_name": "adc0"})),
+        ];
+        let errors = validate_multi_board(&profile, &blocks).unwrap_err();
+        assert!(errors.iter().any(|e| matches!(
+            e,
+            ValidationError::MissingBoardBinding {
+                block_id: 0,
+                ref channel_name,
+                ref node_id,
+                ..
+            } if channel_name == "adc0" && node_id == "board_b"
+        )));
+    }
+
+    #[test]
+    fn validate_multi_board_valid_two_boards() {
+        let mut profile = DeploymentProfile::new("valid_multi");
+        profile.add_board("board_a", "Rp2040");
+        profile.add_board("board_b", "Stm32f4");
+        profile.assign_block(0, "board_a");
+        profile.assign_block(1, "board_b");
+        // Binding for block 0 on board_a
+        profile.peripheral_assignments.push(make_binding(0, "adc0", "board_a", vec!["GP26"]));
+        // Binding for block 1 on board_b
+        profile.peripheral_assignments.push(make_binding(1, "adc1", "board_b", vec!["PA0"]));
+
+        let blocks: Vec<(String, serde_json::Value)> = vec![
+            ("adc".into(), serde_json::json!({"channel_name": "adc0"})),
+            ("adc".into(), serde_json::json!({"channel_name": "adc1"})),
+        ];
+        assert!(
+            validate_multi_board(&profile, &blocks).is_ok(),
+            "expected Ok for valid multi-board profile"
         );
     }
 }

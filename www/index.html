@@ -229,6 +229,18 @@
         </div>
       </section>
 
+      <!-- Multi-Board Deployment -->
+      <section class="mb-4">
+        <h2 class="df-section-head">Boards</h2>
+        <div id="df-board-list" class="mb-2 text-xs"></div>
+        <div class="flex gap-1 mb-1">
+          <input id="df-board-name" type="text" placeholder="node_id" class="flex-1 bg-bg border border-border text-text px-2 py-1 rounded text-xs focus:outline-none focus:border-accent"/>
+          <select id="df-board-mcu" class="bg-bg border border-border text-text px-1 py-1 rounded text-xs focus:outline-none focus:border-accent"></select>
+          <button class="btn btn-primary btn-sm" id="df-board-add">Add</button>
+        </div>
+        <div id="df-block-assignments" class="mb-2 text-xs max-h-[200px] overflow-y-auto"></div>
+      </section>
+
       <!-- Export -->
       <section class="mb-4">
         <h2 class="df-section-head">Export</h2>
