@@ -8,12 +8,13 @@
 use leptos::prelude::*;
 
 use configurable_blocks::codegen;
-use configurable_blocks::deployment_profile::DeploymentProfile;
+use configurable_blocks::deployment_profile::{ChannelMap, DeploymentProfile};
 use configurable_blocks::lower::lower_block_set;
 use module_traits::deployment::*;
 use module_traits::inventory;
 
 use crate::types::BlockSet;
+use super::profile_editor::ProfileEditor;
 
 #[component]
 pub fn DeployPanel() -> impl IntoView {
@@ -22,14 +23,22 @@ pub fn DeployPanel() -> impl IntoView {
     let (tick_hz, set_tick_hz) = signal("100".to_string());
     let (gen_status, set_gen_status) = signal(String::new());
     let (gen_files, set_gen_files) = signal(Vec::<(String, String)>::new());
+    let (channel_map, set_channel_map) = signal(ChannelMap::new());
 
     let families = inventory::supported_families();
 
     // Read the shared block set from the DAG editor tab.
     let shared_blocks = use_context::<ReadSignal<BlockSet>>();
 
-    let block_count = Signal::derive(move || {
-        shared_blocks.map(|s| s.get().len()).unwrap_or(0)
+    // Create a local read signal for the block set that the ProfileEditor can use.
+    // If no shared context exists, we provide an always-empty signal.
+    let (empty_blocks, _set_empty) = signal(BlockSet::new());
+    let blocks_for_editor: ReadSignal<BlockSet> = shared_blocks.unwrap_or(empty_blocks);
+
+    let block_count = Signal::derive(move || blocks_for_editor.get().len());
+
+    let on_map_change = Callback::new(move |map: ChannelMap| {
+        set_channel_map.set(map);
     });
 
     let on_generate = move |_| {
@@ -38,9 +47,7 @@ pub fn DeployPanel() -> impl IntoView {
         let hz: f64 = tick_hz.get().parse().unwrap_or(100.0);
 
         // Retrieve blocks from the shared editor state.
-        let editor_blocks: BlockSet = shared_blocks
-            .map(|s| s.get())
-            .unwrap_or_default();
+        let editor_blocks: BlockSet = blocks_for_editor.get();
 
         if editor_blocks.is_empty() {
             set_gen_status.set("No blocks to deploy. Add blocks in the DAG Editor tab first.".into());
@@ -48,8 +55,9 @@ pub fn DeployPanel() -> impl IntoView {
             return;
         }
 
-        // Build a deployment profile from UI inputs (no channel remapping for now).
-        let profile = DeploymentProfile::new(&node);
+        // Build a deployment profile from UI inputs with channel remapping from the editor.
+        let mut profile = DeploymentProfile::new(&node);
+        profile.channel_map = channel_map.get();
 
         // Lower the editor's block set into a single DAG.
         let dag = match lower_block_set(&editor_blocks, &profile) {
@@ -165,6 +173,9 @@ pub fn DeployPanel() -> impl IntoView {
                 }
             }}
         </div>
+
+        // Channel mapping editor
+        <ProfileEditor blocks=blocks_for_editor on_map_change=on_map_change />
 
         // Show generated files
         {move || {
