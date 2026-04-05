@@ -70,10 +70,7 @@ fn test_pipeline_default_config() {
         output.mlir_text.contains("3.25"),
         "pipeline output should contain the constant value"
     );
-    assert!(
-        output.peripherals_h.contains("hw_adc_read"),
-        "peripherals header should include hardware stubs"
-    );
+    // Pipeline produces MLIR analysis output only — no C FFI artifacts.
 }
 
 #[test]

@@ -9,6 +9,7 @@
 
 #![no_std]
 #![no_main]
+#![deny(unsafe_code)]
 
 extern crate alloc;
 
@@ -20,8 +21,8 @@ use embedded_alloc::LlffHeap as Heap;
 #[global_allocator]
 static HEAP: Heap = Heap::empty();
 
-// RP2350 IMAGE_DEF block — required for the boot ROM to recognize this as a valid image.
-// Must include VECTOR_TABLE item pointing to 0x10000100 (start of FLASH region).
+// RP2350 IMAGE_DEF block — required by the boot ROM to recognize this as a valid image.
+#[allow(unsafe_code)] // link_section is required for boot ROM image definition
 #[link_section = ".start_block"]
 #[used]
 pub static IMAGE_DEF: embassy_rp::block::ImageDefVt =
@@ -30,6 +31,7 @@ pub static IMAGE_DEF: embassy_rp::block::ImageDefVt =
 mod dag_handler;
 mod dap_pins;
 mod dap_task;
+mod heap_init;
 mod http_static;
 mod shared_buses;
 mod ws_server;
@@ -72,17 +74,7 @@ async fn dap_usb_task(
 async fn main(spawner: Spawner) {
     info!("Pico 2 (RP2350A) program start");
 
-    // Initialize heap allocator (8KB for DAG eval buffers)
-    {
-        const HEAP_SIZE: usize = 8192;
-        static mut HEAP_MEM: [core::mem::MaybeUninit<u8>; HEAP_SIZE] =
-            [core::mem::MaybeUninit::uninit(); HEAP_SIZE];
-        // SAFETY: called once at startup, HEAP_MEM is static mut only used here
-        #[allow(static_mut_refs)]
-        unsafe {
-            HEAP.init(HEAP_MEM.as_ptr() as usize, HEAP_SIZE);
-        }
-    }
+    heap_init::init();
 
     let p = embassy_rp::init(Default::default());
 

@@ -128,13 +128,5 @@ fn generate_main_rs(dt: f64) -> String {
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
 
-    // Append C-FFI hw_* stubs for MLIR backend
-    writeln!(out).unwrap();
-    writeln!(
-        out,
-        "static mut HW: HwPeripherals = HwPeripherals {{ _marker: () }};"
-    )
-    .unwrap();
-
     out
 }
