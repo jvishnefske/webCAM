@@ -5,6 +5,7 @@
 hil/firmware-out/
 /www/dist
 /www/pkg/*
+/www/version.json
 !/www/pkg/rustcam.d.ts
 *.swp
 *.swo

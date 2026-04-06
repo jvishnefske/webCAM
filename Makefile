@@ -1,6 +1,6 @@
 .PHONY: build wasm lint test ts ci release serve clean help verify \
        hil-firmware hil-stm32 hil-pi-zero hil-jlink-flash hil-verify all \
-       dag-frontend combined-frontend embed-assets
+       dag-frontend combined-frontend embed-assets ts-combined version hil-e2e
 
 WASM_TARGET = wasm32-unknown-unknown
 
@@ -45,13 +45,21 @@ wasm-cam: ## Build CAM WASM + JS bindings
 wasm-dataflow: ## Build Dataflow WASM + JS bindings
 	wasm-pack build crates/rustsim --target web --out-dir ../../www-dataflow/pkg --release
 
-ts: ts-cam ts-dataflow ## Build and test all TypeScript frontends
+ts: ts-cam ts-dataflow ts-combined ## Build and test all TypeScript frontends
 
 ts-cam: ## Build and test CAM TypeScript frontend
 	cd www-cam && npm ci && npm run typecheck && npm run test && npm run build
 
 ts-dataflow: ## Build and test Dataflow TypeScript frontend
 	cd www-dataflow && npm ci && npm run typecheck && npm run test && npm run build
+
+ts-combined: ## Build combined frontend (copies WASM pkgs + builds www/)
+	cp -r www-cam/pkg/* www/pkg/
+	cp -r www-dataflow/pkg/* www/pkg/
+	cd www && npm ci && npm run typecheck && npm run test && npm run build
+
+version: ## Stamp build metadata into www/version.json
+	@echo '{"sha":"'$$(git rev-parse --short HEAD)'","date":"'$$(date -u +%FT%TZ)'","ref":"'$$(git rev-parse --abbrev-ref HEAD)'"}' > www/version.json
 
 verify: ## Build, test, lint, format-check (swiss-cheese gate)
 	cargo build --workspace $(WORKSPACE_EXCLUDES) --all-targets
@@ -61,10 +69,11 @@ verify: ## Build, test, lint, format-check (swiss-cheese gate)
 
 ci: lint test wasm ts ## Run full CI pipeline locally
 
-release: wasm ts ## Package both webapps for deployment
+release: wasm ts ## Package all webapps for deployment
 	cd www-cam && zip -r ../rustcam.zip .
 	cd www-dataflow && zip -r ../rustsim.zip .
-	@echo "Release artifacts: rustcam.zip rustsim.zip"
+	cd www && zip -r ../rustcam-combined.zip dist/ pkg/ index.html
+	@echo "Release artifacts: rustcam.zip rustsim.zip rustcam-combined.zip"
 
 serve-cam: wasm-cam ts-cam ## Build and serve CAM locally
 	@echo "Serving CAM at http://localhost:8080"
@@ -82,14 +91,12 @@ serve-native: wasm-dataflow ## Build WASM + run native server with mock HAL
 hil-e2e: ## Run E2E tests against live Pico2 (requires flashed device)
 	./tests/pico2_e2e.sh
 
-hil-e2e: ## Run E2E tests against live Pico2 (requires flashed device)
-	./tests/pico2_e2e.sh
-
 clean: ## Remove build artifacts
 	cargo clean
 	rm -rf www-cam/pkg www-cam/dist www-cam/node_modules
 	rm -rf www-dataflow/pkg www-dataflow/dist www-dataflow/node_modules
-	rm -f rustcam.zip rustsim.zip
+	rm -rf www/pkg www/dist www/node_modules www/version.json
+	rm -f rustcam.zip rustsim.zip rustcam-combined.zip
 
 # --- HIL targets ---
 
