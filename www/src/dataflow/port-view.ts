@@ -5,6 +5,7 @@ import { edgePath, createDragWire } from './edge-view.js';
 import type { DataflowManager } from './graph.js';
 import type { GraphSnapshot } from './types.js';
 
+
 const NODE_W = 140;
 const PORT_R = 6;
 const PORT_SPACING = 20;
@@ -171,8 +172,15 @@ export function setupWireDrag(
       targetDataIndex: target?.dataset?.index,
     };
 
+    const tel = mgr.telemetry;
+    function emitTrace(t: Record<string, unknown>): void {
+      tel?.trace('wire-drop', t);
+      console.log('[wire-trace]', t);
+    }
+
     if (!target) {
-      console.log('[wire-trace] no element at point', trace);
+      trace.result = 'no-element';
+      emitTrace(trace);
       wireDrag.dragPath.remove();
       wireDrag = null;
       return;
@@ -199,12 +207,12 @@ export function setupWireDrag(
           try {
             mgr.connect(outBlock, outPort, inBlock, inPort);
             trace.result = 'success';
-            console.log('[wire-trace]', trace);
+            emitTrace(trace);
             onConnect();
           } catch (err) {
             trace.result = 'error';
             trace.error = String(err);
-            console.error('[wire-trace]', trace);
+            emitTrace(trace);
             // Flash target port red briefly, then restore original color
             const origColor = target.style.backgroundColor;
             target.style.backgroundColor = 'var(--color-danger)';
@@ -212,12 +220,12 @@ export function setupWireDrag(
           }
         } else {
           trace.result = 'same-side-skip';
-          console.log('[wire-trace]', trace);
+          emitTrace(trace);
         }
       }
     } else {
       trace.result = 'not-a-port';
-      console.log('[wire-trace]', trace);
+      emitTrace(trace);
     }
 
     wireDrag.dragPath.remove();
