@@ -88,6 +88,60 @@ pub fn dataflow_update_block(
     })
 }
 
+/// Validate whether a connection between two ports is valid.
+/// Returns empty string on success, or an error message on failure.
+#[wasm_bindgen]
+pub fn dataflow_validate_connection(
+    graph_id: u32,
+    from_block: u32,
+    from_port: u32,
+    to_block: u32,
+    to_port: u32,
+) -> String {
+    DATAFLOW_GRAPHS.with(|g| {
+        let graphs = g.borrow();
+        let graph = match graphs.get(&graph_id) {
+            Some(g) => g,
+            None => return "graph not found".to_string(),
+        };
+
+        // Build port count maps from the graph
+        let snap = graph.snapshot();
+        let mut output_counts = std::collections::HashMap::new();
+        let mut input_counts = std::collections::HashMap::new();
+        for block in &snap.blocks {
+            output_counts.insert(block.id, block.outputs.len());
+            input_counts.insert(block.id, block.inputs.len());
+        }
+
+        // Build existing connections list
+        let existing: Vec<(u32, usize, u32, usize)> = snap
+            .channels
+            .iter()
+            .map(|ch| (ch.from_block.0, ch.from_port, ch.to_block.0, ch.to_port))
+            .collect();
+
+        let req = dataflow::connection::ConnectionRequest {
+            from_block,
+            from_port: from_port as usize,
+            from_side: dataflow::connection::PortSide::Output,
+            to_block,
+            to_port: to_port as usize,
+            to_side: dataflow::connection::PortSide::Input,
+        };
+
+        match dataflow::connection::validate_connection(
+            &req,
+            &output_counts,
+            &input_counts,
+            &existing,
+        ) {
+            Ok(_) => String::new(),
+            Err(e) => e.to_string(),
+        }
+    })
+}
+
 /// Connect an output port to an input port. Returns channel id.
 #[wasm_bindgen]
 pub fn dataflow_connect(

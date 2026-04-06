@@ -177,6 +177,9 @@ export function setupWireDrag(
             onConnect();
           } catch (err) {
             console.warn('connect failed:', err);
+            // Flash target port red briefly
+            target.style.backgroundColor = 'var(--color-danger)';
+            setTimeout(() => { target.style.backgroundColor = ''; }, 500);
           }
         }
       }
