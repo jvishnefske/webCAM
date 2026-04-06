@@ -6,7 +6,7 @@
 //!
 //! In simulation mode, blocks with `SimModel` impls interact with `SimPeripherals`.
 
-use crate::dataflow::block::{Module, PortDef, PortKind, SimModel, SimPeripherals, Value};
+use crate::dataflow::block::{Module, PortDef, PortKind, SimModel, SimPeripherals, Tick, Value};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -58,6 +58,16 @@ impl Module for AdcBlock {
     }
     fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
         Some(self)
+    }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for AdcBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        // In non-simulation mode, output 0.0 (no hardware)
+        vec![Some(Value::Float(0.0))]
     }
 }
 
@@ -123,6 +133,16 @@ impl Module for PwmBlock {
     fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
         Some(self)
     }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for PwmBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        // Sink: consume input, produce no output
+        vec![]
+    }
 }
 
 impl SimModel for PwmBlock {
@@ -185,6 +205,15 @@ impl Module for GpioOutBlock {
     fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
         Some(self)
     }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for GpioOutBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        vec![]
+    }
 }
 
 impl SimModel for GpioOutBlock {
@@ -246,6 +275,15 @@ impl Module for GpioInBlock {
     }
     fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
         Some(self)
+    }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for GpioInBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        vec![Some(Value::Float(0.0))]
     }
 }
 
@@ -315,6 +353,15 @@ impl Module for UartTxBlock {
     fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
         Some(self)
     }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for UartTxBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        vec![]
+    }
 }
 
 impl SimModel for UartTxBlock {
@@ -381,6 +428,15 @@ impl Module for UartRxBlock {
     fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
         Some(self)
     }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for UartRxBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        vec![None]
+    }
 }
 
 impl SimModel for UartRxBlock {
@@ -443,6 +499,15 @@ impl Module for EncoderBlock {
     }
     fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
         Some(self)
+    }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for EncoderBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        vec![Some(Value::Float(0.0)), Some(Value::Float(0.0))]
     }
 }
 
@@ -513,6 +578,15 @@ impl Module for Ssd1306DisplayBlock {
     }
     fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
         Some(self)
+    }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for Ssd1306DisplayBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        vec![]
     }
 }
 
@@ -593,6 +667,15 @@ impl Module for Tmc2209StepperBlock {
     fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
         Some(self)
     }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for Tmc2209StepperBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        vec![Some(Value::Float(0.0))]
+    }
 }
 
 impl SimModel for Tmc2209StepperBlock {
@@ -671,6 +754,15 @@ impl Module for Tmc2209StallGuardBlock {
     }
     fn as_sim_model(&mut self) -> Option<&mut dyn SimModel> {
         Some(self)
+    }
+    fn as_tick(&mut self) -> Option<&mut dyn Tick> {
+        Some(self)
+    }
+}
+
+impl Tick for Tmc2209StallGuardBlock {
+    fn tick(&mut self, _inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
+        vec![Some(Value::Float(0.0)), Some(Value::Float(0.0))]
     }
 }
 
@@ -840,7 +932,7 @@ mod tests {
         // default trait impls return None for these
         assert!(block.as_analysis().is_none());
         assert!(block.as_codegen().is_none());
-        assert!(block.as_tick().is_none());
+        assert!(block.as_tick().is_some());
     }
 
     #[test]
