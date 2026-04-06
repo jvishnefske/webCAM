@@ -30,6 +30,19 @@ struct Edge {
     to_port: usize,
 }
 
+/// State of an in-progress wire drag from an output port.
+#[derive(Clone, Copy)]
+struct DraggingWire {
+    /// Block id of the source block.
+    from_block: usize,
+    /// Output port index on the source block.
+    from_port: usize,
+    /// Current mouse X in SVG coordinates.
+    mouse_x: f64,
+    /// Current mouse Y in SVG coordinates.
+    mouse_y: f64,
+}
+
 /// Instance of a placed block on the canvas.
 ///
 /// Stores block type + config as serializable data (Send+Sync safe).
@@ -74,6 +87,9 @@ pub fn DagEditorPanel() -> impl IntoView {
 
     // Selected block
     let (selected_id, set_selected_id) = signal(None::<usize>);
+
+    // Wire drag state: Some while dragging from an output port.
+    let (dragging_wire, set_dragging_wire) = signal(None::<DraggingWire>);
 
     // Config signals derived from selection
     let selected_block_type = Signal::derive(move || {
@@ -446,7 +462,183 @@ pub fn DagEditorPanel() -> impl IntoView {
                     <button class="btn btn-danger" on:click=on_delete>"Delete"</button>
                     <span class="dag-status">{move || deploy_status.get()}</span>
                 </div>
-                <svg class="dag-canvas" viewBox="0 0 700 400">
+                <svg
+                    class="dag-canvas"
+                    viewBox="0 0 700 400"
+                    on:mousedown=move |ev: web_sys::MouseEvent| {
+                        // Start wire drag if mousedown is on an output port circle.
+                        let target = match ev.target() {
+                            Some(t) => t,
+                            None => return,
+                        };
+                        let el: web_sys::Element = match target.dyn_into() {
+                            Ok(e) => e,
+                            Err(_) => return,
+                        };
+                        let side = el.get_attribute("data-side").unwrap_or_default();
+                        if side != "out" {
+                            return;
+                        }
+                        let block_id: usize = match el.get_attribute("data-block-id")
+                            .and_then(|s| s.parse().ok()) {
+                            Some(v) => v,
+                            None => return,
+                        };
+                        let port_idx: usize = match el.get_attribute("data-port-idx")
+                            .and_then(|s| s.parse().ok()) {
+                            Some(v) => v,
+                            None => return,
+                        };
+                        // Compute SVG coordinates from client position
+                        let svg_el = match el.closest("svg") {
+                            Ok(Some(s)) => s,
+                            _ => return,
+                        };
+                        let (mx, my) = client_to_svg(&svg_el, ev.client_x() as f64, ev.client_y() as f64);
+                        set_dragging_wire.set(Some(DraggingWire {
+                            from_block: block_id,
+                            from_port: port_idx,
+                            mouse_x: mx,
+                            mouse_y: my,
+                        }));
+                        ev.prevent_default();
+                    }
+                    on:mousemove=move |ev: web_sys::MouseEvent| {
+                        // Update drag line endpoint while dragging.
+                        if dragging_wire.get_untracked().is_none() {
+                            return;
+                        }
+                        let target = match ev.current_target() {
+                            Some(t) => t,
+                            None => return,
+                        };
+                        let svg_el: web_sys::Element = match target.dyn_into() {
+                            Ok(e) => e,
+                            Err(_) => return,
+                        };
+                        let (mx, my) = client_to_svg(&svg_el, ev.client_x() as f64, ev.client_y() as f64);
+                        set_dragging_wire.update(|dw| {
+                            if let Some(ref mut w) = dw {
+                                w.mouse_x = mx;
+                                w.mouse_y = my;
+                            }
+                        });
+                    }
+                    on:mouseup=move |ev: web_sys::MouseEvent| {
+                        // Complete or cancel wire drag.
+                        let wire = match dragging_wire.get_untracked() {
+                            Some(w) => w,
+                            None => return,
+                        };
+                        // Clear drag state first.
+                        set_dragging_wire.set(None);
+
+                        // Check if mouseup target is an input port.
+                        let target = match ev.target() {
+                            Some(t) => t,
+                            None => return,
+                        };
+                        let el: web_sys::Element = match target.dyn_into() {
+                            Ok(e) => e,
+                            Err(_) => return,
+                        };
+                        let side = el.get_attribute("data-side").unwrap_or_default();
+                        if side != "in" {
+                            return; // Dropped on empty canvas — cancel.
+                        }
+                        let to_block: usize = match el.get_attribute("data-block-id")
+                            .and_then(|s| s.parse().ok()) {
+                            Some(v) => v,
+                            None => return,
+                        };
+                        let to_port: usize = match el.get_attribute("data-port-idx")
+                            .and_then(|s| s.parse().ok()) {
+                            Some(v) => v,
+                            None => return,
+                        };
+
+                        // Do not wire a block to itself.
+                        if wire.from_block == to_block {
+                            return;
+                        }
+
+                        // Generate auto-topic name.
+                        let auto_topic = format!("wire_{}_{}", wire.from_block, wire.from_port);
+
+                        // Update configs for both source and target blocks.
+                        set_blocks.update(|blks| {
+                            // --- Source block: set the output channel's config key ---
+                            if let Some(src_pb) = blks.iter().find(|b| b.id == wire.from_block) {
+                                if let Some(src_block) = src_pb.reconstruct() {
+                                    let channels = src_block.declared_channels();
+                                    let out_channels: Vec<_> = channels.iter()
+                                        .filter(|c| c.direction == ChannelDirection::Output)
+                                        .collect();
+                                    if let Some(out_ch) = out_channels.get(wire.from_port) {
+                                        if let Some(key) = find_config_key_for_channel(&src_pb.config, &out_ch.name) {
+                                            // Now mutably borrow to update
+                                            if let Some(src_mut) = blks.iter_mut().find(|b| b.id == wire.from_block) {
+                                                if let serde_json::Value::Object(ref mut map) = src_mut.config {
+                                                    map.insert(key, serde_json::Value::String(auto_topic.clone()));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // --- Target block: set the input channel's config key ---
+                            if let Some(dst_pb) = blks.iter().find(|b| b.id == to_block) {
+                                if let Some(dst_block) = dst_pb.reconstruct() {
+                                    let channels = dst_block.declared_channels();
+                                    let in_channels: Vec<_> = channels.iter()
+                                        .filter(|c| c.direction == ChannelDirection::Input)
+                                        .collect();
+                                    if let Some(in_ch) = in_channels.get(to_port) {
+                                        if let Some(key) = find_config_key_for_channel(&dst_pb.config, &in_ch.name) {
+                                            if let Some(dst_mut) = blks.iter_mut().find(|b| b.id == to_block) {
+                                                if let serde_json::Value::Object(ref mut map) = dst_mut.config {
+                                                    map.insert(key, serde_json::Value::String(auto_topic.clone()));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                        sync_shared(&blocks.get());
+                    }
+                >
+                    // Dashed drag line (rendered when dragging a wire)
+                    {move || {
+                        let dw = dragging_wire.get();
+                        let blks = blocks.get();
+                        dw.and_then(|w| {
+                            let src = blks.iter().find(|b| b.id == w.from_block)?;
+                            let x1 = src.x + 190.0;
+                            let y1 = src.y + 46.0 + w.from_port as f64 * 16.0;
+                            let x2 = w.mouse_x;
+                            let y2 = w.mouse_y;
+                            let cpx = f64::max((x2 - x1).abs() * 0.4, 30.0);
+                            let d = format!(
+                                "M {},{} C {},{} {},{} {},{}",
+                                x1, y1,
+                                x1 + cpx, y1,
+                                x2 - cpx, y2,
+                                x2, y2
+                            );
+                            Some(view! {
+                                <path
+                                    d=d
+                                    fill="none"
+                                    stroke="#f59e0b"
+                                    stroke-width="2"
+                                    stroke-dasharray="6 3"
+                                    class="dag-edge-drag"
+                                />
+                            })
+                        })
+                    }}
                     {move || {
                         let blks = blocks.get();
                         let edge_list = edges.get();
@@ -513,8 +705,16 @@ pub fn DagEditorPanel() -> impl IntoView {
                                     {channels.iter().filter(|c| c.direction == ChannelDirection::Input).enumerate().map(|(i, ch)| {
                                         let py = 46.0 + i as f64 * 16.0;
                                         let label = ch.name.clone();
+                                        let bid = id.to_string();
+                                        let pidx = i.to_string();
                                         view! {
-                                            <circle cx="0" cy=py r="4" class="dag-port dag-port-in" />
+                                            <circle
+                                                cx="0" cy=py r="4"
+                                                class="dag-port dag-port-in"
+                                                attr:data-block-id=bid
+                                                attr:data-port-idx=pidx
+                                                attr:data-side="in"
+                                            />
                                             <text x="8" y=py + 4.0 class="dag-port-label">{label}</text>
                                         }
                                     }).collect_view()}
@@ -522,8 +722,16 @@ pub fn DagEditorPanel() -> impl IntoView {
                                     {channels.iter().filter(|c| c.direction == ChannelDirection::Output).enumerate().map(|(i, ch)| {
                                         let py = 46.0 + i as f64 * 16.0;
                                         let label = ch.name.clone();
+                                        let bid = id.to_string();
+                                        let pidx = i.to_string();
                                         view! {
-                                            <circle cx="190" cy=py r="4" class="dag-port dag-port-out" />
+                                            <circle
+                                                cx="190" cy=py r="4"
+                                                class="dag-port dag-port-out"
+                                                attr:data-block-id=bid
+                                                attr:data-port-idx=pidx
+                                                attr:data-side="out"
+                                            />
                                             <text x="182" y=py + 4.0 class="dag-port-label dag-port-label-right">{label}</text>
                                         }
                                     }).collect_view()}
@@ -553,6 +761,54 @@ pub fn DagEditorPanel() -> impl IntoView {
             />
         </div>
     }
+}
+
+/// Find the config key whose current value matches `channel_name`.
+///
+/// Blocks store channel topic names as string values in their config JSON.
+/// For example, `{"input_topic": "add/a", "output_topic": "add/out"}`.
+/// Given channel_name="add/a", this returns Some("input_topic").
+fn find_config_key_for_channel(
+    config: &serde_json::Value,
+    channel_name: &str,
+) -> Option<String> {
+    let obj = config.as_object()?;
+    for (key, val) in obj {
+        if let Some(s) = val.as_str() {
+            if s == channel_name {
+                return Some(key.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Convert mouse client coordinates to SVG user-space coordinates.
+///
+/// Uses the SVG element's bounding rect and viewBox to map screen pixels
+/// to the SVG coordinate system.
+fn client_to_svg(svg: &web_sys::Element, client_x: f64, client_y: f64) -> (f64, f64) {
+    let rect = svg.get_bounding_client_rect();
+    let rect_w = rect.width();
+    let rect_h = rect.height();
+    // viewBox is "0 0 700 400" — extract via attribute or use defaults
+    let (vb_w, vb_h) = svg
+        .get_attribute("viewBox")
+        .and_then(|vb| {
+            let parts: Vec<f64> = vb.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+            if parts.len() == 4 {
+                Some((parts[2], parts[3]))
+            } else {
+                None
+            }
+        })
+        .unwrap_or((700.0, 400.0));
+
+    let scale_x = vb_w / rect_w;
+    let scale_y = vb_h / rect_h;
+    let x = (client_x - rect.left()) * scale_x;
+    let y = (client_y - rect.top()) * scale_y;
+    (x, y)
 }
 
 /// Offset all NodeId references in an Op by a given amount.
