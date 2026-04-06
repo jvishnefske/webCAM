@@ -146,7 +146,13 @@ export function setupWireDrag(
   function onPointerMove(e: PointerEvent): void {
     if (!wireDrag) return;
     const world = screenToWorld(e.clientX, e.clientY);
-    wireDrag.dragPath.setAttribute('d', edgePath(wireDrag.fromX, wireDrag.fromY, world.x, world.y));
+    // edgePath assumes output→input (left-to-right curve).
+    // When dragging from an input port, the mouse is the "output" end.
+    if (wireDrag.isOutput) {
+      wireDrag.dragPath.setAttribute('d', edgePath(wireDrag.fromX, wireDrag.fromY, world.x, world.y));
+    } else {
+      wireDrag.dragPath.setAttribute('d', edgePath(world.x, world.y, wireDrag.fromX, wireDrag.fromY));
+    }
   }
 
   function onPointerUp(e: PointerEvent): void {
