@@ -1160,4 +1160,95 @@ mod tests {
 
         assert_eq!(g.get_sim_pwm(0), 1.0);
     }
+
+    // --- Tick (normal mode) tests ---
+
+    #[test]
+    fn adc_tick_returns_zero() {
+        let mut block = AdcBlock::from_config(AdcConfig::default());
+        let tick = block.as_tick().unwrap();
+        let out = tick.tick(&[], 0.01);
+        assert_eq!(out, vec![Some(Value::Float(0.0))]);
+    }
+
+    #[test]
+    fn pwm_tick_consumes_input() {
+        let mut block = PwmBlock::from_config(PwmConfig::default());
+        let duty = Value::Float(0.5);
+        let tick = block.as_tick().unwrap();
+        let out = tick.tick(&[Some(&duty)], 0.01);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn gpio_in_tick_returns_zero() {
+        let mut block = GpioInBlock::from_config(GpioInConfig::default());
+        let tick = block.as_tick().unwrap();
+        let out = tick.tick(&[], 0.01);
+        assert_eq!(out, vec![Some(Value::Float(0.0))]);
+    }
+
+    #[test]
+    fn gpio_out_tick_consumes_input() {
+        let mut block = GpioOutBlock::from_config(GpioOutConfig::default());
+        let val = Value::Float(1.0);
+        let tick = block.as_tick().unwrap();
+        let out = tick.tick(&[Some(&val)], 0.01);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn uart_rx_tick_returns_none() {
+        let mut block = UartRxBlock::from_config(UartRxConfig::default());
+        let tick = block.as_tick().unwrap();
+        let out = tick.tick(&[], 0.01);
+        assert_eq!(out, vec![None]);
+    }
+
+    #[test]
+    fn uart_tx_tick_consumes_input() {
+        let mut block = UartTxBlock::from_config(UartTxConfig::default());
+        let data = Value::Bytes(vec![0x48, 0x49]);
+        let tick = block.as_tick().unwrap();
+        let out = tick.tick(&[Some(&data)], 0.01);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn encoder_tick_returns_zeros() {
+        let mut block = EncoderBlock::from_config(EncoderConfig::default());
+        let tick = block.as_tick().unwrap();
+        let out = tick.tick(&[], 0.01);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0], Some(Value::Float(0.0)));
+        assert_eq!(out[1], Some(Value::Float(0.0)));
+    }
+
+    #[test]
+    fn display_tick_consumes_input() {
+        let mut block = Ssd1306DisplayBlock::from_config(Ssd1306DisplayConfig::default());
+        let l1 = Value::Text("Hello".into());
+        let l2 = Value::Text("World".into());
+        let tick = block.as_tick().unwrap();
+        let out = tick.tick(&[Some(&l1), Some(&l2)], 0.01);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn stepper_tick_returns_zero_position() {
+        let mut block = Tmc2209StepperBlock::from_config(Tmc2209StepperConfig::default());
+        let tick = block.as_tick().unwrap();
+        let out = tick.tick(&[], 0.01);
+        assert_eq!(out, vec![Some(Value::Float(0.0))]);
+    }
+
+    #[test]
+    fn stallguard_tick_returns_zeros() {
+        let mut block = Tmc2209StallGuardBlock::from_config(Tmc2209StallGuardConfig::default());
+        let tick = block.as_tick().unwrap();
+        let out = tick.tick(&[], 0.01);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0], Some(Value::Float(0.0)));
+        assert_eq!(out[1], Some(Value::Float(0.0)));
+    }
 }
