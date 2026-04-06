@@ -13,6 +13,23 @@ use super::config_panel::ConfigPanel;
 use super::monitor::MonitorPanel;
 use super::palette::BlockPalette;
 
+/// An edge connecting an output port on one block to an input port on another.
+///
+/// Edges are auto-detected by matching `declared_channels()` topic names:
+/// a block with an Output channel named "foo" connects to any block with
+/// an Input channel named "foo".
+#[derive(Clone)]
+struct Edge {
+    /// Block id of the source (output) block.
+    from_block: usize,
+    /// Index of the output port on the source block (0-based among outputs).
+    from_port: usize,
+    /// Block id of the destination (input) block.
+    to_block: usize,
+    /// Index of the input port on the destination block (0-based among inputs).
+    to_port: usize,
+}
+
 /// Instance of a placed block on the canvas.
 ///
 /// Stores block type + config as serializable data (Send+Sync safe).
@@ -133,6 +150,50 @@ pub fn DagEditorPanel() -> impl IntoView {
             },
             None => String::new(),
         }
+    });
+
+    // Auto-detect edges by matching output topic names to input topic names.
+    let edges = Signal::derive(move || {
+        let blks = blocks.get();
+        // Collect (block_id, port_index, topic_name) for every output channel.
+        let mut outputs: Vec<(usize, usize, String)> = Vec::new();
+        // Collect (block_id, port_index, topic_name) for every input channel.
+        let mut inputs: Vec<(usize, usize, String)> = Vec::new();
+
+        for pb in blks.iter() {
+            if let Some(block) = pb.reconstruct() {
+                let channels = block.declared_channels();
+                let mut in_idx = 0_usize;
+                let mut out_idx = 0_usize;
+                for ch in &channels {
+                    match ch.direction {
+                        ChannelDirection::Output => {
+                            outputs.push((pb.id, out_idx, ch.name.clone()));
+                            out_idx += 1;
+                        }
+                        ChannelDirection::Input => {
+                            inputs.push((pb.id, in_idx, ch.name.clone()));
+                            in_idx += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut result = Vec::<Edge>::new();
+        for (out_id, out_port, ref topic) in &outputs {
+            for (in_id, in_port, ref in_topic) in &inputs {
+                if topic == in_topic && out_id != in_id {
+                    result.push(Edge {
+                        from_block: *out_id,
+                        from_port: *out_port,
+                        to_block: *in_id,
+                        to_port: *in_port,
+                    });
+                }
+            }
+        }
+        result
     });
 
     // Deploy status
@@ -354,7 +415,7 @@ pub fn DagEditorPanel() -> impl IntoView {
     };
 
     // Tick: POST /api/tick to evaluate the deployed DAG once
-    let on_tick = move |_| {
+    let _on_tick = move |_: web_sys::MouseEvent| {
         let status_setter = set_deploy_status;
         wasm_bindgen_futures::spawn_local(async move {
             match tick_mcu().await {
@@ -387,7 +448,41 @@ pub fn DagEditorPanel() -> impl IntoView {
                 </div>
                 <svg class="dag-canvas" viewBox="0 0 700 400">
                     {move || {
-                        blocks.get().iter().map(|pb| {
+                        let blks = blocks.get();
+                        let edge_list = edges.get();
+
+                        // Edge paths (rendered first so they appear behind nodes)
+                        let edge_views = edge_list.iter().filter_map(|edge| {
+                            let src = blks.iter().find(|b| b.id == edge.from_block)?;
+                            let dst = blks.iter().find(|b| b.id == edge.to_block)?;
+                            // Output port: right side of src block
+                            let x1 = src.x + 190.0;
+                            let y1 = src.y + 46.0 + edge.from_port as f64 * 16.0;
+                            // Input port: left side of dst block
+                            let x2 = dst.x;
+                            let y2 = dst.y + 46.0 + edge.to_port as f64 * 16.0;
+                            // Cubic bezier control point x-offset
+                            let cpx = f64::max((x2 - x1).abs() * 0.4, 30.0);
+                            let d = format!(
+                                "M {},{} C {},{} {},{} {},{}",
+                                x1, y1,
+                                x1 + cpx, y1,
+                                x2 - cpx, y2,
+                                x2, y2
+                            );
+                            Some(view! {
+                                <path
+                                    d=d
+                                    fill="none"
+                                    stroke="#6b7280"
+                                    stroke-width="2"
+                                    class="dag-edge"
+                                />
+                            })
+                        }).collect_view();
+
+                        // Block nodes
+                        let node_views = blks.iter().map(|pb| {
                             let id = pb.id;
                             let x = pb.x;
                             let y = pb.y;
@@ -434,7 +529,12 @@ pub fn DagEditorPanel() -> impl IntoView {
                                     }).collect_view()}
                                 </g>
                             }
-                        }).collect_view()
+                        }).collect_view();
+
+                        view! {
+                            <g class="dag-edges">{edge_views}</g>
+                            <g class="dag-nodes">{node_views}</g>
+                        }
                     }}
                 </svg>
             </div>
