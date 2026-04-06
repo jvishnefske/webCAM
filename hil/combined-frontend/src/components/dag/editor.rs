@@ -354,8 +354,6 @@ pub fn DagEditorPanel() -> impl IntoView {
             // Start tick loop via gloo_timers (100ms = 10Hz)
             let set_topics = set_sim_topics;
             let set_tick = set_sim_tick_count;
-            let set_status = set_deploy_status;
-            let set_running = set_sim_running;
             gloo_timers::callback::Interval::new(100, move || {
                 if !sim_running.get_untracked() {
                     return; // paused — interval keeps firing but we skip
@@ -866,7 +864,8 @@ async fn deploy_to_mcu(cbor_bytes: &[u8]) -> Result<String, String> {
     Ok(text.as_string().unwrap_or_default())
 }
 
-/// POST /api/tick to evaluate the deployed DAG.
+/// POST /api/tick to evaluate the deployed DAG on the MCU.
+#[allow(dead_code)]
 async fn tick_mcu() -> Result<String, String> {
     let window = web_sys::window().ok_or("no window")?;
 
