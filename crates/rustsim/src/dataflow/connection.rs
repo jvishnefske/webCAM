@@ -325,4 +325,155 @@ mod tests {
         // Input is "from", so normalize swaps: output side (20, 3) -> input side (10, 2)
         assert_eq!(normalize(&req), (20, 3, 10, 2));
     }
+
+    // ── Property-based tests ─────────────────────────────────────
+
+    mod prop {
+        use super::*;
+        use proptest::prelude::*;
+
+        fn arb_port_side() -> impl Strategy<Value = PortSide> {
+            prop_oneof![Just(PortSide::Input), Just(PortSide::Output)]
+        }
+
+        // Property: connecting different-side ports on different blocks always succeeds
+        // (when ports are in range and no duplicates)
+        proptest! {
+            #[test]
+            fn valid_connections_always_succeed(
+                from_block in 1u32..100,
+                from_port in 0usize..4,
+                to_offset in 1u32..100,  // ensure different block
+                to_port in 0usize..4,
+            ) {
+                let to_block = from_block + to_offset; // guaranteed different
+                let req = ConnectionRequest {
+                    from_block,
+                    from_port,
+                    from_side: PortSide::Output,
+                    to_block,
+                    to_port,
+                    to_side: PortSide::Input,
+                };
+                let mut out_counts = std::collections::HashMap::new();
+                let mut in_counts = std::collections::HashMap::new();
+                out_counts.insert(from_block, 4);
+                in_counts.insert(to_block, 4);
+                let result = validate_connection(&req, &out_counts, &in_counts, &[]);
+                prop_assert!(result.is_ok());
+            }
+        }
+
+        // Property: same-side connections always fail
+        proptest! {
+            #[test]
+            fn same_side_always_fails(
+                from_block in 1u32..100,
+                to_block in 1u32..100,
+                from_port in 0usize..4,
+                to_port in 0usize..4,
+                side in arb_port_side(),
+            ) {
+                prop_assume!(from_block != to_block);
+                let req = ConnectionRequest {
+                    from_block,
+                    from_port,
+                    from_side: side,
+                    to_block,
+                    to_port,
+                    to_side: side,
+                };
+                let out_counts = std::collections::HashMap::new();
+                let in_counts = std::collections::HashMap::new();
+                let result = validate_connection(&req, &out_counts, &in_counts, &[]);
+                prop_assert_eq!(result, Err(ConnectionError::SameSide));
+            }
+        }
+
+        // Property: self-connections always fail (even with valid sides)
+        proptest! {
+            #[test]
+            fn self_connection_always_fails(
+                block_id in 1u32..100,
+                from_port in 0usize..4,
+                to_port in 0usize..4,
+            ) {
+                let req = ConnectionRequest {
+                    from_block: block_id,
+                    from_port,
+                    from_side: PortSide::Output,
+                    to_block: block_id,
+                    to_port,
+                    to_side: PortSide::Input,
+                };
+                let out_counts = std::collections::HashMap::new();
+                let in_counts = std::collections::HashMap::new();
+                let result = validate_connection(&req, &out_counts, &in_counts, &[]);
+                prop_assert_eq!(result, Err(ConnectionError::SelfConnection));
+            }
+        }
+
+        // Property: normalize always puts output first
+        proptest! {
+            #[test]
+            fn normalize_output_always_first(
+                a_block in 1u32..100,
+                a_port in 0usize..4,
+                b_block in 1u32..100,
+                b_port in 0usize..4,
+                a_is_output in proptest::bool::ANY,
+            ) {
+                let (a_side, b_side) = if a_is_output {
+                    (PortSide::Output, PortSide::Input)
+                } else {
+                    (PortSide::Input, PortSide::Output)
+                };
+                let req = ConnectionRequest {
+                    from_block: a_block,
+                    from_port: a_port,
+                    from_side: a_side,
+                    to_block: b_block,
+                    to_port: b_port,
+                    to_side: b_side,
+                };
+                let (out_block, _, in_block, _) = normalize(&req);
+                // The output side's block should be first
+                if a_is_output {
+                    prop_assert_eq!(out_block, a_block);
+                    prop_assert_eq!(in_block, b_block);
+                } else {
+                    prop_assert_eq!(out_block, b_block);
+                    prop_assert_eq!(in_block, a_block);
+                }
+            }
+        }
+
+        // Property: duplicate detection catches exact matches
+        proptest! {
+            #[test]
+            fn duplicate_always_caught(
+                from_block in 1u32..50,
+                from_port in 0usize..4,
+                to_offset in 1u32..50,
+                to_port in 0usize..4,
+            ) {
+                let to_block = from_block + to_offset;
+                let req = ConnectionRequest {
+                    from_block,
+                    from_port,
+                    from_side: PortSide::Output,
+                    to_block,
+                    to_port,
+                    to_side: PortSide::Input,
+                };
+                let mut out_counts = std::collections::HashMap::new();
+                let mut in_counts = std::collections::HashMap::new();
+                out_counts.insert(from_block, 4);
+                in_counts.insert(to_block, 4);
+                let existing = vec![(from_block, from_port, to_block, to_port)];
+                let result = validate_connection(&req, &out_counts, &in_counts, &existing);
+                prop_assert_eq!(result, Err(ConnectionError::Duplicate));
+            }
+        }
+    }
 }
