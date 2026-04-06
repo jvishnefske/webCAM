@@ -12,6 +12,7 @@ import {
 import { drawConstraintOverlay } from './constraints.js';
 import { initDataflow, resizeDataflow, activateDataflow } from './dataflow/index.js';
 import { initPanel, activatePanel } from './dataflow/panel-editor.js';
+import { initVersion } from './version.js';
 
 // ── Wire cross-module callbacks ──────────────────────────────────────
 
@@ -100,6 +101,7 @@ async function boot(): Promise<void> {
     cam.setWasmReady(true);
     initDataflow();
     initPanel();
+    initVersion();
     $('status').textContent = 'WASM loaded — drop a file to begin.';
     $('status').className = 'text-xs mt-2 min-h-4 text-success';
   } catch (e) {
