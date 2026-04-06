@@ -80,7 +80,6 @@ dap-dispatch = { path = "hil/dap-dispatch" }
 embassy-stm32 = { version = "0.2", default-features = false }
 sha1_smol = "1"
 
-
 [profile.dev]
 codegen-units = 1
 debug = 2

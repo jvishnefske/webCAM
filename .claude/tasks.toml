@@ -1,217 +1,88 @@
 version = 1
-status = "complete"
+status = "in_progress"
 
 [project]
-name = "native-server-mock-hal"
-description = "Native webserver serving frontend with I2C/serial/socket HAL traits mocked in WASM simulation environment"
-worktree_base = ".worktrees"
+name = "mvp-model-based-dev"
+description = "MVP model-based development: simulate in-browser with play/pause/step, monitor live pubsub values, visual wiring with auto-topics"
 
 # ============================================================================
-# Phase 1: Trait extensions + server skeleton (fully parallel)
+# Phase 1: Simulation engine (foundation for everything else)
 # ============================================================================
 
 [[tasks]]
 id = "task-001"
-title = "Add I2C methods to SimPeripherals and Peripherals traits"
+title = "Add tick counter and pubsub persistence to in-browser DAG evaluation"
 acceptance = """
-- SimPeripherals trait (module-traits/src/sim.rs) gains:
-    i2c_write(&mut self, bus: u8, addr: u8, data: &[u8]) -> Result<(), ()>
-    i2c_read(&mut self, bus: u8, addr: u8, buf: &mut [u8]) -> Result<(), ()>
-    i2c_write_read(&mut self, bus: u8, addr: u8, write: &[u8], read: &mut [u8]) -> Result<(), ()>
-  All three have default impls returning Err(())
-- Peripherals trait (dataflow-rt/src/lib.rs) gains matching i2c_* methods with default Err(()) impls
-- Existing tests still pass (cargo test -p module-traits -p dataflow-rt)
-- No breaking changes: all new methods have defaults
+- dag-core eval gains a SimState struct: tick_count (u64), pubsub_store (HashMap<String, f64>)
+- SimState::tick(dag, values) evaluates once, stores Publish outputs in pubsub_store,
+  feeds them back as Subscribe inputs on next tick
+- SimState::reset() clears tick_count and pubsub_store
+- tick_count increments on each tick
+- 5+ tests: multi-tick pubsub persistence, reset clears state, tick_count increments
 """
 deps = []
 status = "complete"
 
 [[tasks]]
 id = "task-002"
-title = "Add socket primitives to SimPeripherals and Peripherals traits"
+title = "Add transport controls to combined-frontend DAG editor"
 acceptance = """
-- SimPeripherals trait gains:
-    tcp_connect(&mut self, id: u8, addr: &str, port: u16) -> Result<(), ()>
-    tcp_send(&mut self, id: u8, data: &[u8]) -> Result<usize, ()>
-    tcp_recv(&mut self, id: u8, buf: &mut [u8]) -> Result<usize, ()>
-    tcp_close(&mut self, id: u8)
-    udp_send(&mut self, id: u8, addr: &str, port: u16, data: &[u8]) -> Result<usize, ()>
-    udp_recv(&mut self, id: u8, buf: &mut [u8]) -> Result<usize, ()>
-  All with default impls returning Err(()) or no-op
-- Peripherals trait gains matching methods with defaults
-- Existing tests still pass
+- Play button: starts a setInterval/gloo_timers loop that calls SimState::tick at configurable dt
+- Pause button: stops the loop
+- Step button: single tick
+- Reset button: calls SimState::reset, clears eval_results
+- dt and speed controls (input fields)
+- Tick counter displayed in status bar
+- All controls use the SimState from task-001
+- Builds with trunk build --release
 """
-deps = []
-status = "complete"
+deps = ["task-001"]
+status = "pending"
 
 [[tasks]]
 id = "task-003"
-title = "Create native-server crate with axum and static file serving"
+title = "Add live pubsub monitor panel to DAG editor"
 acceptance = """
-- New crate at hil/native-server/ with Cargo.toml
-- Dependencies: axum, tokio (rt-multi-thread, macros), tower-http (fs)
-- Added to workspace members in root Cargo.toml (NOT default-members)
-- Added to WORKSPACE_EXCLUDES in Makefile (like other HIL crates)
-- Serves www/ directory on configurable port (default 3000)
-- Serves www/pkg/*.wasm with correct Content-Type
-- CLI: cargo run -p native-server [-- --port 3000 --www-dir www/]
-- cargo build -p native-server succeeds
-- Basic test: server starts and responds 200 on GET /
+- New panel below canvas showing all pubsub topics and current values
+- Updates on every tick (driven by SimState, not polling HTTP)
+- Shows topic name, current value (4 decimal places), direction (pub/sub)
+- Collapsible panel with header showing topic count
+- Topics sorted alphabetically
+- Builds with trunk build --release
 """
-deps = []
-status = "complete"
+deps = ["task-002"]
+status = "pending"
 
 # ============================================================================
-# Phase 2: Implementations (parallel, each depends on one Phase 1 task)
+# Phase 2: Visual wiring (parallel with monitoring)
 # ============================================================================
 
 [[tasks]]
 id = "task-004"
-title = "Implement I2C mock in WasmSimPeripherals using RuntimeBus"
+title = "Add SVG edge rendering between connected blocks"
 acceptance = """
-- WasmSimPeripherals (src/dataflow/sim_peripherals.rs) implements new I2C methods
-- Internally uses i2c-hil-sim RuntimeBus instances (one per logical bus)
-- i2c_write routes to RuntimeBus::write on correct bus
-- i2c_read uses RuntimeBus pointer-based read protocol
-- i2c_write_read does write-then-read transaction
-- WasmSimPeripherals gains:
-    add_i2c_device(bus: u8, addr: u8, name: &str) — adds RuntimeDevice
-    remove_i2c_device(bus: u8, addr: u8) — removes device
-    i2c_device_registers(bus: u8, addr: u8) -> Option<[u8; 256]>
-- rustcam crate Cargo.toml adds i2c-hil-sim dependency
-- 5+ tests: write/read roundtrip, multi-bus, device add/remove, error on missing device
-- cargo test passes (default members)
+- PlacedBlock gains a connections: Vec<(usize, usize, usize)> field (from_id, from_port, to_id, to_port — stored as from_block, to_block, to_port)
+- SVG <line> or <path> elements drawn between output port circles and input port circles
+- Edges update when blocks are repositioned (reactive via signals)
+- Edge color matches port type
+- Builds with trunk build --release
 """
-deps = ["task-001"]
-status = "complete"
+deps = []
+status = "pending"
 
 [[tasks]]
 id = "task-005"
-title = "Implement socket mock in WasmSimPeripherals"
+title = "Add drag-to-connect wiring with auto-topic generation"
 acceptance = """
-- WasmSimPeripherals implements new socket methods
-- Internal state: HashMap<u8, VirtualSocket> with per-socket buffers
-- tcp_connect creates a loopback socket entry (connected state)
-- tcp_send/tcp_recv operate on ring buffers
-- tcp_close removes socket
-- udp_send/udp_recv work statelessly via per-id buffers
-- WasmSimPeripherals gains:
-    inject_tcp_data(id: u8, data: &[u8]) — push data into recv buffer (for testing)
-    drain_tcp_data(id: u8) -> Vec<u8> — drain send buffer (for testing)
-- 5+ tests: connect/send/recv roundtrip, close clears state, UDP stateless
-- cargo test passes
+- Mousedown on output port starts wire drag (dashed SVG line follows cursor)
+- Mouseup on input port completes connection:
+  - Generates auto-topic name (e.g. "wire_3_0" from source block id + port)
+  - Sets output block's publish topic to the auto-topic
+  - Sets input block's subscribe topic to the auto-topic
+  - Adds edge to connections list
+- Mouseup on empty canvas cancels wire
+- Delete key on selected edge removes it and clears auto-topics
+- 3+ tests for auto-topic generation logic
 """
-deps = ["task-002"]
-status = "complete"
-
-[[tasks]]
-id = "task-006"
-title = "Implement DAG HTTP API in native server"
-acceptance = """
-- Axum routes matching Pico2 API contract:
-    POST /api/dag — accept CBOR body, load into DagExecutor
-    POST /api/tick — evaluate one tick, return JSON result
-    GET /api/status — return {loaded, nodes, ticks}
-    GET /api/pubsub — return all topic values as JSON
-    GET /api/channels — return {inputs: [...], outputs: [...]}
-    POST /api/debug — toggle debug mode
-- Server state: Arc<Mutex<ServerState>> containing:
-    DagExecutor + MapChannels + SimplePubSub (from dag-runtime)
-- Depends on dag-runtime with std+json features
-- 6+ tests using axum::test (one per endpoint)
-- API responses match Pico2 JSON schema exactly
-"""
-deps = ["task-003"]
-status = "complete"
-
-[[tasks]]
-id = "task-007"
-title = "Enhance UART/serial mock with baud rate and framing config"
-acceptance = """
-- WasmSimPeripherals gains serial port configuration:
-    configure_serial(port: u8, baud: u32, data_bits: u8, parity: Parity, stop_bits: u8)
-- New SerialConfig struct in sim_peripherals.rs
-- Existing uart_write/uart_read behavior unchanged (backward compatible)
-- Serial config stored per-port, accessible via get_serial_config(port) -> Option<SerialConfig>
-- When configured, uart_write/uart_read can optionally enforce framing (future use)
-- WasmSimPeripherals gains:
-    serial_ports() -> Vec<(u8, SerialConfig)> — list configured ports
-- 3+ tests: configure, read back config, default behavior unchanged
-- cargo test passes
-"""
-deps = []
-status = "complete"
-
-# ============================================================================
-# Phase 3: Server integration + WASM API (depends on Phase 2)
-# ============================================================================
-
-[[tasks]]
-id = "task-008"
-title = "Implement WebSocket CBOR I2C dispatch in native server"
-acceptance = """
-- Axum WebSocket endpoint at /ws
-- Accepts same CBOR protocol as Pico2 (hil-firmware-support/ws_dispatch.rs):
-    TAG_I2C_READ (1), TAG_I2C_WRITE (2), TAG_LIST_BUSES (3),
-    TAG_ADD_DEVICE (30), TAG_REMOVE_DEVICE (31), TAG_GET_CONFIG (35)
-- Server-side I2cBusSet backed by i2c-hil-sim RuntimeBus array
-- Shares RuntimeBus state with SimPeripherals (if both used)
-- native-server Cargo.toml adds: tokio-tungstenite or axum WebSocket, minicbor
-- 4+ tests: list buses, add device, i2c read/write roundtrip via WS
-"""
-deps = ["task-004", "task-006"]
-status = "complete"
-
-[[tasks]]
-id = "task-009"
-title = "Add WASM API exports for I2C, serial, and socket simulation control"
-acceptance = """
-- New wasm-bindgen exports in src/lib.rs:
-    dataflow_add_i2c_device(graph_id, bus, addr, name) -> Result
-    dataflow_remove_i2c_device(graph_id, bus, addr) -> Result
-    dataflow_i2c_device_registers(graph_id, bus, addr) -> Result<JsValue>
-    dataflow_configure_serial(graph_id, port, baud, data_bits, parity, stop_bits) -> Result
-    dataflow_serial_ports(graph_id) -> Result<JsValue>
-    dataflow_tcp_inject(graph_id, socket_id, data: &[u8]) -> Result
-    dataflow_tcp_drain(graph_id, socket_id) -> Result<JsValue>
-- All delegate to WasmSimPeripherals methods on the graph's sim state
-- Return errors if simulation mode not enabled
-- 6+ wasm-bindgen-test or unit tests
-- cargo test passes
-"""
-deps = ["task-004", "task-005", "task-007"]
-status = "complete"
-
-# ============================================================================
-# Phase 4: Integration testing + developer experience
-# ============================================================================
-
-[[tasks]]
-id = "task-010"
-title = "Integration tests for API parity and mock HAL roundtrips"
-acceptance = """
-- Test suite in hil/native-server/tests/ or as integration tests:
-    1. Deploy CBOR DAG via POST /api/dag, tick, verify output matches dag-runtime
-    2. Add I2C device via WebSocket, read registers via HTTP, verify match
-    3. Full roundtrip: deploy DAG with I2C input block, add device, tick, verify I2C read flows through
-    4. Verify JSON response schemas match Pico2 exactly (status, channels, pubsub)
-    5. WebSocket reconnection doesn't lose I2C bus state
-- All tests pass with cargo test -p native-server
-"""
-deps = ["task-008", "task-009"]
-status = "complete"
-
-[[tasks]]
-id = "task-011"
-title = "Makefile serve-native target and dev workflow"
-acceptance = """
-- New Makefile targets:
-    serve-native: wasm-pack build + cargo run -p native-server
-    dev: wasm-pack build + native-server with file watching (cargo-watch or similar)
-- native-server auto-detects www/ directory relative to workspace root
-- Frontend hil-client.ts works with both native-server (localhost:3000) and Pico2 (169.254.1.61:8080) — same CBOR protocol, different base URL
-- Running `make serve-native` starts server, opens browser at localhost:3000
-- README or CLAUDE.md updated with native-server usage
-"""
-deps = ["task-010"]
-status = "complete"
+deps = ["task-004"]
+status = "pending"
