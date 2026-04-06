@@ -96,6 +96,74 @@ impl Dag {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SimState: persistent simulation state with pubsub feedback
+// ---------------------------------------------------------------------------
+
+/// Simulation state that persists pubsub values across ticks.
+///
+/// On each tick, `Publish` outputs are stored in the internal map.
+/// On the next tick, `Subscribe` reads from this map, enabling
+/// cross-tick feedback loops (e.g., accumulator, low-pass filter).
+pub struct SimState {
+    tick: u64,
+    values: Vec<f64>,
+    pubsub: alloc::collections::BTreeMap<String, f64>,
+}
+
+impl SimState {
+    /// Create a new simulation state for a DAG with `node_count` nodes.
+    pub fn new(node_count: usize) -> Self {
+        Self {
+            tick: 0,
+            values: alloc::vec![0.0; node_count],
+            pubsub: alloc::collections::BTreeMap::new(),
+        }
+    }
+
+    /// Evaluate one tick of the DAG, storing pubsub outputs for the next tick.
+    pub fn tick(&mut self, dag: &Dag) {
+        let result = dag.evaluate(&NullChannels, &SimPubSub(&self.pubsub), &mut self.values);
+        for (topic, value) in &result.publishes {
+            self.pubsub.insert(topic.clone(), *value);
+        }
+        self.tick += 1;
+    }
+
+    /// Current tick count.
+    pub fn tick_count(&self) -> u64 {
+        self.tick
+    }
+
+    /// Get a pubsub topic's current value.
+    pub fn pubsub_value(&self, topic: &str) -> Option<f64> {
+        self.pubsub.get(topic).copied()
+    }
+
+    /// Get all pubsub topics and values.
+    pub fn topics(&self) -> &alloc::collections::BTreeMap<String, f64> {
+        &self.pubsub
+    }
+
+    /// Reset simulation state: clear tick counter, pubsub store, and values.
+    pub fn reset(&mut self) {
+        self.tick = 0;
+        self.pubsub.clear();
+        for v in &mut self.values {
+            *v = 0.0;
+        }
+    }
+}
+
+/// PubSub reader backed by a BTreeMap (used internally by SimState).
+struct SimPubSub<'a>(&'a alloc::collections::BTreeMap<String, f64>);
+
+impl<'a> PubSubReader for SimPubSub<'a> {
+    fn read(&self, topic: &str) -> f64 {
+        self.0.get(topic).copied().unwrap_or(0.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -319,5 +387,97 @@ mod tests {
             "Expected ~24.7041, got {}",
             result
         );
+    }
+
+    // =================================================================
+    // SimState tests (task-001)
+    // =================================================================
+
+    #[test]
+    fn test_req_001_simstate_tick_increments() {
+        let mut dag = Dag::new();
+        dag.constant(1.0).unwrap();
+        let mut state = SimState::new(dag.len());
+        assert_eq!(state.tick_count(), 0);
+        state.tick(&dag);
+        assert_eq!(state.tick_count(), 1);
+        state.tick(&dag);
+        assert_eq!(state.tick_count(), 2);
+    }
+
+    #[test]
+    fn test_req_001_simstate_pubsub_persistence() {
+        // Const(10) → Publish("x"), Subscribe("x") → Publish("y")
+        let mut dag = Dag::new();
+        let c = dag.constant(10.0).unwrap();
+        dag.publish("x", c).unwrap();
+        let s = dag.subscribe("x").unwrap();
+        dag.publish("y", s).unwrap();
+
+        let mut state = SimState::new(dag.len());
+
+        // Tick 1: publish x=10, subscribe reads x=0 (not yet stored)
+        state.tick(&dag);
+        assert_eq!(state.pubsub_value("x"), Some(10.0));
+        assert_eq!(state.pubsub_value("y"), Some(0.0));
+
+        // Tick 2: subscribe reads x=10 (from tick 1), publishes y=10
+        state.tick(&dag);
+        assert_eq!(state.pubsub_value("y"), Some(10.0));
+    }
+
+    #[test]
+    fn test_req_001_simstate_reset() {
+        let mut dag = Dag::new();
+        let c = dag.constant(42.0).unwrap();
+        dag.publish("val", c).unwrap();
+
+        let mut state = SimState::new(dag.len());
+        state.tick(&dag);
+        assert_eq!(state.tick_count(), 1);
+        assert_eq!(state.pubsub_value("val"), Some(42.0));
+
+        state.reset();
+        assert_eq!(state.tick_count(), 0);
+        assert_eq!(state.pubsub_value("val"), None);
+    }
+
+    #[test]
+    fn test_req_001_simstate_multi_tick_accumulation() {
+        // Subscribe("acc") → Add with Const(1) → Publish("acc")
+        // Each tick: acc = acc + 1 (accumulator via pubsub feedback)
+        let mut dag = Dag::new();
+        let prev = dag.subscribe("acc").unwrap();
+        let one = dag.constant(1.0).unwrap();
+        let sum = dag.add(prev, one).unwrap();
+        dag.publish("acc", sum).unwrap();
+
+        let mut state = SimState::new(dag.len());
+
+        state.tick(&dag); // acc = 0 + 1 = 1
+        assert_eq!(state.pubsub_value("acc"), Some(1.0));
+
+        state.tick(&dag); // acc = 1 + 1 = 2
+        assert_eq!(state.pubsub_value("acc"), Some(2.0));
+
+        state.tick(&dag); // acc = 2 + 1 = 3
+        assert_eq!(state.pubsub_value("acc"), Some(3.0));
+    }
+
+    #[test]
+    fn test_req_001_simstate_topics_list() {
+        let mut dag = Dag::new();
+        let a = dag.constant(1.0).unwrap();
+        let b = dag.constant(2.0).unwrap();
+        dag.publish("alpha", a).unwrap();
+        dag.publish("beta", b).unwrap();
+
+        let mut state = SimState::new(dag.len());
+        state.tick(&dag);
+
+        let topics = state.topics();
+        assert_eq!(topics.len(), 2);
+        assert!(topics.contains_key("alpha"));
+        assert!(topics.contains_key("beta"));
     }
 }
