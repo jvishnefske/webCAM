@@ -26,6 +26,7 @@ mlir-codegen = { path = "../../mlir-codegen", optional = true }
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
+proptest = "1"
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false
