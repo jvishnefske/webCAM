@@ -1,0 +1,112 @@
+version = 1
+status = "ready_for_implementation"
+
+[project]
+name = "block-full-workflow"
+description = "Make logic, embedded, and I/O blocks fully functional with integration tests proving end-to-end dataflow"
+worktree_base = ".worktrees"
+
+# ── Embedded block Tick-mode tests ─────────────────────────────────
+
+[[tasks]]
+id = "task-001"
+title = "Add Tick-mode unit tests for all 10 embedded blocks"
+acceptance = """
+- 10 new tests in embedded.rs exercising Tick::tick() directly for each block
+- ADC/GpioIn/Encoder/StallGuard tests verify output is Some(Float(0.0))
+- PWM/GpioOut/UartTx/Display tests verify output is empty vec
+- UartRx test verifies output is vec![None]
+- Stepper test verifies output is Some(Float(0.0))
+- `cargo test -p rustsim -- embedded` passes with 0 failures
+"""
+deps = []
+status = "complete"
+
+# ── Integration test: embedded workflow ────────────────────────────
+
+[[tasks]]
+id = "task-002"
+title = "Add integration test for ADC → Gain → PWM dataflow chain"
+acceptance = """
+- New file: crates/rustsim/tests/block_workflows.rs
+- Test creates DataflowGraph, adds ADC source + gain + PWM sink, connects them
+- Ticks graph in normal mode (no simulation), verifies no panics
+- Ticks graph in simulation mode with injected ADC voltage, verifies gain output = voltage * factor
+- `cargo test -p rustsim --test block_workflows` passes
+"""
+deps = ["task-001"]
+status = "complete"
+
+# ── Integration test: state machine workflow ───────────────────────
+
+[[tasks]]
+id = "task-003"
+title = "Add integration test for state machine transitions in dataflow graph"
+acceptance = """
+- Test in block_workflows.rs creates graph with constant(1.0) → state_machine
+- State machine has states [idle, running, stopped] with guard transitions
+- After tick, state machine output reflects transition from idle to running
+- Multiple ticks demonstrate state persistence
+- `cargo test -p rustsim --test block_workflows` passes
+"""
+deps = ["task-002"]
+status = "complete"
+
+# ── Integration test: I/O blocks workflow ──────────────────────────
+
+[[tasks]]
+id = "task-004"
+title = "Add integration test for PubSub and GPIO passthrough workflows"
+acceptance = """
+- Test PubSub: source → sink, verify source outputs None initially, sink consumes
+- Test GPIO: gpio_in → gpio_out passthrough, 3 ticks, verify tick_count = 3
+- Test encoder → gain: encoder outputs (0,0), gain scales position
+- All in block_workflows.rs, all pass
+"""
+deps = ["task-002"]
+status = "complete"
+
+# ── Integration test: mixed workflow ───────────────────────────────
+
+[[tasks]]
+id = "task-005"
+title = "Add integration test for mixed math+embedded+logic workflow"
+acceptance = """
+- Test: constant(3) + constant(4) → add → clamp(0,5) → verify output = 5.0
+- Test: ADC → gain(2) → clamp(0,100) → PWM, simulation mode with ADC=0.75
+  verify gain output = 1.5, clamp output = 1.5
+- `cargo test -p rustsim --test block_workflows` passes
+"""
+deps = ["task-003", "task-004"]
+status = "complete"
+
+# ── Simulation mode integration test ──────────────────────────────
+
+[[tasks]]
+id = "task-006"
+title = "Add integration test for simulation mode with WasmSimPeripherals"
+acceptance = """
+- Test creates graph with ADC, GPIO in, encoder blocks
+- Enables simulation_mode, injects ADC voltage and GPIO state
+- Verifies SimModel path produces correct values (not zeros)
+- Verifies switching back to normal mode produces default values
+- `cargo test -p rustsim --test block_workflows` passes
+"""
+deps = ["task-005"]
+status = "complete"
+
+# ── Verify make all passes ─────────────────────────────────────────
+
+[[tasks]]
+id = "task-007"
+title = "Verify make all passes with all new tests"
+acceptance = """
+- `make lint` passes (0 clippy warnings)
+- `make test` passes (coverage >= 92% functions)
+- `make wasm` builds both WASM targets
+- `make ts` builds all TS frontends
+- `make require-safe` passes
+- `make all` exits 0
+"""
+deps = ["task-006"]
+status = "complete"

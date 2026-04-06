@@ -1,0 +1,239 @@
+//! Integration tests for complete block workflows.
+//!
+//! These tests verify end-to-end dataflow through logic, embedded, and I/O blocks.
+
+use rustsim::dataflow::block::Value;
+use rustsim::dataflow::blocks;
+use rustsim::dataflow::graph::DataflowGraph;
+use rustsim::dataflow::sim_peripherals::WasmSimPeripherals;
+
+// ── Helpers ───────────────────────────────────────────────────────
+
+fn add(graph: &mut DataflowGraph, block_type: &str, config: &str) -> rustsim::dataflow::block::BlockId {
+    let block = blocks::create_block(block_type, config).unwrap();
+    graph.add_block(block)
+}
+
+fn output_value_by_id(graph: &DataflowGraph, id: u32, port: usize) -> Option<Value> {
+    let snap = graph.snapshot();
+    snap.blocks
+        .iter()
+        .find(|b| b.id == id)
+        .and_then(|b| b.output_values.get(port).cloned().flatten())
+}
+
+// ── task-002: ADC → Gain → PWM workflow ──────────────────────────
+
+#[test]
+fn adc_gain_pwm_normal_mode() {
+    let mut graph = DataflowGraph::new();
+
+    let adc = add(&mut graph, "adc_source", r#"{"channel":0,"resolution_bits":12}"#);
+    let gain = add(&mut graph, "gain", r#"{"op":"Gain","param1":2.0,"param2":0.0}"#);
+    let pwm = add(&mut graph, "pwm_sink", r#"{"channel":0,"frequency_hz":1000}"#);
+
+    graph.connect(adc, 0, gain, 0).unwrap();
+    graph.connect(gain, 0, pwm, 0).unwrap();
+
+    // Normal mode: ADC outputs 0.0, gain * 2 = 0.0, PWM consumes
+    graph.tick(0.01);
+
+    let snap = graph.snapshot();
+    assert_eq!(snap.blocks.len(), 3);
+    assert_eq!(snap.tick_count, 1);
+
+    // Gain output should be 0.0 (ADC default * 2)
+    let gain_out = output_value_by_id(&graph, gain.0, 0);
+    assert_eq!(gain_out, Some(Value::Float(0.0)));
+}
+
+#[test]
+fn adc_gain_pwm_simulation_mode() {
+    let mut graph = DataflowGraph::new();
+    graph.set_simulation_mode(true);
+    let mut peripherals = WasmSimPeripherals::new();
+    peripherals.set_adc_voltage(0, 1.5);
+    graph.set_sim_peripherals(peripherals);
+
+    let adc = add(&mut graph, "adc_source", r#"{"channel":0,"resolution_bits":12}"#);
+    let gain = add(&mut graph, "gain", r#"{"op":"Gain","param1":2.0,"param2":0.0}"#);
+    let _pwm = add(&mut graph, "pwm_sink", r#"{"channel":0,"frequency_hz":1000}"#);
+
+    graph.connect(adc, 0, gain, 0).unwrap();
+    graph.connect(gain, 0, _pwm, 0).unwrap();
+
+    graph.tick(0.01);
+
+    // ADC reads 1.5 from sim, gain * 2 = 3.0
+    let gain_out = output_value_by_id(&graph, gain.0, 0);
+    assert_eq!(gain_out, Some(Value::Float(3.0)));
+}
+
+// ── task-003: State machine transitions ──────────────────────────
+
+#[test]
+fn state_machine_transitions_in_graph() {
+    let mut graph = DataflowGraph::new();
+
+    let trigger = add(&mut graph, "constant", r#"{"value":1.0}"#);
+    let sm = add(
+        &mut graph,
+        "state_machine",
+        r#"{"states":["idle","running","stopped"],"initial":"idle","transitions":[{"from":"idle","to":"running","guard_port":0},{"from":"running","to":"stopped","guard_port":1}]}"#,
+    );
+
+    // Connect constant(1.0) to guard port 0 → idle→running
+    graph.connect(trigger, 0, sm, 0).unwrap();
+
+    graph.tick(0.01);
+
+    let snap = graph.snapshot();
+    let sm_block = snap.blocks.iter().find(|b| b.block_type == "state_machine").unwrap();
+    // State machine should have outputs
+    assert!(!sm_block.output_values.is_empty());
+
+    // First output is state index: idle=0, running=1
+    // After one tick with guard_port 0 = 1.0, should transition to running (index 1)
+    assert_eq!(sm_block.output_values[0], Some(Value::Float(1.0)));
+
+    // Second tick: state persists as "running" (guard port 1 not connected → 0.0, no transition)
+    graph.tick(0.01);
+    let snap2 = graph.snapshot();
+    let sm_block2 = snap2.blocks.iter().find(|b| b.block_type == "state_machine").unwrap();
+    assert_eq!(sm_block2.output_values[0], Some(Value::Float(1.0)));
+}
+
+// ── task-004: I/O blocks ─────────────────────────────────────────
+
+#[test]
+fn pubsub_source_sink_workflow() {
+    let mut graph = DataflowGraph::new();
+
+    let source = add(&mut graph, "pubsub_source", r#"{"topic":"test/val","port_kind":"Float"}"#);
+    let sink = add(&mut graph, "pubsub_sink", r#"{"topic":"test/out","port_kind":"Float"}"#);
+
+    graph.connect(source, 0, sink, 0).unwrap();
+    graph.tick(0.01);
+
+    let snap = graph.snapshot();
+    assert_eq!(snap.blocks.len(), 2);
+    // PubSub source with no value set outputs None
+    let src_block = snap.blocks.iter().find(|b| b.id == source.0).unwrap();
+    assert_eq!(src_block.output_values[0], None);
+}
+
+#[test]
+fn gpio_passthrough_ticks() {
+    let mut graph = DataflowGraph::new();
+
+    let gpio_in = add(&mut graph, "gpio_in", r#"{"pin":2}"#);
+    let gpio_out = add(&mut graph, "gpio_out", r#"{"pin":13}"#);
+
+    graph.connect(gpio_in, 0, gpio_out, 0).unwrap();
+
+    graph.tick(0.01);
+    graph.tick(0.01);
+    graph.tick(0.01);
+
+    let snap = graph.snapshot();
+    assert_eq!(snap.blocks.len(), 2);
+    assert_eq!(snap.tick_count, 3);
+}
+
+#[test]
+fn encoder_to_gain_workflow() {
+    let mut graph = DataflowGraph::new();
+
+    let encoder = add(&mut graph, "encoder", r#"{"channel":0}"#);
+    let gain = add(&mut graph, "gain", r#"{"op":"Gain","param1":0.5,"param2":0.0}"#);
+
+    // Encoder position (port 0) → gain
+    graph.connect(encoder, 0, gain, 0).unwrap();
+
+    graph.tick(0.01);
+
+    // Encoder outputs 0.0 in normal mode, gain * 0.5 = 0.0
+    let gain_out = output_value_by_id(&graph, gain.0, 0);
+    assert_eq!(gain_out, Some(Value::Float(0.0)));
+}
+
+// ── task-005: Mixed workflows ────────────────────────────────────
+
+#[test]
+fn math_pipeline_add_clamp() {
+    let mut graph = DataflowGraph::new();
+
+    let c1 = add(&mut graph, "constant", r#"{"value":3.0}"#);
+    let c2 = add(&mut graph, "constant", r#"{"value":4.0}"#);
+    let sum = add(&mut graph, "add", "{}");
+    let clamp = add(&mut graph, "clamp", r#"{"op":"Clamp","param1":0.0,"param2":5.0}"#);
+
+    graph.connect(c1, 0, sum, 0).unwrap();
+    graph.connect(c2, 0, sum, 1).unwrap();
+    graph.connect(sum, 0, clamp, 0).unwrap();
+
+    graph.tick(0.01);
+
+    // 3 + 4 = 7, clamped to [0, 5] = 5.0
+    let clamp_out = output_value_by_id(&graph, clamp.0, 0);
+    assert_eq!(clamp_out, Some(Value::Float(5.0)));
+}
+
+#[test]
+fn mixed_embedded_math_simulation() {
+    let mut graph = DataflowGraph::new();
+    graph.set_simulation_mode(true);
+    let mut peripherals = WasmSimPeripherals::new();
+    peripherals.set_adc_voltage(0, 0.75);
+    graph.set_sim_peripherals(peripherals);
+
+    let adc = add(&mut graph, "adc_source", r#"{"channel":0,"resolution_bits":12}"#);
+    let gain = add(&mut graph, "gain", r#"{"op":"Gain","param1":2.0,"param2":0.0}"#);
+    let clamp = add(&mut graph, "clamp", r#"{"op":"Clamp","param1":0.0,"param2":100.0}"#);
+    let _pwm = add(&mut graph, "pwm_sink", r#"{"channel":0,"frequency_hz":1000}"#);
+
+    graph.connect(adc, 0, gain, 0).unwrap();
+    graph.connect(gain, 0, clamp, 0).unwrap();
+    graph.connect(clamp, 0, _pwm, 0).unwrap();
+
+    graph.tick(0.01);
+
+    // ADC=0.75, gain*2=1.5, clamp[0,100]=1.5
+    let gain_out = output_value_by_id(&graph, gain.0, 0);
+    assert_eq!(gain_out, Some(Value::Float(1.5)));
+    let clamp_out = output_value_by_id(&graph, clamp.0, 0);
+    assert_eq!(clamp_out, Some(Value::Float(1.5)));
+}
+
+// ── task-006: Simulation mode toggle ─────────────────────────────
+
+#[test]
+fn simulation_mode_produces_real_values() {
+    let mut graph = DataflowGraph::new();
+    graph.set_simulation_mode(true);
+    let mut peripherals = WasmSimPeripherals::new();
+    peripherals.set_adc_voltage(0, 3.3);
+    peripherals.set_gpio_state(5, true);
+    graph.set_sim_peripherals(peripherals);
+
+    let adc = add(&mut graph, "adc_source", r#"{"channel":0,"resolution_bits":12}"#);
+    let gpio_in = add(&mut graph, "gpio_in", r#"{"pin":5}"#);
+
+    graph.tick(0.01);
+
+    // Simulation mode: ADC reads 3.3, GPIO reads 1.0 (true)
+    let adc_out = output_value_by_id(&graph, adc.0, 0);
+    assert_eq!(adc_out, Some(Value::Float(3.3)));
+    let gpio_out = output_value_by_id(&graph, gpio_in.0, 0);
+    assert_eq!(gpio_out, Some(Value::Float(1.0)));
+
+    // Switch back to normal mode
+    graph.set_simulation_mode(false);
+    graph.tick(0.01);
+
+    // Normal mode: ADC outputs 0.0, GPIO outputs 0.0
+    let adc_out2 = output_value_by_id(&graph, adc.0, 0);
+    assert_eq!(adc_out2, Some(Value::Float(0.0)));
+    let gpio_out2 = output_value_by_id(&graph, gpio_in.0, 0);
+    assert_eq!(gpio_out2, Some(Value::Float(0.0)));
+}
