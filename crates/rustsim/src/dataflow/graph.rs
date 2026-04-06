@@ -526,7 +526,7 @@ mod tests {
     }
 
     #[test]
-    fn embedded_block_outputs_none_without_simulation() {
+    fn embedded_block_outputs_default_without_simulation() {
         use crate::dataflow::blocks::embedded::{AdcBlock, AdcConfig};
 
         let mut g = DataflowGraph::new();
@@ -534,7 +534,8 @@ mod tests {
         g.tick(0.01);
         let snap = g.snapshot();
         let adc_snap = snap.blocks.iter().find(|b| b.id == adc.0).unwrap();
-        assert_eq!(adc_snap.output_values[0], None);
+        // Without simulation, the Tick impl returns a default 0.0
+        assert_eq!(adc_snap.output_values[0], Some(Value::Float(0.0)));
     }
 
     #[test]
