@@ -19,10 +19,10 @@
   </div>
 </header>
 
-<div class="app">
+<div class="app dataflow-mode">
   <!-- Sidebar -->
   <div class="sidebar bg-surface border-r border-border p-4 overflow-y-auto">
-    <div id="cam-sidebar-content">
+    <div id="cam-sidebar-content" class="hidden">
     <section class="mb-5">
       <h2 class="text-[13px] uppercase tracking-wider text-text-dim mb-3">Input File</h2>
       <div class="drop-zone border-2 border-dashed border-border rounded-lg px-4 py-8 text-center cursor-pointer transition-colors duration-200 mb-3 hover:border-accent hover:bg-[rgba(79,140,255,0.06)]" id="drop-zone">
@@ -167,7 +167,7 @@
       </section>
     </div><!-- sketch-sidebar-content -->
 
-    <div id="dataflow-sidebar-content" class="hidden">
+    <div id="dataflow-sidebar-content">
       <!-- Project bar -->
       <section class="mb-4">
         <div class="flex items-center gap-2 mb-2">
@@ -304,8 +304,8 @@
 
   <!-- Preview canvas -->
   <div class="preview bg-bg flex flex-col border-r border-border">
-    <div class="text-[13px] uppercase tracking-wider text-text-dim px-4 py-3 border-b border-border" id="preview-header">Toolpath Preview</div>
-    <canvas id="preview-canvas"></canvas>
+    <div class="text-[13px] uppercase tracking-wider text-text-dim px-4 py-3 border-b border-border hidden" id="preview-header">Toolpath Preview</div>
+    <canvas id="preview-canvas" class="hidden"></canvas>
     <div id="sketch-canvas-wrap" class="flex-1 relative" style="display:none">
       <canvas id="sketch-canvas" class="absolute inset-0 w-full h-full cursor-crosshair"></canvas>
       <div class="absolute top-2 right-3 text-[11px] text-text-dim font-mono" id="sketch-cursor-pos"></div>
