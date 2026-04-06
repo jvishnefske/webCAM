@@ -8,6 +8,7 @@ pub mod block;
 pub mod blocks;
 pub mod channel;
 pub mod codegen;
+pub mod connection;
 pub mod dsl_bridge;
 pub mod graph;
 pub mod panel;
