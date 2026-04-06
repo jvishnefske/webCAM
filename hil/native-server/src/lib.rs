@@ -370,6 +370,13 @@ fn handle_telemetry(state: &SharedState, tag: u32, data: &[u8]) {
         (tag as u8, seq, 0.0)
     };
 
+    // Log debug trace events (tag 57) to server console
+    if actual_tag == 57 {
+        let cat = payload.get("category").and_then(|v| v.as_str()).unwrap_or("?");
+        let data = payload.get("data").cloned().unwrap_or(serde_json::Value::Null);
+        eprintln!("[debug-trace] {cat}: {data}");
+    }
+
     let entry = TelemetryEntry { seq, timestamp_ms: ts, tag: actual_tag, payload };
     if st.telemetry_log.len() >= 256 {
         st.telemetry_log.pop_front();
@@ -409,6 +416,8 @@ fn parse_telemetry_payload(tag: u32, data: &[u8]) -> serde_json::Value {
             (56, 1) => "seq",
             (56, 2) => "timestampMs",
             (56, 3) => "inner",
+            (57, 1) => "category",
+            (57, 2) => "data",
             _ => "unknown",
         };
         match dec.datatype() {

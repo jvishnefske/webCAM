@@ -9,6 +9,7 @@ export const TAG_CONNECTION_CREATED = 53;
 export const TAG_CONNECTION_REMOVED = 54;
 export const TAG_GRAPH_RESET       = 55;
 export const TAG_DEBUG_WRAPPER     = 56;
+export const TAG_DEBUG_TRACE       = 57;
 
 export type TelemetryEvent =
   | { tag: 50; blockId: number; blockType: string; config: unknown; x: number; y: number }
@@ -16,7 +17,8 @@ export type TelemetryEvent =
   | { tag: 52; blockId: number; blockType: string; config: unknown }
   | { tag: 53; fromBlock: number; fromPort: number; toBlock: number; toPort: number; channelId: number }
   | { tag: 54; channelId: number }
-  | { tag: 55 };
+  | { tag: 55 }
+  | { tag: 57; category: string; data: Record<string, unknown> };
 
 export class TelemetryPublisher {
   private ws: WebSocket | null = null;
@@ -39,6 +41,12 @@ export class TelemetryPublisher {
   setDebug(on: boolean): void {
     this.debug = on;
     if (on) this.seq = 0;
+  }
+
+  /** Publish a debug trace event (only when debug mode is on). */
+  trace(category: string, data: Record<string, unknown>): void {
+    if (!this.debug) return;
+    this.publish({ tag: 57, category, data });
   }
 
   publish(event: TelemetryEvent): void {
@@ -73,6 +81,8 @@ export class TelemetryPublisher {
         return { 0: 54, 1: event.channelId };
       case 55:
         return { 0: 55 };
+      case 57:
+        return { 0: 57, 1: event.category, 2: JSON.stringify(event.data) };
     }
   }
 }
