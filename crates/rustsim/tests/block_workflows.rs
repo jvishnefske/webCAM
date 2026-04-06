@@ -157,6 +157,31 @@ fn encoder_to_gain_workflow() {
     assert_eq!(gain_out, Some(Value::Float(0.0)));
 }
 
+#[test]
+fn encoder_simulation_velocity() {
+    let mut graph = DataflowGraph::new();
+    graph.set_simulation_mode(true);
+    let peripherals = WasmSimPeripherals::new();
+    graph.set_sim_peripherals(peripherals);
+
+    let encoder = add(&mut graph, "encoder", r#"{"channel":0}"#);
+
+    // Tick 1: position moves from 0 → 100, dt=0.01
+    graph.with_sim_peripherals(|p| p.set_encoder_position(0, 100));
+    graph.tick(0.01);
+
+    let pos = output_value_by_id(&graph, encoder.0, 0);
+    let vel = output_value_by_id(&graph, encoder.0, 1);
+    assert_eq!(pos, Some(Value::Float(100.0)));
+    // velocity = delta(100-0) / 0.01 = 10000.0
+    assert_eq!(vel, Some(Value::Float(10000.0)));
+
+    // Tick 2: position stays at 100, velocity should be 0
+    graph.tick(0.01);
+    let vel2 = output_value_by_id(&graph, encoder.0, 1);
+    assert_eq!(vel2, Some(Value::Float(0.0)));
+}
+
 // ── task-005: Mixed workflows ────────────────────────────────────
 
 #[test]

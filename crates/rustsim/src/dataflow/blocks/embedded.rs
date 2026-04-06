@@ -467,14 +467,18 @@ pub struct EncoderConfig {
 }
 
 /// Reads a quadrature encoder channel.
-/// Without simulation, outputs None.
+/// Without simulation, outputs zero position and velocity.
 pub struct EncoderBlock {
     pub(crate) config: EncoderConfig,
+    prev_position: i64,
 }
 
 impl EncoderBlock {
     pub fn from_config(config: EncoderConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            prev_position: 0,
+        }
     }
 }
 
@@ -519,9 +523,10 @@ impl SimModel for EncoderBlock {
         peripherals: &mut dyn SimPeripherals,
     ) -> Vec<Option<Value>> {
         let position = peripherals.encoder_read(self.config.channel);
+        let delta = position - self.prev_position;
+        self.prev_position = position;
         let pos_f64 = position as f64;
-        // Velocity estimation: delta position / dt (crude, but functional)
-        let velocity = if dt > 0.0 { pos_f64 / dt } else { 0.0 };
+        let velocity = if dt > 0.0 { delta as f64 / dt } else { 0.0 };
         vec![Some(Value::Float(pos_f64)), Some(Value::Float(velocity))]
     }
 }
