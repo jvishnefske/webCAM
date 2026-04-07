@@ -2,6 +2,11 @@
 
 import type { GraphSnapshot, NodePosition } from './types.js';
 
+/** Unwrap a value that may be a plain number or a newtype wrapper {0: number}. */
+function unwrapId(v: number | { 0: number }): number {
+  return typeof v === 'number' ? v : v[0];
+}
+
 export interface SavedProject {
   name: string;
   lastModified: string;
@@ -33,9 +38,9 @@ export function serializeProject(
         config: b.config,
       })),
       channels: snap.channels.map(c => ({
-        fromBlock: c.from_block[0],
+        fromBlock: unwrapId(c.from_block),
         fromPort: c.from_port,
-        toBlock: c.to_block[0],
+        toBlock: unwrapId(c.to_block),
         toPort: c.to_port,
       })),
     },

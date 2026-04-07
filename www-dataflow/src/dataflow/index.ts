@@ -19,6 +19,11 @@ import { createSidebar } from './sidebar.js';
 import { TelemetryPublisher } from './telemetry.js';
 import type { GraphSnapshot, Value } from './types.js';
 
+/** Unwrap a value that may be a plain number or a newtype wrapper {0: number}. */
+function unwrapId(v: number | { 0: number }): number {
+  return typeof v === 'number' ? v : v[0];
+}
+
 let mgr: DataflowManager | null = null;
 let editor: DataflowEditor | null = null;
 let hilClient: HilClient | null = null;
@@ -378,11 +383,11 @@ function updateEdgeInfo(channelId: number | null, snap: GraphSnapshot | null): v
     infoEl.appendChild(span);
     return;
   }
-  const ch = snap.channels.find(c => c.id[0] === channelId);
+  const ch = snap.channels.find(c => unwrapId(c.id) === channelId);
   if (!ch) return;
 
-  const fromBlock = snap.blocks.find(b => b.id === ch.from_block[0]);
-  const toBlock = snap.blocks.find(b => b.id === ch.to_block[0]);
+  const fromBlock = snap.blocks.find(b => b.id === unwrapId(ch.from_block));
+  const toBlock = snap.blocks.find(b => b.id === unwrapId(ch.to_block));
 
   infoEl.textContent = '';
   const title = document.createElement('b');
@@ -397,9 +402,9 @@ function updateEdgeInfo(channelId: number | null, snap: GraphSnapshot | null): v
   const detailDiv = document.createElement('div');
   detailDiv.className = 'mt-1.5 text-xs';
 
-  const fromName = fromBlock ? `${fromBlock.name}` : `Block ${ch.from_block[0]}`;
+  const fromName = fromBlock ? `${fromBlock.name}` : `Block ${unwrapId(ch.from_block)}`;
   const fromPortName = fromBlock?.outputs[ch.from_port]?.name ?? `port ${ch.from_port}`;
-  const toName = toBlock ? `${toBlock.name}` : `Block ${ch.to_block[0]}`;
+  const toName = toBlock ? `${toBlock.name}` : `Block ${unwrapId(ch.to_block)}`;
   const toPortName = toBlock?.inputs[ch.to_port]?.name ?? `port ${ch.to_port}`;
 
   const fromRow = document.createElement('div');
