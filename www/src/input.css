@@ -285,6 +285,9 @@
     cursor: pointer;
     transition: stroke-width 0.1s;
   }
+  .df-edge.dragging {
+    pointer-events: none;
+  }
   .df-edge:hover {
     stroke-width: 4;
     filter: brightness(1.3);
