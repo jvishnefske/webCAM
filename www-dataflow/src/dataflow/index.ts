@@ -11,9 +11,11 @@ import { HilClient } from './hil-client.js';
 import { renderPinTable } from './pin-table.js';
 import { renderI2cPanel, updateI2cBuses } from './i2c-panel.js';
 import {
-  serializeProject, saveProject, loadProject, deleteProject,
+  createProject, loadProject, saveProject, deleteProject,
   listProjects, getActiveProjectName, setActiveProjectName,
-  uniqueName, createAutoSave,
+  uniqueName, createAutoSave, addSheet, removeSheet,
+  serializeDataflowSheet,
+  type Project, type DataflowSheetData,
 } from './storage.js';
 import { createSidebar } from './sidebar.js';
 import { TelemetryPublisher } from './telemetry.js';
@@ -27,7 +29,7 @@ function unwrapId(v: number | { 0: number }): number {
 let mgr: DataflowManager | null = null;
 let editor: DataflowEditor | null = null;
 let hilClient: HilClient | null = null;
-let activeProjectName = 'Untitled';
+let activeProject: Project | null = null;
 let triggerAutoSave: (() => void) | null = null;
 let telemetry: TelemetryPublisher | null = null;
 
@@ -68,9 +70,13 @@ export function initDataflow(): void {
     const projects = listProjects();
     const infos = projects.map(name => {
       const p = loadProject(name);
-      return { name, lastModified: p?.lastModified ?? '' };
+      return {
+        name,
+        lastModified: p?.lastModified ?? '',
+        sheets: [{ id: 'main', label: 'Main', type: 'dataflow' as const, parentId: null }],
+      };
     });
-    sidebar.renderProjects(infos, activeProjectName);
+    sidebar.renderProjects(infos, activeProjectName, 'main');
   }
 
   function resetEditor(dt: number) {
@@ -104,12 +110,12 @@ export function initDataflow(): void {
   // Set up sidebar panel
   const sidebarContainer = $('df-sidebar-panel');
   const sidebar = createSidebar({
-    onLoad: (name) => {
+    onLoadProject: (name) => {
       currentSave();
       loadProjectByName(name);
       refreshSidebar();
     },
-    onDelete: (name) => {
+    onDeleteProject: (name) => {
       deleteProject(name);
       if (name === activeProjectName) {
         const dt = parseFloat($input('df-dt').value) || 0.01;
@@ -119,6 +125,15 @@ export function initDataflow(): void {
         updateProjectNameDisplay();
       }
       refreshSidebar();
+    },
+    onSelectSheet: (_projectName, _sheetId) => {
+      // Sheet selection will be implemented when multi-sheet support lands
+    },
+    onAddSheet: (_projectName) => {
+      // Sheet creation will be implemented when multi-sheet support lands
+    },
+    onDeleteSheet: (_projectName, _sheetId) => {
+      // Sheet deletion will be implemented when multi-sheet support lands
     },
   });
   sidebarContainer.appendChild(sidebar.element);
