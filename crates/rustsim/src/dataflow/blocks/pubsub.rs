@@ -2,18 +2,18 @@
 
 use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use tsify_next::Tsify;
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize, TS)]
-#[ts(export)]
+#[derive(Debug, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(default)]
 pub struct PubSubConfig {
     pub topic: String,
-    #[ts(type = "\"Float\" | \"Bytes\" | \"Text\" | \"Series\" | \"Any\"")]
+    #[tsify(type = "\"Float\" | \"Bytes\" | \"Text\" | \"Series\" | \"Any\"")]
     pub port_kind: PortKind,
 }
 
