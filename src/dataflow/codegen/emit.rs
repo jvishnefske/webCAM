@@ -820,7 +820,26 @@ fn emit_state_machine_block(out: &mut String, block: &BlockSnapshot) -> Result<(
             for t in &from_transitions {
                 let to_state = t.get("to").and_then(|v| v.as_str()).unwrap_or(state);
                 let to_variant = to_pascal_case(to_state);
-                let guard_port = t.get("guard_port").and_then(|v| v.as_u64());
+
+                // Resolve guard port index from either old or new format:
+                //   Old: {"guard_port": 0}
+                //   New: {"guard": {"type": "GuardPort", "port": 0}}
+                //   New: {"guard": {"type": "Topic", "topic": "..."}} — treated as port guard (MVP)
+                //   New: {"guard": {"type": "Unconditional"}} or absent — unconditional
+                let guard_port: Option<u64> =
+                    // Old format
+                    t.get("guard_port").and_then(|v| v.as_u64()).or_else(|| {
+                        // New format
+                        t.get("guard").and_then(|g| {
+                            let guard_type = g.get("type").and_then(|v| v.as_str())?;
+                            match guard_type {
+                                "GuardPort" => g.get("port").and_then(|v| v.as_u64()),
+                                // Topic guard: treat as port guard using the first available port (MVP)
+                                "Topic" => Some(0),
+                                _ => None,
+                            }
+                        })
+                    });
 
                 if let Some(port) = guard_port {
                     if first {
@@ -849,10 +868,18 @@ fn emit_state_machine_block(out: &mut String, block: &BlockSnapshot) -> Result<(
                 }
             }
             // If all transitions were conditional, add else clause to stay
-            if from_transitions
-                .iter()
-                .all(|t| t.get("guard_port").and_then(|v| v.as_u64()).is_some())
-            {
+            if from_transitions.iter().all(|t| {
+                // Old format
+                t.get("guard_port").and_then(|v| v.as_u64()).is_some()
+                    || t.get("guard").and_then(|g| {
+                        let guard_type = g.get("type").and_then(|v| v.as_str())?;
+                        match guard_type {
+                            "GuardPort" => g.get("port").and_then(|v| v.as_u64()),
+                            "Topic" => Some(0),
+                            _ => None,
+                        }
+                    }).is_some()
+            }) {
                 writeln!(out, "            else {{ Block{id}State::{variant} }},").unwrap();
             }
         }
@@ -1183,6 +1210,9 @@ fn generate_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 writeln!(out, "    // TODO: transport.recv + pubsub::decode").unwrap();
                 writeln!(out, "    0.0").unwrap();
                 writeln!(out, "}}").unwrap();
+            }
+            "state_machine" => {
+                emit_state_machine_block(&mut out, block)?;
             }
             other => {
                 return Err(format!("unsupported block type for codegen: {other}"));
@@ -2211,6 +2241,51 @@ mod tests {
             lib_rs.contains("out_5_p0: 0.0_f64"),
             "Missing out_5_p0 default"
         );
+    }
+
+    #[test]
+    fn state_machine_topic_codegen() {
+        let snap = GraphSnapshot {
+            blocks: vec![BlockSnapshot {
+                id: 5,
+                block_type: "state_machine".to_string(),
+                name: "FSM".to_string(),
+                inputs: vec![PortDef::new("motor_cmd", PortKind::Float)],
+                outputs: vec![
+                    PortDef::new("state", PortKind::Float),
+                    PortDef::new("active_idle", PortKind::Float),
+                    PortDef::new("active_running", PortKind::Float),
+                ],
+                config: serde_json::json!({
+                    "states": ["idle", "running"],
+                    "initial": "idle",
+                    "transitions": [{
+                        "from": "idle",
+                        "to": "running",
+                        "guard": {"type": "Topic", "topic": "motor_cmd", "condition": {"field": "speed", "op": "Gt", "value": 0.0}},
+                        "actions": []
+                    }],
+                    "input_topics": [{"topic": "motor_cmd", "schema": {"name": "motor_cmd", "fields": [{"name": "speed", "field_type": "F32"}]}}],
+                    "output_topics": []
+                }),
+                output_values: vec![],
+                target: None,
+                custom_codegen: None,
+            }],
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let result = generate_rust(&snap, 0.01).unwrap();
+        let blocks_rs = result
+            .files
+            .iter()
+            .find(|(n, _)| n == "src/blocks.rs")
+            .unwrap()
+            .1
+            .as_str();
+        assert!(blocks_rs.contains("Idle"), "should contain idle state");
+        assert!(blocks_rs.contains("Running"), "should contain running state");
     }
 
     // Distributed multi-MCU tests -----------------------------------------------
