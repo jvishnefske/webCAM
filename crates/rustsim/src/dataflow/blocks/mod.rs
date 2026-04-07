@@ -238,7 +238,8 @@ pub fn available_block_types() -> Vec<BlockTypeInfo> {
     ]
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, tsify_next::Tsify)]
+#[tsify(into_wasm_abi)]
 pub struct BlockTypeInfo {
     pub block_type: &'static str,
     pub name: &'static str,
@@ -479,31 +480,4 @@ mod tests {
         assert!(b.as_sim_model().is_none());
     }
 
-    /// Export all block config types to TypeScript.
-    /// Run with: cargo test -p rustsim export_ts_block_configs -- --ignored
-    #[test]
-    #[ignore]
-    fn export_ts_block_configs() {
-        use ts_rs::TS;
-        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../www-dataflow/src/dataflow/generated");
-        std::fs::create_dir_all(&out).unwrap();
-
-        constant::ConstantConfig::export_all_to(&out).unwrap();
-        function::FunctionConfig::export_all_to(&out).unwrap();
-        plot::PlotConfig::export_all_to(&out).unwrap();
-        udp::UdpConfig::export_all_to(&out).unwrap();
-        pubsub::PubSubConfig::export_all_to(&out).unwrap();
-        state_machine::StateMachineConfig::export_all_to(&out).unwrap();
-        embedded::AdcConfig::export_all_to(&out).unwrap();
-        embedded::PwmConfig::export_all_to(&out).unwrap();
-        embedded::GpioOutConfig::export_all_to(&out).unwrap();
-        embedded::GpioInConfig::export_all_to(&out).unwrap();
-        embedded::UartTxConfig::export_all_to(&out).unwrap();
-        embedded::UartRxConfig::export_all_to(&out).unwrap();
-        embedded::EncoderConfig::export_all_to(&out).unwrap();
-        embedded::Ssd1306DisplayConfig::export_all_to(&out).unwrap();
-        embedded::Tmc2209StepperConfig::export_all_to(&out).unwrap();
-        embedded::Tmc2209StallGuardConfig::export_all_to(&out).unwrap();
-    }
 }

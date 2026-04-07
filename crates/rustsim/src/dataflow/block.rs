@@ -4,6 +4,7 @@
 //! crate authors can depend on `module-traits` alone.
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 // Re-export core types from module-traits.
 pub use module_traits::{
@@ -12,5 +13,6 @@ pub use module_traits::{
 };
 
 /// Opaque block identifier.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi)]
 pub struct BlockId(pub u32);
