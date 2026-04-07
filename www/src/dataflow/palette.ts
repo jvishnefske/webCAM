@@ -16,6 +16,13 @@ export const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
   gpio_in: { pin: 2 },
   uart_tx: { port: 0, baud: 115200 },
   uart_rx: { port: 0, baud: 115200 },
+  pubsub_source: { topic: 'default', port_kind: 'Float' },
+  pubsub_sink: { topic: 'default', port_kind: 'Float' },
+  state_machine: { states: ['idle'], initial: 'idle', transitions: [] },
+  encoder: { channel: 0 },
+  ssd1306_display: { i2c_bus: 0, address: 60 },
+  tmc2209_stepper: { uart_port: 0, uart_addr: 0, steps_per_rev: 200, microsteps: 16 },
+  tmc2209_stallguard: { uart_port: 0, uart_addr: 0, threshold: 50 },
 };
 
 /** Show palette at screen position, create block at world position. */
