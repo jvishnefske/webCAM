@@ -8,12 +8,14 @@
 
 use crate::dataflow::block::{Module, PortDef, PortKind, SimModel, SimPeripherals, Tick, Value};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 // ---------------------------------------------------------------------------
 // ADC Source
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct AdcConfig {
     pub channel: u8,
     pub resolution_bits: u8,
@@ -87,7 +89,8 @@ impl SimModel for AdcBlock {
 // PWM Sink
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct PwmConfig {
     pub channel: u8,
     pub frequency_hz: u32,
@@ -163,7 +166,8 @@ impl SimModel for PwmBlock {
 // GPIO Out
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct GpioOutConfig {
     pub pin: u8,
 }
@@ -234,7 +238,8 @@ impl SimModel for GpioOutBlock {
 // GPIO In
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct GpioInConfig {
     pub pin: u8,
 }
@@ -307,7 +312,8 @@ impl SimModel for GpioInBlock {
 // UART TX
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct UartTxConfig {
     pub port: u8,
     pub baud: u32,
@@ -382,7 +388,8 @@ impl SimModel for UartTxBlock {
 // UART RX
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct UartRxConfig {
     pub port: u8,
     pub baud: u32,
@@ -461,7 +468,8 @@ impl SimModel for UartRxBlock {
 // Encoder
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct EncoderConfig {
     pub channel: u8,
 }
@@ -535,7 +543,9 @@ impl SimModel for EncoderBlock {
 // SSD1306 Display
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(default)]
 pub struct Ssd1306DisplayConfig {
     pub i2c_bus: u8,
     pub address: u8,
@@ -619,7 +629,9 @@ impl SimModel for Ssd1306DisplayBlock {
 // TMC2209 Stepper
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(default)]
 pub struct Tmc2209StepperConfig {
     pub uart_port: u8,
     pub uart_addr: u8,
@@ -709,7 +721,9 @@ impl SimModel for Tmc2209StepperBlock {
 // TMC2209 StallGuard
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(default)]
 pub struct Tmc2209StallGuardConfig {
     pub uart_port: u8,
     pub uart_addr: u8,

@@ -485,7 +485,7 @@ function setupSidebarPalette(): void {
       item.textContent = bt.name;
       item.addEventListener('click', () => {
         if (!mgr || !editor) return;
-        const config = DEFAULT_CONFIGS[bt.block_type] ?? {};
+        const config = (DEFAULT_CONFIGS as Record<string, Record<string, unknown>>)[bt.block_type] ?? {};
         mgr.addBlock(bt.block_type, config, 200, 200);
         editor.updateSnapshot();
         editor.onChange?.();

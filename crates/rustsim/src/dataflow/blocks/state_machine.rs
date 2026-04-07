@@ -37,12 +37,15 @@ use crate::dataflow::block::{
     MessageData, MessageSchema, Module, PortDef, PortKind, Tick, Value,
 };
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 // ---------------------------------------------------------------------------
 // Config types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+#[serde(default)]
 pub struct StateMachineConfig {
     pub states: Vec<String>,
     pub initial: String,
@@ -66,7 +69,8 @@ impl Default for StateMachineConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
 pub struct TransitionConfig {
     pub from: String,
     pub to: String,
@@ -75,7 +79,8 @@ pub struct TransitionConfig {
     pub actions: Vec<TransitionAction>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
 #[serde(tag = "type")]
 pub enum TransitionGuard {
     Topic {
@@ -89,14 +94,16 @@ pub enum TransitionGuard {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
 pub struct FieldCondition {
     pub field: String,
     pub op: CompareOp,
     pub value: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
 pub enum CompareOp {
     Eq,
     Ne,
@@ -119,15 +126,18 @@ impl CompareOp {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
 pub struct TransitionAction {
     pub topic: String,
     pub message: Vec<(String, f64)>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
 pub struct TopicBinding {
     pub topic: String,
+    #[ts(type = "{ name: string; fields: Array<{ name: string; field_type: string }> }")]
     pub schema: MessageSchema,
 }
 

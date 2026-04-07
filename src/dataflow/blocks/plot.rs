@@ -2,8 +2,10 @@
 
 use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct PlotConfig {
     /// Maximum number of samples to keep.
     #[serde(default = "default_max_samples")]

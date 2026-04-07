@@ -23,6 +23,7 @@ dag-core = { path = "../../dag-core", default-features = false, features = ["std
 i2c-hil-sim = { path = "../../hil/i2c-hil-sim" }
 embedded-hal = "1.0"
 mlir-codegen = { path = "../../mlir-codegen", optional = true }
+ts-rs = "10"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
