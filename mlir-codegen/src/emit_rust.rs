@@ -241,6 +241,28 @@ fn emit_op(out: &mut String, idx: usize, op: &IrOp) {
             let _ = writeln!(out, "    let (p, v) = hw.encoder_read({ch}); state.v{} = p; state.v{} = v;", r(0), r(1));
         }
 
+        IrOpKind::Dataflow(DataflowOp::ChannelRead) => {
+            let topic = attr_str(op, "topic");
+            let _ = writeln!(out, "    // Op {idx}: dataflow.channel_read {{topic = \"{topic}\"}}");
+            let _ = writeln!(out, "    state.v{} = hw.channel_read(\"{topic}\");", r(0));
+        }
+
+        IrOpKind::Dataflow(DataflowOp::ChannelWrite) => {
+            let topic = attr_str(op, "topic");
+            let _ = writeln!(out, "    // Op {idx}: dataflow.channel_write {{topic = \"{topic}\"}}");
+            let _ = writeln!(out, "    hw.channel_write(\"{topic}\", state.v{});", a(0));
+        }
+
+        IrOpKind::Dataflow(DataflowOp::MessageFieldExtract) => {
+            let field = attr_str(op, "field");
+            let _ = writeln!(out, "    // Op {idx}: dataflow.message_field {{field = \"{field}\"}}");
+            let _ = writeln!(out, "    state.v{} = hw.message_field(state.v{}, \"{field}\");", r(0), a(0));
+        }
+
+        IrOpKind::Dataflow(DataflowOp::StateMachine) => {
+            let _ = writeln!(out, "    // Op {idx}: dataflow.state_machine (not yet implemented)");
+        }
+
         IrOpKind::Func(FuncOp::Call { callee }) if callee == "subscribe" => {
             let topic = attr_str(op, "topic");
             let _ = writeln!(out, "    // Op {idx}: func.call @subscribe {{topic = \"{topic}\"}}");
