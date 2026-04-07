@@ -40,6 +40,62 @@ test.describe('Block Editor Connections', () => {
     expect(inputPorts).toBeGreaterThanOrEqual(1); // Gain has 1 input
   });
 
+  test('programmatic connect via UI manager creates edge', async ({ page }) => {
+    await page.goto(BASE_URL);
+    await page.waitForSelector('.df-workspace', { timeout: 10000 });
+    await page.waitForTimeout(1000);
+
+    // Add two blocks via sidebar palette clicks
+    await page.click('text=Constant');
+    await page.waitForTimeout(300);
+    await page.click('text=Gain');
+    await page.waitForTimeout(300);
+
+    // Call connect programmatically via the graph manager (same as what the wire-drop handler does)
+    const result = await page.evaluate(async () => {
+      // Access the WASM module via dynamic import
+      const mod = await import('/pkg/rustsim.js');
+      if (!mod) return { error: 'rustsim import failed' };
+
+      // Find the graph manager — it's stored somewhere accessible
+      // Let's use the WASM API directly with graph ID 1 (default)
+      try {
+        const snap = JSON.parse(mod.dataflow_snapshot(1));
+        const blocks = snap.blocks;
+        if (blocks.length < 2) return { error: 'not enough blocks', count: blocks.length };
+
+        // Find constant (has output) and gain (has input)
+        const src = blocks.find((b: any) => b.block_type === 'constant');
+        const dst = blocks.find((b: any) => b.block_type === 'gain');
+        if (!src || !dst) return { error: 'blocks not found' };
+
+        const chId = mod.dataflow_connect(1, src.id, 0, dst.id, 0);
+        const snap2 = JSON.parse(mod.dataflow_snapshot(1));
+        return {
+          channelId: chId,
+          edgeCount: snap2.channels.length,
+          srcId: src.id,
+          dstId: dst.id,
+        };
+      } catch (e) {
+        return { error: String(e) };
+      }
+    });
+
+    console.log('Programmatic connect result:', JSON.stringify(result));
+    expect(result.error).toBeUndefined();
+    expect(result.edgeCount).toBe(1);
+
+    // Now check if the edge SVG appeared
+    await page.waitForTimeout(500);
+    // Trigger a snapshot refresh by clicking the workspace
+    await page.click('.df-workspace');
+    await page.waitForTimeout(500);
+
+    const edges = await page.locator('.df-edge:not(.dragging)').count();
+    console.log('Visible edges after programmatic connect:', edges);
+  });
+
   test('drag from output to input creates connection', async ({ page }) => {
     const wireTraces: string[] = [];
     page.on('console', msg => {
