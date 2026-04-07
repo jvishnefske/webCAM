@@ -24,6 +24,8 @@ i2c-hil-sim = { path = "../../hil/i2c-hil-sim" }
 embedded-hal = "1.0"
 mlir-codegen = { path = "../../mlir-codegen", optional = true }
 ts-rs = "10"
+tsify-next = { version = "0.5", features = ["js"] }
+serde-wasm-bindgen = "0.6"
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
