@@ -8,6 +8,11 @@ const NODE_W = 140;
 const PORT_OFFSET_Y = 30;
 const PORT_SPACING = 20;
 
+/** Unwrap a value that may be a plain number or a newtype wrapper {0: number}. */
+function unwrapId(v: number | { 0: number }): number {
+  return typeof v === 'number' ? v : v[0];
+}
+
 /** Compute SVG cubic Bezier d attribute for a connection. */
 export function edgePath(x1: number, y1: number, x2: number, y2: number): string {
   const dx = Math.abs(x2 - x1);
@@ -39,11 +44,11 @@ export function reconcileEdges(
 
   const currentIds = new Set<number>();
   for (const ch of channels) {
-    const chId = ch.id[0];
+    const chId = unwrapId(ch.id);
     currentIds.add(chId);
 
-    const fromBlock = blockMap.get(ch.from_block[0]);
-    const toBlock = blockMap.get(ch.to_block[0]);
+    const fromBlock = blockMap.get(unwrapId(ch.from_block));
+    const toBlock = blockMap.get(unwrapId(ch.to_block));
     if (!fromBlock || !toBlock) continue;
 
     const fromPos = positions.get(fromBlock.id) ?? { x: 0, y: 0 };
@@ -96,13 +101,13 @@ export function updateEdgesForBlock(
   for (const b of blocks) blockMap.set(b.id, b);
 
   for (const ch of channels) {
-    if (ch.from_block[0] !== blockId && ch.to_block[0] !== blockId) continue;
-    const chId = ch.id[0];
+    if (unwrapId(ch.from_block) !== blockId && unwrapId(ch.to_block) !== blockId) continue;
+    const chId = unwrapId(ch.id);
     const path = edges.paths.get(chId);
     if (!path) continue;
 
-    const fromBlock = blockMap.get(ch.from_block[0]);
-    const toBlock = blockMap.get(ch.to_block[0]);
+    const fromBlock = blockMap.get(unwrapId(ch.from_block));
+    const toBlock = blockMap.get(unwrapId(ch.to_block));
     if (!fromBlock || !toBlock) continue;
 
     const fromPos = positions.get(fromBlock.id) ?? { x: 0, y: 0 };

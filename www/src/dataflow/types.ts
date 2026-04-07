@@ -12,10 +12,10 @@ export interface ValueSeries { type: 'Series'; data: number[] }
 export type Value = ValueFloat | ValueBytes | ValueText | ValueSeries;
 
 export interface ChannelSnapshot {
-  id: { 0: number };
-  from_block: { 0: number };
+  id: number | { 0: number };
+  from_block: number | { 0: number };
   from_port: number;
-  to_block: { 0: number };
+  to_block: number | { 0: number };
   to_port: number;
 }
 
