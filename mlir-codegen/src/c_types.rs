@@ -14,6 +14,7 @@ pub fn c_type(kind: &PortKind) -> &'static str {
         PortKind::Text => "double",
         PortKind::Series => "double",
         PortKind::Any => "double",
+        PortKind::Message(_) => "double",
     }
 }
 
@@ -25,6 +26,7 @@ pub fn c_default(kind: &PortKind) -> &'static str {
         PortKind::Text => "0.0",
         PortKind::Series => "0.0",
         PortKind::Any => "0.0",
+        PortKind::Message(_) => "0.0",
     }
 }
 
@@ -36,6 +38,7 @@ pub fn mlir_type(kind: &PortKind) -> &'static str {
         PortKind::Text => "f64",
         PortKind::Series => "f64",
         PortKind::Any => "f64",
+        PortKind::Message(_) => "f64",
     }
 }
 
