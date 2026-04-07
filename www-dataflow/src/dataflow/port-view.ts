@@ -191,14 +191,23 @@ export function setupWireDrag(
   function onPointerUp(e: PointerEvent): void {
     if (!wireDrag) return;
 
-    // Check if we dropped on a port — try elementFromPoint first,
-    // then walk up to find the nearest .df-port in case we hit a child/label.
-    let target = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
-    if (target && !target.classList.contains('df-port')) {
-      target = target.closest('.df-port') as HTMLElement | null;
-    }
-    // Also check what e.target is (may differ from elementFromPoint due to pointer capture)
+    // Prefer e.target (reliable after releasePointerCapture in onPointerDown).
+    // Fall back to elementFromPoint + closest walk for edge cases.
     const eTarget = e.target as HTMLElement | null;
+    let target: HTMLElement | null = null;
+    if (eTarget?.classList.contains('df-port')) {
+      target = eTarget;
+    } else if (eTarget) {
+      target = eTarget.closest('.df-port') as HTMLElement | null;
+    }
+    if (!target) {
+      const efp = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+      if (efp?.classList.contains('df-port')) {
+        target = efp;
+      } else if (efp) {
+        target = efp.closest('.df-port') as HTMLElement | null;
+      }
+    }
     const trace: Record<string, unknown> = {
       event: 'wire-drop',
       fromBlock: wireDrag.fromBlock,
