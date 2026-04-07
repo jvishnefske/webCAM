@@ -1,8 +1,7 @@
 /** Searchable block type picker for the dataflow editor. */
 
-import type { BlockTypeInfo } from './types.js';
+import type { BlockTypeInfo, BlockConfigMap } from './types.js';
 import type { DataflowManager } from './graph.js';
-import type { BlockConfigMap } from './generated/index.js';
 
 export const DEFAULT_CONFIGS: { [K in keyof BlockConfigMap]: BlockConfigMap[K] } = {
   constant: { value: 1.0 },

@@ -37,14 +37,14 @@ use crate::dataflow::block::{
     MessageData, MessageSchema, Module, PortDef, PortKind, Tick, Value,
 };
 use serde::{Deserialize, Serialize};
-use ts_rs::TS;
+use tsify_next::Tsify;
 
 // ---------------------------------------------------------------------------
 // Config types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(default)]
 pub struct StateMachineConfig {
     pub states: Vec<String>,
@@ -69,8 +69,8 @@ impl Default for StateMachineConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct TransitionConfig {
     pub from: String,
     pub to: String,
@@ -79,8 +79,8 @@ pub struct TransitionConfig {
     pub actions: Vec<TransitionAction>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "type")]
 pub enum TransitionGuard {
     Topic {
@@ -94,16 +94,16 @@ pub enum TransitionGuard {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct FieldCondition {
     pub field: String,
     pub op: CompareOp,
     pub value: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub enum CompareOp {
     Eq,
     Ne,
@@ -126,18 +126,18 @@ impl CompareOp {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct TransitionAction {
     pub topic: String,
     pub message: Vec<(String, f64)>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct TopicBinding {
     pub topic: String,
-    #[ts(type = "{ name: string; fields: Array<{ name: string; field_type: string }> }")]
+    #[tsify(type = "{ name: string; fields: Array<{ name: string; field_type: string }> }")]
     pub schema: MessageSchema,
 }
 
