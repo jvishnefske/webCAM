@@ -277,7 +277,7 @@ impl BlockFn {
                 // Evaluate guards — first matching transition wins
                 let mut next = current;
                 for t in transitions {
-                    if t.from == current && inp(inputs, t.guard as usize) > 0.5 {
+                    if t.from == current && (t.guard == u8::MAX || inp(inputs, t.guard as usize) > 0.5) {
                         next = t.to;
                         break;
                     }
@@ -523,7 +523,18 @@ fn parse_state_machine(cfg: &serde_json::Value) -> Result<BlockFn, String> {
                     let to_name = t.get("to")?.as_str()?;
                     let from = state_names.iter().position(|&s| s == from_name)?;
                     let to = state_names.iter().position(|&s| s == to_name)?;
-                    let guard = t.get("guard_port")?.as_u64()? as u8;
+                    let guard = if let Some(g) = t.get("guard") {
+                        match g.get("type").and_then(|v| v.as_str()) {
+                            Some("GuardPort") => {
+                                g.get("port").and_then(|v| v.as_u64()).unwrap_or(0) as u8
+                            }
+                            Some("Unconditional") => u8::MAX, // sentinel for always-fire
+                            _ => 0, // Topic guards: MVP runtime uses port 0
+                        }
+                    } else {
+                        // Legacy: guard_port field directly on transition
+                        t.get("guard_port").and_then(|v| v.as_u64()).unwrap_or(0) as u8
+                    };
                     Some(SmTransition {
                         from: from as u8,
                         guard,
@@ -912,6 +923,47 @@ mod tests {
         assert_eq!(rt.read_output(1, 0), Some(1.0)); // state_idx = 1 (on)
         assert_eq!(rt.read_output(1, 1), Some(0.0)); // off inactive
         assert_eq!(rt.read_output(1, 2), Some(1.0)); // on active
+    }
+
+    #[test]
+    fn state_machine_new_guard_format() {
+        let block = BlockSnapshot {
+            id: 1,
+            block_type: "state_machine".to_string(),
+            name: "SM".to_string(),
+            inputs: vec![PortDef { name: "guard_0".to_string(), kind: PortKind::Float }],
+            outputs: vec![
+                PortDef { name: "state".to_string(), kind: PortKind::Float },
+                PortDef { name: "active_idle".to_string(), kind: PortKind::Float },
+                PortDef { name: "active_running".to_string(), kind: PortKind::Float },
+            ],
+            config: serde_json::json!({
+                "states": ["idle", "running"],
+                "initial": "idle",
+                "transitions": [{
+                    "from": "idle",
+                    "to": "running",
+                    "guard": {"type": "GuardPort", "port": 0},
+                    "actions": []
+                }],
+                "input_topics": [],
+                "output_topics": []
+            }),
+            output_values: vec![],
+            custom_codegen: None,
+        };
+        let bf = BlockFn::from_snapshot(&block).unwrap();
+        match &bf {
+            BlockFn::StateMachine { n_states, initial, transitions } => {
+                assert_eq!(*n_states, 2);
+                assert_eq!(*initial, 0);
+                assert_eq!(transitions.len(), 1);
+                assert_eq!(transitions[0].from, 0);
+                assert_eq!(transitions[0].to, 1);
+                assert_eq!(transitions[0].guard, 0);
+            }
+            other => panic!("expected StateMachine, got {:?}", other),
+        }
     }
 
     #[test]
