@@ -74,7 +74,7 @@ export function showPalette(
       item.className = 'df-palette-item';
       item.textContent = bt.name;
       item.addEventListener('click', () => {
-        const config = (DEFAULT_CONFIGS as Record<string, Record<string, unknown>>)[bt.block_type] ?? {};
+        const config = (DEFAULT_CONFIGS as unknown as Record<string, Record<string, unknown>>)[bt.block_type] ?? {};
         mgr.addBlock(bt.block_type, config, worldX, worldY);
         palette.remove();
         onBlockAdded();
