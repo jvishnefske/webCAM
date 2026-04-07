@@ -73,6 +73,14 @@ pub enum DataflowOp {
     UartTx,
     EncoderRead,
     // NOTE: No stepper/stallguard/display — these are channel messages, not IR ops.
+    /// `dataflow.channel_read "topic"` -- read from a named typed channel (subscribe).
+    ChannelRead,
+    /// `dataflow.channel_write "topic"` -- write to a named typed channel (publish).
+    ChannelWrite,
+    /// `dataflow.message_field "name"` -- extract a typed field from a message value.
+    MessageFieldExtract,
+    /// `dataflow.state_machine` -- region-based FSM op.
+    StateMachine,
 }
 
 impl IrOpKind {
@@ -94,6 +102,10 @@ impl IrOpKind {
                 DataflowOp::UartRx => "uart_rx",
                 DataflowOp::UartTx => "uart_tx",
                 DataflowOp::EncoderRead => "encoder_read",
+                DataflowOp::ChannelRead => "channel_read",
+                DataflowOp::ChannelWrite => "channel_write",
+                DataflowOp::MessageFieldExtract => "message_field",
+                DataflowOp::StateMachine => "state_machine",
             }),
             Self::Custom(s) => s.clone(),
         }
