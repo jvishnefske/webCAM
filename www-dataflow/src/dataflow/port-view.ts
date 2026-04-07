@@ -142,6 +142,9 @@ export function setupWireDrag(
 
     e.preventDefault();
     e.stopPropagation();
+    // Release implicit pointer capture so pointerup fires on the element
+    // under the cursor (the target port), not the source port.
+    target.releasePointerCapture(e.pointerId);
   }
 
   function onPointerMove(e: PointerEvent): void {
