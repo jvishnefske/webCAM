@@ -4,6 +4,7 @@ import type { BlockSnapshot, NodePosition, GraphSnapshot } from './types.js';
 import type { DataflowManager } from './graph.js';
 import { createPorts, updateOutputLabels } from './port-view.js';
 import { updateEdgesForBlock, type EdgeElements } from './edge-view.js';
+import { mountStateMachineEditor } from './state-machine-editor.js';
 
 const PORT_SPACING = 20;
 const NODE_H_BASE = 40;
@@ -49,6 +50,12 @@ export function reconcileNodes(
       nodeEl.appendChild(typeLabel);
 
       createPorts(nodeEl, block.inputs, block.outputs, block.output_values);
+
+      if (block.block_type === 'state_machine') {
+        const editorDiv = document.createElement('div');
+        editorDiv.className = 'sm-editor-container';
+        nodeEl.appendChild(editorDiv);
+      }
 
       const h = nodeHeight(block);
       nodeEl.style.height = `${h}px`;
@@ -173,6 +180,33 @@ export function setupNodeDrag(
     workspace.removeEventListener('pointermove', onPointerMove);
     workspace.removeEventListener('pointerup', onPointerUp);
   };
+}
+
+export function updateStateMachineEditor(
+  elements: NodeElements,
+  selectedId: number | null,
+  snap: { blocks: import('./types.js').BlockSnapshot[] } | null,
+  mgr: DataflowManager,
+  onConfigChanged: () => void,
+): void {
+  for (const [, nodeEl] of elements.nodes) {
+    const container = nodeEl.querySelector('.sm-editor-container');
+    if (container) container.textContent = '';
+  }
+  if (selectedId === null || !snap) return;
+  const block = snap.blocks.find(b => b.id === selectedId);
+  if (!block || block.block_type !== 'state_machine') return;
+  const nodeEl = elements.nodes.get(selectedId);
+  if (!nodeEl) return;
+  const container = nodeEl.querySelector('.sm-editor-container') as HTMLElement | null;
+  if (!container) return;
+  mountStateMachineEditor(
+    container,
+    selectedId,
+    block.config as unknown as import('./types.js').StateMachineConfig,
+    mgr,
+    onConfigChanged,
+  );
 }
 
 /** Set up right-click delete on nodes. Returns cleanup function. */
