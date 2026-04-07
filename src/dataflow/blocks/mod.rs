@@ -290,6 +290,44 @@ mod tests {
     }
 
     #[test]
+    fn create_block_state_machine_minimal() {
+        let block = create_block("state_machine", r#"{"states":["idle"],"initial":"idle"}"#).unwrap();
+        assert_eq!(block.block_type(), "state_machine");
+    }
+
+    #[test]
+    fn create_block_state_machine_with_topics() {
+        let cfg = r#"{
+            "states": ["idle", "running"],
+            "initial": "idle",
+            "transitions": [{
+                "from": "idle",
+                "to": "running",
+                "guard": {"type": "Topic", "topic": "cmd", "condition": {"field": "go", "op": "Gt", "value": 0.0}},
+                "actions": []
+            }],
+            "input_topics": [{"topic": "cmd", "schema": {"name": "cmd", "fields": [{"name": "go", "field_type": "F32"}]}}],
+            "output_topics": []
+        }"#;
+        let block = create_block("state_machine", cfg).unwrap();
+        assert_eq!(block.block_type(), "state_machine");
+        assert_eq!(block.input_ports().len(), 1);
+        assert_eq!(block.input_ports()[0].name, "cmd");
+    }
+
+    #[test]
+    fn create_block_state_machine_legacy_guard() {
+        let cfg = r#"{
+            "states": ["a", "b"],
+            "initial": "a",
+            "transitions": [{"from": "a", "to": "b", "guard": {"type": "GuardPort", "port": 0}}]
+        }"#;
+        let block = create_block("state_machine", cfg).unwrap();
+        assert_eq!(block.input_ports().len(), 1);
+        assert_eq!(block.input_ports()[0].name, "guard_0");
+    }
+
+    #[test]
     fn create_block_gain() {
         let block = create_block("gain", r#"{"op":"Gain","param1":2.0}"#).unwrap();
         assert_eq!(block.block_type(), "gain");
@@ -439,5 +477,34 @@ mod tests {
     fn constant_block_as_sim_model_none() {
         let mut b = constant::ConstantBlock::new(1.0);
         assert!(b.as_sim_model().is_none());
+    }
+
+    /// Export all block config types to TypeScript.
+    /// Run with: cargo test -p rustcam export_ts_block_configs -- --ignored
+    #[test]
+    #[ignore]
+    fn export_ts_block_configs() {
+        use ts_rs::TS;
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../www-dataflow/src/dataflow/generated");
+        std::fs::create_dir_all(&out).unwrap();
+
+        // Export each config type and its dependencies
+        constant::ConstantConfig::export_all_to(&out).unwrap();
+        function::FunctionConfig::export_all_to(&out).unwrap();
+        plot::PlotConfig::export_all_to(&out).unwrap();
+        udp::UdpConfig::export_all_to(&out).unwrap();
+        pubsub::PubSubConfig::export_all_to(&out).unwrap();
+        state_machine::StateMachineConfig::export_all_to(&out).unwrap();
+        embedded::AdcConfig::export_all_to(&out).unwrap();
+        embedded::PwmConfig::export_all_to(&out).unwrap();
+        embedded::GpioOutConfig::export_all_to(&out).unwrap();
+        embedded::GpioInConfig::export_all_to(&out).unwrap();
+        embedded::UartTxConfig::export_all_to(&out).unwrap();
+        embedded::UartRxConfig::export_all_to(&out).unwrap();
+        embedded::EncoderConfig::export_all_to(&out).unwrap();
+        embedded::Ssd1306DisplayConfig::export_all_to(&out).unwrap();
+        embedded::Tmc2209StepperConfig::export_all_to(&out).unwrap();
+        embedded::Tmc2209StallGuardConfig::export_all_to(&out).unwrap();
     }
 }
