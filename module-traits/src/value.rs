@@ -5,6 +5,39 @@ use alloc::vec::Vec;
 
 use serde::{Deserialize, Serialize};
 
+/// Primitive field types for message schemas.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum FieldType {
+    F32,
+    F64,
+    U8,
+    U16,
+    U32,
+    I32,
+    Bool,
+}
+
+/// A named field in a message schema.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MessageField {
+    pub name: String,
+    pub field_type: FieldType,
+}
+
+/// Schema definition for a structured message type.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MessageSchema {
+    pub name: String,
+    pub fields: Vec<MessageField>,
+}
+
+/// Runtime message data: flat f64 fields (bools as 0.0/1.0, ints cast to f64).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MessageData {
+    pub schema_name: String,
+    pub fields: Vec<(String, f64)>,
+}
+
 /// The kinds of data that can flow through a port.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum PortKind {
@@ -13,6 +46,7 @@ pub enum PortKind {
     Text,
     Series,
     Any,
+    Message(MessageSchema),
 }
 
 /// Metadata for a single port.
@@ -39,6 +73,7 @@ pub enum Value {
     Bytes(Vec<u8>),
     Text(String),
     Series(Vec<f64>),
+    Message(MessageData),
 }
 
 impl Value {
@@ -70,12 +105,23 @@ impl Value {
         }
     }
 
+    pub fn as_message(&self) -> Option<&MessageData> {
+        match self {
+            Value::Message(m) => Some(m),
+            _ => None,
+        }
+    }
+
     pub fn kind(&self) -> PortKind {
         match self {
             Value::Float(_) => PortKind::Float,
             Value::Bytes(_) => PortKind::Bytes,
             Value::Text(_) => PortKind::Text,
             Value::Series(_) => PortKind::Series,
+            Value::Message(m) => PortKind::Message(MessageSchema {
+                name: m.schema_name.clone(),
+                fields: Vec::new(), // runtime data does not carry field types
+            }),
         }
     }
 }
@@ -216,5 +262,108 @@ mod tests {
             let restored: PortKind = serde_json::from_str(&json).expect("deserialize PortKind");
             assert_eq!(kind, &restored);
         }
+    }
+
+    #[test]
+    fn test_field_type_serde_roundtrip() {
+        let types = vec![
+            FieldType::F32, FieldType::F64, FieldType::U8,
+            FieldType::U16, FieldType::U32, FieldType::I32, FieldType::Bool,
+        ];
+        for ft in &types {
+            let json = serde_json::to_string(ft).expect("serialize FieldType");
+            let restored: FieldType = serde_json::from_str(&json).expect("deserialize FieldType");
+            assert_eq!(ft, &restored);
+        }
+    }
+
+    #[test]
+    fn test_message_schema_construction() {
+        let schema = MessageSchema {
+            name: String::from("motor_cmd"),
+            fields: vec![
+                MessageField { name: String::from("speed"), field_type: FieldType::F32 },
+                MessageField { name: String::from("dir"), field_type: FieldType::Bool },
+            ],
+        };
+        assert_eq!(schema.name, "motor_cmd");
+        assert_eq!(schema.fields.len(), 2);
+        assert_eq!(schema.fields[0].name, "speed");
+        assert_eq!(schema.fields[1].field_type, FieldType::Bool);
+    }
+
+    #[test]
+    fn test_message_schema_serde_roundtrip() {
+        let schema = MessageSchema {
+            name: String::from("sensor"),
+            fields: vec![
+                MessageField { name: String::from("temp"), field_type: FieldType::F32 },
+            ],
+        };
+        let json = serde_json::to_string(&schema).expect("serialize");
+        let restored: MessageSchema = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(schema, restored);
+    }
+
+    #[test]
+    fn test_port_kind_message_serde_roundtrip() {
+        let schema = MessageSchema {
+            name: String::from("cmd"),
+            fields: vec![
+                MessageField { name: String::from("val"), field_type: FieldType::F64 },
+            ],
+        };
+        let kind = PortKind::Message(schema);
+        let json = serde_json::to_string(&kind).expect("serialize");
+        let restored: PortKind = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(kind, restored);
+    }
+
+    #[test]
+    fn test_message_data_construction() {
+        let msg = MessageData {
+            schema_name: String::from("motor_cmd"),
+            fields: vec![
+                (String::from("speed"), 1.5),
+                (String::from("dir"), 1.0),
+            ],
+        };
+        assert_eq!(msg.schema_name, "motor_cmd");
+        assert_eq!(msg.fields.len(), 2);
+        assert_eq!(msg.fields[0].1, 1.5);
+    }
+
+    #[test]
+    fn test_value_message_serde_roundtrip() {
+        let msg = Value::Message(MessageData {
+            schema_name: String::from("s"),
+            fields: vec![(String::from("x"), 42.0)],
+        });
+        let json = serde_json::to_string(&msg).expect("serialize");
+        let restored: Value = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(msg, restored);
+    }
+
+    #[test]
+    fn test_value_message_kind() {
+        let msg = Value::Message(MessageData {
+            schema_name: String::from("s"),
+            fields: vec![],
+        });
+        match msg.kind() {
+            PortKind::Message(s) => assert_eq!(s.name, "s"),
+            other => panic!("expected PortKind::Message, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_value_as_message() {
+        let data = MessageData {
+            schema_name: String::from("t"),
+            fields: vec![(String::from("a"), 1.0)],
+        };
+        let val = Value::Message(data.clone());
+        assert_eq!(val.as_message(), Some(&data));
+        assert_eq!(Value::Float(1.0).as_message(), None);
     }
 }

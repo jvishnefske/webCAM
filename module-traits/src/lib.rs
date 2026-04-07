@@ -29,4 +29,4 @@ pub use codegen_trait::Codegen;
 pub use module::Module;
 pub use sim::{SimModel, SimPeripherals};
 pub use tick::Tick;
-pub use value::{PortDef, PortKind, Value};
+pub use value::{FieldType, MessageData, MessageField, MessageSchema, PortDef, PortKind, Value};
