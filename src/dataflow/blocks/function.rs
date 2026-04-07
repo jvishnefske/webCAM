@@ -2,8 +2,10 @@
 
 use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub enum FunctionOp {
     Gain,
     Add,
@@ -11,7 +13,8 @@ pub enum FunctionOp {
     Clamp,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct FunctionConfig {
     pub op: FunctionOp,
     #[serde(default)]

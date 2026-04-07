@@ -2,8 +2,9 @@
 
 import type { BlockTypeInfo } from './types.js';
 import type { DataflowManager } from './graph.js';
+import type { BlockConfigMap } from './generated/index.js';
 
-export const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
+export const DEFAULT_CONFIGS: { [K in keyof BlockConfigMap]: BlockConfigMap[K] } = {
   constant: { value: 1.0 },
   gain: { op: 'Gain', param1: 1.0, param2: 0.0 },
   clamp: { op: 'Clamp', param1: 0.0, param2: 100.0 },
@@ -16,6 +17,13 @@ export const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
   gpio_in: { pin: 2 },
   uart_tx: { port: 0, baud: 115200 },
   uart_rx: { port: 0, baud: 115200 },
+  pubsub_source: { topic: 'default', port_kind: 'Float' },
+  pubsub_sink: { topic: 'default', port_kind: 'Float' },
+  state_machine: { states: ['idle'], initial: 'idle', transitions: [], input_topics: [], output_topics: [] },
+  encoder: { channel: 0 },
+  ssd1306_display: { i2c_bus: 0, address: 60 },
+  tmc2209_stepper: { uart_port: 0, uart_addr: 0, steps_per_rev: 200, microsteps: 16 },
+  tmc2209_stallguard: { uart_port: 0, uart_addr: 0, threshold: 50 },
 };
 
 /** Show palette at screen position, create block at world position. */
@@ -67,7 +75,7 @@ export function showPalette(
       item.className = 'df-palette-item';
       item.textContent = bt.name;
       item.addEventListener('click', () => {
-        const config = DEFAULT_CONFIGS[bt.block_type] ?? {};
+        const config = (DEFAULT_CONFIGS as Record<string, Record<string, unknown>>)[bt.block_type] ?? {};
         mgr.addBlock(bt.block_type, config, worldX, worldY);
         palette.remove();
         onBlockAdded();

@@ -2,15 +2,28 @@
 
 use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(default)]
 pub struct PubSubConfig {
     pub topic: String,
+    #[ts(type = "\"Float\" | \"Bytes\" | \"Text\" | \"Series\" | \"Any\"")]
     pub port_kind: PortKind,
+}
+
+impl Default for PubSubConfig {
+    fn default() -> Self {
+        Self {
+            topic: "default".into(),
+            port_kind: PortKind::Float,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

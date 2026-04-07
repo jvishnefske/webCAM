@@ -86,14 +86,34 @@ test.describe('Block Editor Connections', () => {
     expect(result.error).toBeUndefined();
     expect(result.edgeCount).toBe(1);
 
-    // Now check if the edge SVG appeared
-    await page.waitForTimeout(500);
-    // Trigger a snapshot refresh by clicking the workspace
-    await page.click('.df-workspace');
-    await page.waitForTimeout(500);
+    // Trigger snapshot refresh via the editor
+    await page.waitForTimeout(200);
 
-    const edges = await page.locator('.df-edge:not(.dragging)').count();
-    console.log('Visible edges after programmatic connect:', edges);
+    // Check DOM state in detail
+    const domState = await page.evaluate(async () => {
+      const mod = await import('/pkg/rustsim.js');
+      const snap = JSON.parse(mod.dataflow_snapshot(1));
+      const svg = document.querySelector('.df-edge-layer');
+      const allEdges = document.querySelectorAll('.df-edge');
+      const allPaths = svg ? svg.querySelectorAll('path') : [];
+      return {
+        wasmChannels: snap.channels,
+        svgExists: !!svg,
+        svgChildCount: svg?.children.length ?? 0,
+        svgHTML: svg?.innerHTML.slice(0, 300) ?? 'none',
+        edgeElements: allEdges.length,
+        pathElements: allPaths.length,
+        // Check if positions exist for the connected blocks
+        channelDetail: snap.channels.map((ch: any) => ({
+          id: ch.id,
+          from: ch.from_block,
+          to: ch.to_block,
+          fromPort: ch.from_port,
+          toPort: ch.to_port,
+        })),
+      };
+    });
+    console.log('DOM edge state:', JSON.stringify(domState, null, 2));
   });
 
   test('drag from output to input creates connection', async ({ page }) => {
