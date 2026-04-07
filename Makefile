@@ -88,6 +88,9 @@ serve-native: wasm-dataflow ## Build WASM + run native server with mock HAL
 	@echo "Starting native-server at http://localhost:3000"
 	cargo run -p native-server -- --www-dir www-dataflow --port 3000
 
+dev: ## Hot-reload dev server (watches Rust+TS, rebuilds WASM automatically)
+	./scripts/dev.sh
+
 hil-e2e: ## Run E2E tests against live Pico2 (requires flashed device)
 	./tests/pico2_e2e.sh
 
