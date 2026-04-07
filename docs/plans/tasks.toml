@@ -18,7 +18,7 @@ acceptance = """
 - `wasm-pack build crates/rustsim --target web` succeeds
 """
 deps = []
-status = "pending"
+status = "complete"
 
 # ── Task 2: Derive Tsify on snapshot types (GraphSnapshot, etc.) ──
 
@@ -32,7 +32,7 @@ acceptance = """
 - No manual TS definitions needed for these types in types.ts
 """
 deps = ["task-001"]
-status = "pending"
+status = "complete"
 
 # ── Task 3: Convert snapshot WASM exports from String to typed ────
 
@@ -63,7 +63,7 @@ acceptance = """
 - `cargo check -p rustsim` passes
 """
 deps = ["task-001"]
-status = "pending"
+status = "complete"
 
 # ── Task 5: Convert remaining WASM exports to typed args ──────────
 
