@@ -89,34 +89,133 @@ pub fn emit_state_machine_tick(
             // Stay in current state
             writeln!(out, "        // no transitions — stay in {state_name}").unwrap();
         } else {
-            for t in &from_transitions {
+            for (t_idx, t) in from_transitions.iter().enumerate() {
                 let to_state = t.get("to").and_then(|v| v.as_str()).unwrap_or(state_name);
-                let guard_port = t.get("guard_port").and_then(|v| v.as_u64());
+                let to_label = to_snake_case(to_state);
 
-                if let Some(port) = guard_port {
-                    let guard_ssa = inputs
-                        .get(port as usize)
-                        .map(|s| s.as_str())
-                        .unwrap_or("%zero");
-                    let to_label = to_snake_case(to_state);
-                    writeln!(out, "        // if guard_{port} > 0.5 → {to_state}").unwrap();
-                    let cmp_ssa = format!("%sm{id}_cmp_{state_idx}_{port}");
-                    let thresh_ssa = format!("%sm{id}_thresh_{state_idx}");
-                    writeln!(out, "        {thresh_ssa} = arith.constant 0.5 : f64").unwrap();
-                    writeln!(
-                        out,
-                        "        {cmp_ssa} = arith.cmpf \"ogt\", {guard_ssa}, {thresh_ssa} : f64"
-                    )
-                    .unwrap();
-                    writeln!(out, "        cf.cond_br {cmp_ssa}, ^{to_label}, ^{label}").unwrap();
-                } else {
-                    // Unconditional transition
-                    let to_label = to_snake_case(to_state);
-                    writeln!(
-                        out,
-                        "        cf.br ^{to_label}  // unconditional → {to_state}"
-                    )
-                    .unwrap();
+                // Determine guard type: prefer new `guard` object, fall back to legacy `guard_port`
+                let guard_obj = t.get("guard");
+                let guard_type = guard_obj
+                    .and_then(|g| g.get("type"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unconditional");
+
+                match guard_type {
+                    "Topic" => {
+                        let topic = guard_obj
+                            .and_then(|g| g.get("topic"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        // Find SSA name matching topic: look for input whose name contains the topic
+                        let guard_ssa = inputs
+                            .iter()
+                            .find(|s| s.contains(topic))
+                            .map(|s| s.as_str())
+                            .unwrap_or("%zero");
+                        let condition = guard_obj.and_then(|g| g.get("condition"));
+                        if let Some(cond) = condition {
+                            let field = cond
+                                .get("field")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("value");
+                            let op_str = cond
+                                .get("op")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("Gt");
+                            let threshold = cond
+                                .get("value")
+                                .and_then(|v| v.as_f64())
+                                .unwrap_or(0.0);
+                            let mlir_op = compare_op_to_mlir(op_str);
+                            let field_ssa = format!("%sm{id}_field_{t_idx}_{field}");
+                            let thresh_ssa = format!("%sm{id}_thresh_{t_idx}");
+                            let cmp_ssa = format!("%sm{id}_cmp_{t_idx}");
+                            writeln!(
+                                out,
+                                "        // guard: {topic}.{field} {op_str} {threshold}"
+                            )
+                            .unwrap();
+                            writeln!(
+                                out,
+                                "        {field_ssa} = dataflow.message_field {guard_ssa}, \"{field}\" : f64"
+                            )
+                            .unwrap();
+                            writeln!(
+                                out,
+                                "        {thresh_ssa} = arith.constant {threshold} : f64"
+                            )
+                            .unwrap();
+                            writeln!(
+                                out,
+                                "        {cmp_ssa} = arith.cmpf \"{mlir_op}\", {field_ssa}, {thresh_ssa} : f64"
+                            )
+                            .unwrap();
+                            writeln!(
+                                out,
+                                "        cf.cond_br {cmp_ssa}, ^{to_label}, ^{label}"
+                            )
+                            .unwrap();
+                        } else {
+                            // Message presence — topic present means transition
+                            writeln!(
+                                out,
+                                "        // guard: message on {topic}"
+                            )
+                            .unwrap();
+                            writeln!(
+                                out,
+                                "        cf.br ^{to_label}  // topic present -> {to_state}"
+                            )
+                            .unwrap();
+                        }
+                    }
+                    "GuardPort" => {
+                        let port = guard_obj
+                            .and_then(|g| g.get("port"))
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let guard_ssa = inputs
+                            .get(port as usize)
+                            .map(|s| s.as_str())
+                            .unwrap_or("%zero");
+                        writeln!(out, "        // if guard_{port} > 0.5 -> {to_state}").unwrap();
+                        let cmp_ssa = format!("%sm{id}_cmp_{state_idx}_{port}");
+                        let thresh_ssa = format!("%sm{id}_thresh_{state_idx}");
+                        writeln!(out, "        {thresh_ssa} = arith.constant 0.5 : f64").unwrap();
+                        writeln!(
+                            out,
+                            "        {cmp_ssa} = arith.cmpf \"ogt\", {guard_ssa}, {thresh_ssa} : f64"
+                        )
+                        .unwrap();
+                        writeln!(out, "        cf.cond_br {cmp_ssa}, ^{to_label}, ^{label}").unwrap();
+                    }
+                    _ => {
+                        // "Unconditional" or missing guard object — check legacy guard_port field
+                        let legacy_port = t.get("guard_port").and_then(|v| v.as_u64());
+                        if let Some(port) = legacy_port {
+                            let guard_ssa = inputs
+                                .get(port as usize)
+                                .map(|s| s.as_str())
+                                .unwrap_or("%zero");
+                            writeln!(out, "        // if guard_{port} > 0.5 → {to_state}").unwrap();
+                            let cmp_ssa = format!("%sm{id}_cmp_{state_idx}_{port}");
+                            let thresh_ssa = format!("%sm{id}_thresh_{state_idx}");
+                            writeln!(out, "        {thresh_ssa} = arith.constant 0.5 : f64").unwrap();
+                            writeln!(
+                                out,
+                                "        {cmp_ssa} = arith.cmpf \"ogt\", {guard_ssa}, {thresh_ssa} : f64"
+                            )
+                            .unwrap();
+                            writeln!(out, "        cf.cond_br {cmp_ssa}, ^{to_label}, ^{label}").unwrap();
+                        } else {
+                            // Unconditional transition
+                            writeln!(
+                                out,
+                                "        cf.br ^{to_label}  // unconditional → {to_state}"
+                            )
+                            .unwrap();
+                        }
+                    }
                 }
             }
         }
@@ -168,6 +267,19 @@ fn extract_transitions(block: &BlockSnapshot) -> Vec<serde_json::Value> {
 
 fn to_snake_case(s: &str) -> String {
     s.to_lowercase().replace([' ', '-'], "_")
+}
+
+/// Map a comparison operator name to its MLIR `arith.cmpf` predicate string.
+fn compare_op_to_mlir(op: &str) -> &'static str {
+    match op {
+        "Gt" => "ogt",
+        "Lt" => "olt",
+        "Ge" => "oge",
+        "Le" => "ole",
+        "Eq" => "oeq",
+        "Ne" => "one",
+        _ => "ogt",
+    }
 }
 
 #[cfg(test)]
@@ -238,6 +350,50 @@ mod tests {
         assert!(out.contains("^running"));
         assert!(out.contains("cf.cond_br"));
         assert!(out.contains("%v10_p0"));
+    }
+
+    #[test]
+    fn emit_sm_with_topic_guards() {
+        let block = BlockSnapshot {
+            id: 20,
+            block_type: "state_machine".to_string(),
+            name: "topic_fsm".to_string(),
+            inputs: vec![PortDef {
+                name: "motor_cmd".to_string(),
+                kind: PortKind::Float,
+            }],
+            outputs: vec![
+                PortDef { name: "state".to_string(), kind: PortKind::Float },
+                PortDef { name: "active_idle".to_string(), kind: PortKind::Float },
+                PortDef { name: "active_running".to_string(), kind: PortKind::Float },
+            ],
+            config: serde_json::json!({
+                "states": ["idle", "running"],
+                "initial": "idle",
+                "transitions": [{
+                    "from": "idle",
+                    "to": "running",
+                    "guard": {
+                        "type": "Topic",
+                        "topic": "motor_cmd",
+                        "condition": {"field": "speed", "op": "Gt", "value": 0.0}
+                    },
+                    "actions": []
+                }],
+                "input_topics": [{"topic": "motor_cmd", "schema": {"name": "motor_cmd", "fields": [{"name": "speed", "field_type": "F32"}]}}],
+                "output_topics": []
+            }),
+            output_values: vec![],
+            custom_codegen: None,
+        };
+        let inputs = vec!["%motor_cmd".to_string()];
+        let mut out = String::new();
+        emit_state_machine_tick(&mut out, 20, &block, &inputs).unwrap();
+        assert!(out.contains("dataflow.state_machine"), "should contain state_machine op");
+        assert!(out.contains("^idle"), "should contain idle region");
+        assert!(out.contains("^running"), "should contain running region");
+        assert!(out.contains("dataflow.message_field"), "should contain message_field op");
+        assert!(out.contains("speed"), "should reference speed field");
     }
 
     #[test]
