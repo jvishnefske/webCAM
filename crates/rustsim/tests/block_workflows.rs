@@ -79,7 +79,7 @@ fn state_machine_transitions_in_graph() {
     let sm = add(
         &mut graph,
         "state_machine",
-        r#"{"states":["idle","running","stopped"],"initial":"idle","transitions":[{"from":"idle","to":"running","guard_port":0},{"from":"running","to":"stopped","guard_port":1}]}"#,
+        r#"{"states":["idle","running","stopped"],"initial":"idle","transitions":[{"from":"idle","to":"running","guard":{"type":"GuardPort","port":0}},{"from":"running","to":"stopped","guard":{"type":"GuardPort","port":1}}]}"#,
     );
 
     // Connect constant(1.0) to guard port 0 → idle→running

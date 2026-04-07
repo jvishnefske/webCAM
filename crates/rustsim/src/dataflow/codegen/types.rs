@@ -10,6 +10,7 @@ pub fn rust_type(kind: &PortKind) -> &'static str {
         PortKind::Text => "String",
         PortKind::Series => "Vec<f64>",
         PortKind::Any => "serde_json::Value",
+        PortKind::Message(_) => "MessageData",
     }
 }
 
@@ -21,6 +22,7 @@ pub fn rust_default(kind: &PortKind) -> &'static str {
         PortKind::Text => "String::new()",
         PortKind::Series => "Vec::new()",
         PortKind::Any => "serde_json::Value::Null",
+        PortKind::Message(_) => "MessageData { schema_name: String::new(), fields: Vec::new() }",
     }
 }
 
@@ -33,6 +35,7 @@ pub fn rust_type_no_std(kind: &PortKind) -> &'static str {
         PortKind::Text => "f64",
         PortKind::Series => "f64",
         PortKind::Any => "f64",
+        PortKind::Message(_) => "f64",
     }
 }
 
@@ -44,6 +47,7 @@ pub fn rust_default_no_std(kind: &PortKind) -> &'static str {
         PortKind::Text => "0.0_f64",
         PortKind::Series => "0.0_f64",
         PortKind::Any => "0.0_f64",
+        PortKind::Message(_) => "0.0_f64",
     }
 }
 
