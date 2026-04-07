@@ -11,11 +11,13 @@ import { HilClient } from './hil-client.js';
 import { renderPinTable } from './pin-table.js';
 import { renderI2cPanel, updateI2cBuses } from './i2c-panel.js';
 import {
-  serializeProject, loadProject, saveProject, deleteProject,
+  createProject, loadProject, saveProject, deleteProject,
   listProjects, getActiveProjectName, setActiveProjectName,
-  uniqueName, createAutoSave,
+  uniqueName, createAutoSave, addSheet, removeSheet,
+  serializeDataflowSheet,
+  type Project, type DataflowSheetData,
 } from './storage.js';
-import { createSidebar } from './sidebar.js';
+import { createSidebar, type ProjectInfo } from './sidebar.js';
 import { TelemetryPublisher } from './telemetry.js';
 import type { GraphSnapshot, Value } from './types.js';
 
@@ -27,7 +29,7 @@ function unwrapId(v: number | { 0: number }): number {
 let mgr: DataflowManager | null = null;
 let editor: DataflowEditor | null = null;
 let hilClient: HilClient | null = null;
-let activeProjectName = 'Untitled';
+let activeProject: Project | null = null;
 let triggerAutoSave: (() => void) | null = null;
 let telemetry: TelemetryPublisher | null = null;
 
@@ -49,31 +51,41 @@ export function initDataflow(): void {
   // ── Project management ──────────────────────────────────────────
   const projectNameEl = $('df-project-name');
 
+  /** Save the current active sheet into the active project and persist. */
   function currentSave() {
-    if (!mgr || !editor) return;
-    const snap = mgr.snapshot();
-    const viewport = { panX: 0, panY: 0, scale: 1 }; // TODO: expose from editor
-    const project = serializeProject(activeProjectName, snap, mgr.positions, viewport);
-    saveProject(project);
-    setActiveProjectName(activeProjectName);
+    if (!activeProject || !mgr || !editor) return;
+    const sheetId = activeProject.activeSheet;
+    const sheet = activeProject.sheets[sheetId];
+    if (sheet?.type === 'dataflow') {
+      const snap = mgr.snapshot();
+      const viewport = { panX: 0, panY: 0, scale: 1 }; // TODO: expose from editor
+      sheet.data = serializeDataflowSheet(snap, mgr.positions, viewport);
+    }
+    activeProject.lastModified = new Date().toISOString();
+    saveProject(activeProject);
+    setActiveProjectName(activeProject.name);
   }
 
   triggerAutoSave = createAutoSave(() => currentSave(), 1000);
 
   function updateProjectNameDisplay() {
-    projectNameEl.textContent = activeProjectName;
+    projectNameEl.textContent = activeProject?.name ?? 'Untitled';
   }
 
   function refreshSidebar() {
-    const projects = listProjects();
-    const infos = projects.map(name => {
+    const names = listProjects();
+    const infos: ProjectInfo[] = names.map(name => {
       const p = loadProject(name);
-      const sheets = p
-        ? Object.values(p.sheets).map(s => ({ id: s.id, label: s.label, type: s.type, parentId: s.parentId }))
-        : [{ id: 'main', label: 'Main', type: 'dataflow' as const, parentId: null }];
-      return { name, lastModified: p?.lastModified ?? '', sheets };
-    });
-    sidebar.renderProjects(infos, activeProjectName, 'main');
+      if (!p) return null;
+      return {
+        name: p.name,
+        lastModified: p.lastModified,
+        sheets: Object.values(p.sheets).map(s => ({
+          id: s.id, label: s.label, type: s.type, parentId: s.parentId,
+        })),
+      };
+    }).filter((x): x is ProjectInfo => x !== null);
+    sidebar.renderProjects(infos, activeProject?.name ?? null, activeProject?.activeSheet ?? null);
   }
 
   function resetEditor(dt: number) {
@@ -92,16 +104,54 @@ export function initDataflow(): void {
     editor.resize();
   }
 
+  /** Load a dataflow sheet's data into a fresh editor+manager. */
+  function loadDataflowSheet(data: DataflowSheetData) {
+    const dt = parseFloat($input('df-dt').value) || 0.01;
+    resetEditor(dt);
+    // Replay blocks
+    const idMap = new Map<number, number>();
+    for (const block of data.graph.blocks) {
+      const newId = mgr!.addBlock(block.blockType, block.config);
+      idMap.set(block.id, newId);
+      const pos = data.positions[block.id];
+      if (pos) mgr!.positions.set(newId, { x: pos.x, y: pos.y });
+    }
+    // Replay channels
+    for (const ch of data.graph.channels) {
+      const from = idMap.get(ch.fromBlock);
+      const to = idMap.get(ch.toBlock);
+      if (from !== undefined && to !== undefined) {
+        mgr!.connect(from, ch.fromPort, to, ch.toPort);
+      }
+    }
+    editor!.updateSnapshot();
+  }
+
+  /** Switch the active sheet within the current project. */
+  function switchToSheet(sheetId: string) {
+    if (!activeProject) return;
+    currentSave(); // save current sheet first
+    activeProject.activeSheet = sheetId;
+    const sheet = activeProject.sheets[sheetId];
+    if (sheet?.type === 'dataflow') {
+      loadDataflowSheet(sheet.data as DataflowSheetData);
+    }
+    // BSP sheets handled later
+    saveProject(activeProject);
+    refreshSidebar();
+  }
+
+  /** Load an entire project by name, switching to its active sheet. */
   function loadProjectByName(name: string) {
     const project = loadProject(name);
     if (!project) return;
-    const dt = parseFloat($input('df-dt').value) || 0.01;
-    resetEditor(dt);
-    mgr!.restoreProject(project);
-    activeProjectName = name;
+    activeProject = project;
     setActiveProjectName(name);
+    const sheet = project.sheets[project.activeSheet];
+    if (sheet?.type === 'dataflow') {
+      loadDataflowSheet(sheet.data as DataflowSheetData);
+    }
     updateProjectNameDisplay();
-    editor!.updateSnapshot();
   }
 
   // Set up sidebar panel
@@ -114,23 +164,46 @@ export function initDataflow(): void {
     },
     onDeleteProject: (name) => {
       deleteProject(name);
-      if (name === activeProjectName) {
-        const dt = parseFloat($input('df-dt').value) || 0.01;
-        resetEditor(dt);
-        activeProjectName = 'Untitled';
-        setActiveProjectName(activeProjectName);
+      if (name === activeProject?.name) {
+        const newName = uniqueName('Untitled', listProjects());
+        activeProject = createProject(newName);
+        saveProject(activeProject);
+        setActiveProjectName(newName);
+        switchToSheet('main');
         updateProjectNameDisplay();
       }
       refreshSidebar();
     },
-    onSelectSheet: (_projectName, _sheetId) => {
-      // Sheet selection will be implemented when multi-sheet support lands
+    onSelectSheet: (projectName, sheetId) => {
+      // If selecting a sheet in a different project, load that project first
+      if (projectName !== activeProject?.name) {
+        currentSave();
+        loadProjectByName(projectName);
+      }
+      switchToSheet(sheetId);
     },
-    onAddSheet: (_projectName) => {
-      // Sheet creation will be implemented when multi-sheet support lands
+    onAddSheet: (projectName) => {
+      if (projectName !== activeProject?.name) return;
+      const label = prompt('Sheet name:');
+      if (!label || !label.trim()) return;
+      const id = label.trim().toLowerCase().replace(/\s+/g, '-');
+      const existingIds = Object.keys(activeProject.sheets);
+      const uniqueId = existingIds.includes(id) ? `${id}-${Date.now()}` : id;
+      // Default to dataflow; could prompt for type in the future
+      addSheet(activeProject, uniqueId, label.trim(), 'dataflow');
+      saveProject(activeProject);
+      refreshSidebar();
     },
-    onDeleteSheet: (_projectName, _sheetId) => {
-      // Sheet deletion will be implemented when multi-sheet support lands
+    onDeleteSheet: (projectName, sheetId) => {
+      if (projectName !== activeProject?.name) return;
+      const wasActive = activeProject.activeSheet === sheetId;
+      if (removeSheet(activeProject, sheetId)) {
+        saveProject(activeProject);
+        if (wasActive) {
+          switchToSheet(activeProject.activeSheet);
+        }
+        refreshSidebar();
+      }
     },
   });
   sidebarContainer.appendChild(sidebar.element);
@@ -138,10 +211,11 @@ export function initDataflow(): void {
   // Toolbar: New
   $btn('df-new').addEventListener('click', () => {
     currentSave();
-    const dt = parseFloat($input('df-dt').value) || 0.01;
-    resetEditor(dt);
-    activeProjectName = uniqueName('Untitled', listProjects());
-    setActiveProjectName(activeProjectName);
+    const name = uniqueName('Untitled', listProjects());
+    activeProject = createProject(name);
+    saveProject(activeProject);
+    setActiveProjectName(name);
+    switchToSheet('main');
     updateProjectNameDisplay();
     refreshSidebar();
   });
@@ -150,9 +224,15 @@ export function initDataflow(): void {
   $btn('df-save-as').addEventListener('click', () => {
     const name = prompt('Project name:');
     if (!name || !name.trim()) return;
+    currentSave(); // persist current sheet into activeProject
     const finalName = uniqueName(name.trim(), listProjects());
-    activeProjectName = finalName;
-    currentSave();
+    // Clone current project under new name
+    const cloned: Project = JSON.parse(JSON.stringify(activeProject));
+    cloned.name = finalName;
+    cloned.lastModified = new Date().toISOString();
+    activeProject = cloned;
+    saveProject(activeProject);
+    setActiveProjectName(finalName);
     updateProjectNameDisplay();
     refreshSidebar();
   });
@@ -168,12 +248,14 @@ export function initDataflow(): void {
 
   // Also auto-save on config apply (handled in updateBlockInfo)
 
-  // Restore last active project on init
+  // Restore last active project on init, or create "Untitled" with main sheet
   const lastActive = getActiveProjectName();
   if (lastActive && loadProject(lastActive)) {
     loadProjectByName(lastActive);
   } else {
-    activeProjectName = 'Untitled';
+    activeProject = createProject('Untitled');
+    saveProject(activeProject);
+    setActiveProjectName('Untitled');
     updateProjectNameDisplay();
   }
 
@@ -420,11 +502,11 @@ function updateEdgeInfo(channelId: number | null, snap: GraphSnapshot | null): v
   const toPortName = toBlock?.inputs[ch.to_port]?.name ?? `port ${ch.to_port}`;
 
   const fromRow = document.createElement('div');
-  fromRow.textContent = `From: ${fromName} → ${fromPortName}`;
+  fromRow.textContent = `From: ${fromName} \u2192 ${fromPortName}`;
   detailDiv.appendChild(fromRow);
 
   const toRow = document.createElement('div');
-  toRow.textContent = `To: ${toName} → ${toPortName}`;
+  toRow.textContent = `To: ${toName} \u2192 ${toPortName}`;
   detailDiv.appendChild(toRow);
 
   infoEl.appendChild(detailDiv);
@@ -607,7 +689,7 @@ function setupHilConnection(): void {
     renderI2cPanel(i2cContainer, hilClient);
 
     hilClient.connect(url);
-    statusEl.textContent = 'Connecting…';
+    statusEl.textContent = 'Connecting\u2026';
     statusEl.className = 'text-xs text-warning mb-2';
   });
 
@@ -624,7 +706,7 @@ function setupHilConnection(): void {
       const snap = mgr.snapshot();
       const snapshotJson = JSON.stringify(snap);
       hilClient.deploy(snapshotJson, target, dt);
-      deployStatus.textContent = 'Deploying…';
+      deployStatus.textContent = 'Deploying\u2026';
       deployStatus.className = 'text-xs mt-1 min-h-4 text-warning';
     } catch (e) {
       deployStatus.textContent = `Deploy error: ${e}`;
