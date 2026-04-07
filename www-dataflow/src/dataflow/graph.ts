@@ -67,13 +67,12 @@ export class DataflowManager {
   }
 
   snapshot(): GraphSnapshot {
-    return JSON.parse(dataflow_snapshot(this.graphId));
+    return dataflow_snapshot(this.graphId) as GraphSnapshot;
   }
 
   /** Run N ticks instantly (non-realtime batch). */
   runBatch(steps: number, dt: number): GraphSnapshot {
-    const json = dataflow_run(this.graphId, steps, dt);
-    return JSON.parse(json);
+    return dataflow_run(this.graphId, steps, dt) as GraphSnapshot;
   }
 
   /** Start the realtime tick loop. */
@@ -99,8 +98,7 @@ export class DataflowManager {
     const now = performance.now() / 1000;
     if (this.lastTime !== null) {
       const elapsed = Math.min(now - this.lastTime, 0.1); // cap at 100ms
-      const json = dataflow_advance(this.graphId, elapsed);
-      const snap: GraphSnapshot = JSON.parse(json);
+      const snap = dataflow_advance(this.graphId, elapsed) as GraphSnapshot;
       this.onTick?.(snap);
     }
     this.lastTime = now;
@@ -130,6 +128,6 @@ export class DataflowManager {
   }
 
   static blockTypes(): BlockTypeInfo[] {
-    return JSON.parse(dataflow_block_types());
+    return dataflow_block_types() as BlockTypeInfo[];
   }
 }

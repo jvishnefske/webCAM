@@ -182,9 +182,9 @@ pub fn dataflow_disconnect(graph_id: u32, channel_id: u32) -> Result<(), JsValue
 }
 
 /// Advance the graph by wall-clock elapsed seconds (realtime mode).
-/// Returns snapshot JSON.
+/// Returns snapshot as a typed JS object.
 #[wasm_bindgen]
-pub fn dataflow_advance(graph_id: u32, elapsed: f64) -> Result<String, JsValue> {
+pub fn dataflow_advance(graph_id: u32, elapsed: f64) -> Result<JsValue, JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         DATAFLOW_SCHEDULERS.with(|s| {
             let mut graphs = g.borrow_mut();
@@ -198,15 +198,16 @@ pub fn dataflow_advance(graph_id: u32, elapsed: f64) -> Result<String, JsValue> 
             let ticks = sched.advance(elapsed);
             graph.run(ticks, sched.dt);
             let snap = graph.snapshot();
-            serde_json::to_string(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
+            serde_wasm_bindgen::to_value(&snap)
+                .map_err(|e| JsValue::from_str(&e.to_string()))
         })
     })
 }
 
 /// Run a fixed number of ticks (non-realtime batch mode).
-/// Returns snapshot JSON.
+/// Returns snapshot as a typed JS object.
 #[wasm_bindgen]
-pub fn dataflow_run(graph_id: u32, steps: u32, dt: f64) -> Result<String, JsValue> {
+pub fn dataflow_run(graph_id: u32, steps: u32, dt: f64) -> Result<JsValue, JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
         let graph = graphs
@@ -214,7 +215,8 @@ pub fn dataflow_run(graph_id: u32, steps: u32, dt: f64) -> Result<String, JsValu
             .ok_or_else(|| JsValue::from_str("graph not found"))?;
         graph.run(steps as u64, dt);
         let snap = graph.snapshot();
-        serde_json::to_string(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&snap)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     })
 }
 
@@ -233,21 +235,23 @@ pub fn dataflow_set_speed(graph_id: u32, speed: f64) -> Result<(), JsValue> {
 
 /// Get a snapshot of the graph without ticking.
 #[wasm_bindgen]
-pub fn dataflow_snapshot(graph_id: u32) -> Result<String, JsValue> {
+pub fn dataflow_snapshot(graph_id: u32) -> Result<JsValue, JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         let graphs = g.borrow();
         let graph = graphs
             .get(&graph_id)
             .ok_or_else(|| JsValue::from_str("graph not found"))?;
         let snap = graph.snapshot();
-        serde_json::to_string(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_wasm_bindgen::to_value(&snap)
+            .map_err(|e| JsValue::from_str(&e.to_string()))
     })
 }
 
-/// List available block types as JSON.
+/// List available block types as a typed JS array.
 #[wasm_bindgen]
-pub fn dataflow_block_types() -> String {
-    serde_json::to_string(&dataflow::blocks::available_block_types()).unwrap_or_default()
+pub fn dataflow_block_types() -> JsValue {
+    let types = dataflow::blocks::available_block_types();
+    serde_wasm_bindgen::to_value(&types).unwrap_or(JsValue::NULL)
 }
 
 /// Generate a standalone Rust crate from a dataflow graph.
@@ -691,8 +695,9 @@ mod tests {
 
     #[test]
     fn test_dataflow_block_types() {
-        let json = dataflow_block_types();
-        let types: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        // Test the underlying function directly (serde_wasm_bindgen round-trip
+        // requires a JS host, so we verify the internal API instead).
+        let types = dataflow::blocks::available_block_types();
         assert!(!types.is_empty());
     }
 
@@ -736,8 +741,13 @@ mod tests {
     fn test_dataflow_snapshot() {
         let gid = dataflow_new(0.01);
         dataflow_add_block(gid, "constant", r#"{"value":5.0}"#).unwrap();
-        let snap = dataflow_snapshot(gid).unwrap();
-        assert!(snap.contains("constant"));
+        // Verify via internal API (serde_wasm_bindgen round-trip needs a JS host)
+        DATAFLOW_GRAPHS.with(|g| {
+            let graphs = g.borrow();
+            let graph = graphs.get(&gid).unwrap();
+            let snap = graph.snapshot();
+            assert!(snap.blocks.iter().any(|b| b.block_type == "constant"));
+        });
         dataflow_destroy(gid);
     }
 
@@ -745,8 +755,14 @@ mod tests {
     fn test_dataflow_run() {
         let gid = dataflow_new(0.01);
         dataflow_add_block(gid, "constant", r#"{"value":3.0}"#).unwrap();
-        let snap = dataflow_run(gid, 10, 0.01).unwrap();
-        assert!(snap.contains("constant"));
+        // Run and verify via internal API (serde_wasm_bindgen needs a JS host)
+        DATAFLOW_GRAPHS.with(|g| {
+            let mut graphs = g.borrow_mut();
+            let graph = graphs.get_mut(&gid).unwrap();
+            graph.run(10, 0.01);
+            let snap = graph.snapshot();
+            assert!(snap.blocks.iter().any(|b| b.block_type == "constant"));
+        });
         dataflow_destroy(gid);
     }
 
@@ -754,8 +770,19 @@ mod tests {
     fn test_dataflow_advance() {
         let gid = dataflow_new(0.01);
         dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
-        let snap = dataflow_advance(gid, 0.05).unwrap();
-        assert!(!snap.is_empty());
+        // Advance and verify via internal API (serde_wasm_bindgen needs a JS host)
+        DATAFLOW_SCHEDULERS.with(|s| {
+            DATAFLOW_GRAPHS.with(|g| {
+                let mut graphs = g.borrow_mut();
+                let mut schedulers = s.borrow_mut();
+                let graph = graphs.get_mut(&gid).unwrap();
+                let sched = schedulers.get_mut(&gid).unwrap();
+                let ticks = sched.advance(0.05);
+                graph.run(ticks, sched.dt);
+                let snap = graph.snapshot();
+                assert!(!snap.blocks.is_empty());
+            });
+        });
         dataflow_destroy(gid);
     }
 
