@@ -3,12 +3,14 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+use tsify_next::Tsify;
 
 use super::block::{BlockId, Module, Value};
 use super::channel::{Channel, ChannelId};
 
 /// Snapshot of one block for serialization to the frontend.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi)]
 pub struct BlockSnapshot {
     pub id: u32,
     pub block_type: String,
@@ -29,7 +31,8 @@ pub struct BlockSnapshot {
 }
 
 /// Snapshot of the entire graph.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Tsify)]
+#[tsify(into_wasm_abi)]
 pub struct GraphSnapshot {
     pub blocks: Vec<BlockSnapshot>,
     pub channels: Vec<Channel>,

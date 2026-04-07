@@ -1,5 +1,9 @@
 //! Core value types for the dataflow graph.
 
+#[cfg(feature = "tsify")]
+use alloc::boxed::Box;
+#[cfg(feature = "tsify")]
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -7,6 +11,8 @@ use serde::{Deserialize, Serialize};
 
 /// Primitive field types for message schemas.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi))]
 pub enum FieldType {
     F32,
     F64,
@@ -19,6 +25,8 @@ pub enum FieldType {
 
 /// A named field in a message schema.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi))]
 pub struct MessageField {
     pub name: String,
     pub field_type: FieldType,
@@ -26,6 +34,8 @@ pub struct MessageField {
 
 /// Schema definition for a structured message type.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi))]
 pub struct MessageSchema {
     pub name: String,
     pub fields: Vec<MessageField>,
@@ -33,6 +43,8 @@ pub struct MessageSchema {
 
 /// Runtime message data: flat f64 fields (bools as 0.0/1.0, ints cast to f64).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi))]
 pub struct MessageData {
     pub schema_name: String,
     pub fields: Vec<(String, f64)>,
@@ -40,6 +52,8 @@ pub struct MessageData {
 
 /// The kinds of data that can flow through a port.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi))]
 pub enum PortKind {
     Float,
     Bytes,
@@ -51,6 +65,8 @@ pub enum PortKind {
 
 /// Metadata for a single port.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi))]
 pub struct PortDef {
     pub name: String,
     pub kind: PortKind,
@@ -67,6 +83,8 @@ impl PortDef {
 
 /// A value flowing through a channel.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi))]
 #[serde(tag = "type", content = "data")]
 pub enum Value {
     Float(f64),
