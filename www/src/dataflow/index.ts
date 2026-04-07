@@ -442,6 +442,7 @@ function formatValue(val: Value | null): string {
     case 'Text': return `"${val.data.slice(0, 30)}"`;
     case 'Bytes': return `[${val.data.length} bytes]`;
     case 'Series': return `[${val.data.length} samples]`;
+    default: return String(val.data);
   }
 }
 
