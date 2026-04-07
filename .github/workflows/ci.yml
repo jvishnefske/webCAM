@@ -18,27 +18,28 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
           components: clippy
       - uses: jetli/wasm-pack-action@v0.4.0
       - run: cargo install cargo-llvm-cov --locked
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - run: make lint
       - run: make test
       - run: make wasm
       - run: make ts
-      - run: mkdir -p www && cp -r www-cam/dist/* www/ && cp -r www-cam/pkg www/pkg
+      - run: |
+          echo '{"sha":"'"${GITHUB_SHA::8}"'","date":"'"$(date -u +%FT%TZ)"'","ref":"'"$GITHUB_REF_NAME"'"}' > www/version.json
       - run: cd www && zip -r ../rustcam.zip .
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: rustcam
           path: rustcam.zip
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v4
         with:
           path: www
       - uses: softprops/action-gh-release@v2
@@ -59,7 +60,7 @@ jobs:
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - id: deploy
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
 
   deploy-external:
     needs: build
@@ -68,18 +69,19 @@ jobs:
     concurrency:
       group: deploy-external
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
       - uses: jetli/wasm-pack-action@v0.4.0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - run: make wasm ts
-      - run: mkdir -p www && cp -r www-cam/dist/* www/ && cp -r www-cam/pkg www/pkg
+      - run: |
+          echo '{"sha":"'"${GITHUB_SHA::8}"'","date":"'"$(date -u +%FT%TZ)"'","ref":"'"$GITHUB_REF_NAME"'"}' > www/version.json
       - name: Remove build-only files
-        run: rm -rf www-cam/node_modules www-dataflow/node_modules
+        run: rm -rf www-cam/node_modules www-dataflow/node_modules www/node_modules
       - uses: peaceiris/actions-gh-pages@v4
         with:
           deploy_key: ${{ secrets.CAM_DEPLOY_KEY }}
@@ -99,9 +101,9 @@ jobs:
       group: pr-preview-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         if: github.event.action != 'closed'
         with:
           name: rustcam
@@ -118,7 +120,7 @@ jobs:
           destination_dir: pr-preview/pr-${{ github.event.pull_request.number }}
           keep_files: true
 
-      - uses: actions/github-script@v7
+      - uses: actions/github-script@v8
         if: github.event.action != 'closed'
         with:
           script: |
