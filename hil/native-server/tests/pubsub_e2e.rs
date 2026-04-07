@@ -6,6 +6,7 @@
 //! 3. Read published values via GET /api/pubsub
 //! 4. Verify values flow through the dataflow pipeline
 //! 5. Send telemetry events via WebSocket and read via GET /api/telemetry
+#![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use axum::body::Body;
 use dag_core::cbor::encode_dag;
