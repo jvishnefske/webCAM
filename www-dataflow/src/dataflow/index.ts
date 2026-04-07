@@ -11,11 +11,9 @@ import { HilClient } from './hil-client.js';
 import { renderPinTable } from './pin-table.js';
 import { renderI2cPanel, updateI2cBuses } from './i2c-panel.js';
 import {
-  createProject, loadProject, saveProject, deleteProject,
+  serializeProject, loadProject, saveProject, deleteProject,
   listProjects, getActiveProjectName, setActiveProjectName,
-  uniqueName, createAutoSave, addSheet, removeSheet,
-  serializeDataflowSheet,
-  type Project, type DataflowSheetData,
+  uniqueName, createAutoSave,
 } from './storage.js';
 import { createSidebar } from './sidebar.js';
 import { TelemetryPublisher } from './telemetry.js';
@@ -29,7 +27,7 @@ function unwrapId(v: number | { 0: number }): number {
 let mgr: DataflowManager | null = null;
 let editor: DataflowEditor | null = null;
 let hilClient: HilClient | null = null;
-let activeProject: Project | null = null;
+let activeProjectName = 'Untitled';
 let triggerAutoSave: (() => void) | null = null;
 let telemetry: TelemetryPublisher | null = null;
 
@@ -70,11 +68,10 @@ export function initDataflow(): void {
     const projects = listProjects();
     const infos = projects.map(name => {
       const p = loadProject(name);
-      return {
-        name,
-        lastModified: p?.lastModified ?? '',
-        sheets: [{ id: 'main', label: 'Main', type: 'dataflow' as const, parentId: null }],
-      };
+      const sheets = p
+        ? Object.values(p.sheets).map(s => ({ id: s.id, label: s.label, type: s.type, parentId: s.parentId }))
+        : [{ id: 'main', label: 'Main', type: 'dataflow' as const, parentId: null }];
+      return { name, lastModified: p?.lastModified ?? '', sheets };
     });
     sidebar.renderProjects(infos, activeProjectName, 'main');
   }

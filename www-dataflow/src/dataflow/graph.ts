@@ -7,7 +7,7 @@ import {
 } from '../../pkg/rustsim.js';
 import type { GraphSnapshot, BlockTypeInfo, NodePosition } from './types.js';
 import type { TelemetryPublisher } from './telemetry.js';
-import type { SavedProject } from './storage.js';
+import type { Project, DataflowSheetData } from './storage.js';
 
 export class DataflowManager {
   graphId: number;
@@ -108,15 +108,18 @@ export class DataflowManager {
   };
 
   /** Replay a saved project into this (empty) graph. Returns old→new block ID map. */
-  restoreProject(project: SavedProject): Map<number, number> {
+  restoreProject(project: Project): Map<number, number> {
+    const sheet = project.sheets[project.activeSheet];
+    if (!sheet || sheet.type !== 'dataflow') return new Map();
+    const data = sheet.data as DataflowSheetData;
     const idMap = new Map<number, number>();
-    for (const block of project.graph.blocks) {
+    for (const block of data.graph.blocks) {
       const newId = this.addBlock(block.blockType, block.config);
       idMap.set(block.id, newId);
-      const pos = project.positions[block.id];
+      const pos = data.positions[block.id];
       if (pos) this.positions.set(newId, { x: pos.x, y: pos.y });
     }
-    for (const ch of project.graph.channels) {
+    for (const ch of data.graph.channels) {
       const from = idMap.get(ch.fromBlock);
       const to = idMap.get(ch.toBlock);
       if (from !== undefined && to !== undefined) {
