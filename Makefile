@@ -138,7 +138,7 @@ hil-verify: hil-firmware ## Build all HIL firmware (host crates covered by ci)
 # --- Embedded assets ---
 
 dag-frontend: ## Build DAG editor JS bundle
-	cd www-dataflow && npx esbuild dag/dag-editor.ts --bundle --format=esm --target=es2022 --minify --external:../pkg/rustsim.js --outfile=dag/dag-editor.js
+	cd www && npx esbuild dag/dag-editor.ts --bundle --format=esm --target=es2022 --minify --external:../pkg/rustsim.js --outfile=dag/dag-editor.js
 
 embed-assets: dag-frontend ## Gzip frontend assets and generate Rust source
 	bash tools/embed-assets.sh
