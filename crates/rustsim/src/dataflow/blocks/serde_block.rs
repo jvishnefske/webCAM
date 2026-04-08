@@ -79,6 +79,21 @@ impl Tick for JsonDecodeBlock {
     }
 }
 
+pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
+    reg.push(super::registry::BlockRegistration {
+        block_type: "json_encode",
+        display_name: "JSON Encode",
+        category: "Serde",
+        create_from_json: |_json| Ok(Box::new(JsonEncodeBlock::new())),
+    });
+    reg.push(super::registry::BlockRegistration {
+        block_type: "json_decode",
+        display_name: "JSON Decode",
+        category: "Serde",
+        create_from_json: |_json| Ok(Box::new(JsonDecodeBlock::new())),
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

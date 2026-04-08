@@ -104,6 +104,27 @@ impl Tick for UdpSinkBlock {
     }
 }
 
+pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
+    reg.push(super::registry::BlockRegistration {
+        block_type: "udp_source",
+        display_name: "UDP Source",
+        category: "I/O",
+        create_from_json: |json| {
+            let cfg: UdpConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
+            Ok(Box::new(UdpSourceBlock::new(&cfg.address)))
+        },
+    });
+    reg.push(super::registry::BlockRegistration {
+        block_type: "udp_sink",
+        display_name: "UDP Sink",
+        category: "I/O",
+        create_from_json: |json| {
+            let cfg: UdpConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
+            Ok(Box::new(UdpSinkBlock::new(&cfg.address)))
+        },
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

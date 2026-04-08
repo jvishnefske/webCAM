@@ -798,6 +798,102 @@ impl SimModel for Tmc2209StallGuardBlock {
     }
 }
 
+pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
+    reg.push(super::registry::BlockRegistration {
+        block_type: "adc_source",
+        display_name: "ADC Source",
+        category: "Embedded",
+        create_from_json: |json| {
+            let cfg: AdcConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
+            Ok(Box::new(AdcBlock::from_config(cfg)))
+        },
+    });
+    reg.push(super::registry::BlockRegistration {
+        block_type: "pwm_sink",
+        display_name: "PWM Sink",
+        category: "Embedded",
+        create_from_json: |json| {
+            let cfg: PwmConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
+            Ok(Box::new(PwmBlock::from_config(cfg)))
+        },
+    });
+    reg.push(super::registry::BlockRegistration {
+        block_type: "gpio_out",
+        display_name: "GPIO Out",
+        category: "Embedded",
+        create_from_json: |json| {
+            let cfg: GpioOutConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
+            Ok(Box::new(GpioOutBlock::from_config(cfg)))
+        },
+    });
+    reg.push(super::registry::BlockRegistration {
+        block_type: "gpio_in",
+        display_name: "GPIO In",
+        category: "Embedded",
+        create_from_json: |json| {
+            let cfg: GpioInConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
+            Ok(Box::new(GpioInBlock::from_config(cfg)))
+        },
+    });
+    reg.push(super::registry::BlockRegistration {
+        block_type: "uart_tx",
+        display_name: "UART TX",
+        category: "Embedded",
+        create_from_json: |json| {
+            let cfg: UartTxConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
+            Ok(Box::new(UartTxBlock::from_config(cfg)))
+        },
+    });
+    reg.push(super::registry::BlockRegistration {
+        block_type: "uart_rx",
+        display_name: "UART RX",
+        category: "Embedded",
+        create_from_json: |json| {
+            let cfg: UartRxConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
+            Ok(Box::new(UartRxBlock::from_config(cfg)))
+        },
+    });
+    reg.push(super::registry::BlockRegistration {
+        block_type: "encoder",
+        display_name: "Encoder",
+        category: "Embedded",
+        create_from_json: |json| {
+            let cfg: EncoderConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
+            Ok(Box::new(EncoderBlock::from_config(cfg)))
+        },
+    });
+    reg.push(super::registry::BlockRegistration {
+        block_type: "ssd1306_display",
+        display_name: "SSD1306 Display",
+        category: "Embedded",
+        create_from_json: |json| {
+            let cfg: Ssd1306DisplayConfig =
+                serde_json::from_str(json).map_err(|e| e.to_string())?;
+            Ok(Box::new(Ssd1306DisplayBlock::from_config(cfg)))
+        },
+    });
+    reg.push(super::registry::BlockRegistration {
+        block_type: "tmc2209_stepper",
+        display_name: "TMC2209 Stepper",
+        category: "Embedded",
+        create_from_json: |json| {
+            let cfg: Tmc2209StepperConfig =
+                serde_json::from_str(json).map_err(|e| e.to_string())?;
+            Ok(Box::new(Tmc2209StepperBlock::from_config(cfg)))
+        },
+    });
+    reg.push(super::registry::BlockRegistration {
+        block_type: "tmc2209_stallguard",
+        display_name: "TMC2209 StallGuard",
+        category: "Embedded",
+        create_from_json: |json| {
+            let cfg: Tmc2209StallGuardConfig =
+                serde_json::from_str(json).map_err(|e| e.to_string())?;
+            Ok(Box::new(Tmc2209StallGuardBlock::from_config(cfg)))
+        },
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
