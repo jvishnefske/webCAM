@@ -39,6 +39,9 @@ pub trait HwBridge {
     fn encoder_read(&self, channel: u8) -> f64 {
         0.0
     }
+    fn smbus_read_word(&self, bus: u8, addr: u8, cmd: u8) -> u16 {
+        0
+    }
     fn publish(&mut self, topic: u16, value: f64) {}
     fn subscribe(&self, topic: u16) -> f64 {
         0.0
@@ -75,6 +78,8 @@ pub enum OpCode {
     EncoderRead(u8),
     Subscribe(u16),
     Publish(u16),
+    /// `smbus_read_word(bus, addr, cmd)() → [value]`
+    SmBusReadWord { bus: u8, addr: u8, cmd: u8 },
     Nop,
 }
 
@@ -279,6 +284,9 @@ fn execute_op(
         OpCode::EncoderRead(ch) => {
             outputs[0] = hw.encoder_read(ch);
         }
+        OpCode::SmBusReadWord { bus, addr, cmd } => {
+            outputs[0] = hw.smbus_read_word(bus, addr, cmd) as f64;
+        }
         OpCode::Subscribe(topic) => {
             outputs[0] = hw.subscribe(topic);
         }
@@ -463,6 +471,21 @@ fn ir_op_to_opcode(kind: &IrOpKind, attrs: &HashMap<String, Attr>) -> OpCode {
                 _ => 0,
             };
             OpCode::EncoderRead(ch)
+        }
+        IrOpKind::Dataflow(DataflowOp::SmBusReadWord) => {
+            let bus = match attrs.get("bus") {
+                Some(Attr::I64(v)) => *v as u8,
+                _ => 0,
+            };
+            let addr = match attrs.get("addr") {
+                Some(Attr::I64(v)) => *v as u8,
+                _ => 0x48,
+            };
+            let cmd = match attrs.get("cmd") {
+                Some(Attr::I64(v)) => *v as u8,
+                _ => 0,
+            };
+            OpCode::SmBusReadWord { bus, addr, cmd }
         }
         IrOpKind::Dataflow(DataflowOp::ChannelRead) => {
             let topic = match attrs.get("topic") {
@@ -831,5 +854,30 @@ mod tests {
         let graph = CompiledGraph::<TB, TS>::default();
         assert_eq!(graph.block_count(), 0);
         assert_eq!(graph.slot_count(), 0);
+    }
+
+    #[test]
+    fn smbus_read_word_block_fn() {
+        struct MockHw;
+        impl HwBridge for MockHw {
+            fn smbus_read_word(&self, bus: u8, addr: u8, cmd: u8) -> u16 {
+                assert_eq!(bus, 0);
+                assert_eq!(addr, 0x48);
+                assert_eq!(cmd, 0x00);
+                0xCAFE
+            }
+        }
+
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        b.smbus_read_word(0, 0x48, 0x00);
+        let module = b.build();
+
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        assert_eq!(graph.block_count(), 1);
+
+        graph.tick(1.0, &mut MockHw);
+        // slot 0 = clock, slot 1 = smbus_read_word output
+        assert_eq!(graph.read_slot(1), 0xCAFE as f64);
     }
 }
