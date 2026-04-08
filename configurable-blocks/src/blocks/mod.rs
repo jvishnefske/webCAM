@@ -2,6 +2,7 @@
 
 pub mod basic;
 pub mod pid;
+pub mod smbus;
 
 use crate::lower::ConfigurableBlock;
 use crate::schema::BlockCategory;
@@ -105,6 +106,13 @@ pub fn registry() -> Vec<BlockEntry> {
             category: BlockCategory::Io,
             description: "Write duty cycle to hardware PWM channel",
             create: || Box::new(basic::PwmBlock::default()),
+        },
+        BlockEntry {
+            block_type: "smbus_read",
+            display_name: "SMBus Read Word",
+            category: BlockCategory::Io,
+            description: "Read a 16-bit word via SMBus protocol, optionally periodic",
+            create: || Box::new(smbus::SmBusReadBlock::default()),
         },
         // PubSub
         BlockEntry {
