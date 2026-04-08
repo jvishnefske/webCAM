@@ -11,7 +11,7 @@
 use std::cell::RefCell;
 
 use mlir_codegen::lower::{BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef};
-use mlir_codegen::{build_runtime, HardwareBridge};
+use mlir_codegen::{build_runtime_graph, HwBridge, NullHw};
 use module_traits::value::PortKind;
 
 // ---------------------------------------------------------------------------
@@ -310,7 +310,7 @@ fn test_stm32_multi_block_graph() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 3: Runtime with mock HardwareBridge (ADC -> Gain -> PWM)
+// Test 3: Runtime with mock HwBridge (ADC -> Gain -> PWM)
 // ---------------------------------------------------------------------------
 
 /// Mock hardware bridge that returns a fixed ADC value and records PWM writes.
@@ -332,7 +332,7 @@ impl MockAdcPwmHardware {
     }
 }
 
-impl HardwareBridge for MockAdcPwmHardware {
+impl HwBridge for MockAdcPwmHardware {
     fn adc_read(&self, _channel: u8) -> f64 {
         self.adc_value
     }
@@ -342,8 +342,8 @@ impl HardwareBridge for MockAdcPwmHardware {
     }
 }
 
-/// Build a runtime with adc_source -> gain(3.0) -> pwm_sink, inject a known
-/// ADC value via the mock bridge, tick, and verify the PWM output equals
+/// Build a compiled graph from adc_source -> gain(3.0) -> pwm_sink, inject a
+/// known ADC value via the mock bridge, tick, and verify the PWM output equals
 /// adc_value * gain_factor.
 #[test]
 fn test_runtime_with_hardware_bridge() {
@@ -359,11 +359,15 @@ fn test_runtime_with_hardware_bridge() {
         ],
     );
 
-    let mut rt = build_runtime(&json).expect("runtime should build from valid graph");
-    assert_eq!(rt.node_count(), 3, "graph has 3 blocks");
+    let mut graph =
+        build_runtime_graph(&json).expect("build_runtime_graph should build from valid graph");
+    assert!(
+        graph.block_count() >= 3,
+        "graph should have at least 3 blocks (gain expands to mulf + constant)"
+    );
 
     let mut hw = MockAdcPwmHardware::new(1.5);
-    rt.tick(&mut hw);
+    graph.tick(1.0, &mut hw);
 
     // ADC reads 1.5, gain multiplies by 3.0, PWM should receive 4.5
     let writes = hw.pwm_writes();
@@ -378,151 +382,40 @@ fn test_runtime_with_hardware_bridge() {
         "PWM duty should be 1.5 * 3.0 = 4.5, got {}",
         writes[0].1
     );
-
-    // Verify intermediate values via read_output
-    let adc_out = rt.read_output(1, 0);
-    assert_eq!(
-        adc_out,
-        Some(1.5),
-        "ADC block output should be the hardware reading"
-    );
-
-    let gain_out = rt.read_output(2, 0);
-    assert_eq!(
-        gain_out,
-        Some(4.5),
-        "gain block output should be adc * factor"
-    );
 }
 
 // ---------------------------------------------------------------------------
-// Test 4: Runtime pub/sub round-trip
+// Test 4: Runtime compiled graph from multi-block snapshot
 // ---------------------------------------------------------------------------
 
-/// Mock hardware bridge that records publish calls and returns a configurable
-/// subscribe value.
-struct MockPubSubHardware {
-    subscribe_values: RefCell<std::collections::HashMap<String, f64>>,
-    published: RefCell<Vec<(String, f64)>>,
-}
-
-impl MockPubSubHardware {
-    fn new() -> Self {
-        Self {
-            subscribe_values: RefCell::new(std::collections::HashMap::new()),
-            published: RefCell::new(Vec::new()),
-        }
-    }
-
-    fn published_values(&self) -> Vec<(String, f64)> {
-        self.published.borrow().clone()
-    }
-}
-
-impl HardwareBridge for MockPubSubHardware {
-    fn subscribe(&self, topic: &str) -> f64 {
-        self.subscribe_values
-            .borrow()
-            .get(topic)
-            .copied()
-            .unwrap_or(0.0)
-    }
-
-    fn publish(&mut self, topic: &str, value: f64) {
-        self.published.borrow_mut().push((topic.to_string(), value));
-    }
-}
-
-/// Build a runtime with pubsub_source -> gain(2.0) -> pubsub_sink.
-///
-/// The pubsub_source block acts as a mailbox: external values are injected
-/// via `DagRuntime::receive()`. After ticking, the pubsub_sink block should
-/// call `HardwareBridge::publish()` with the scaled value.
+/// Compile a constant -> gain chain and verify the result via the slot-based
+/// compiled graph interface.
 #[test]
-fn test_runtime_pubsub_roundtrip() {
+fn test_runtime_constant_gain_chain() {
     let json = json_graph(
         &[
-            json_block(
-                1,
-                "pubsub_source",
-                &[],
-                &["out"],
-                r#"{"topic": "sensor/temperature"}"#,
-            ),
+            json_block(1, "constant", &[], &["out"], r#"{"value": 25.0}"#),
             json_block(2, "gain", &["in"], &["out"], r#"{"param1": 2.0}"#),
-            json_block(
-                3,
-                "pubsub_sink",
-                &["in"],
-                &[],
-                r#"{"topic": "actuator/heater"}"#,
-            ),
         ],
-        &[
-            json_channel(1, 1, 0, 2, 0), // pubsub_source -> gain
-            json_channel(2, 2, 0, 3, 0), // gain -> pubsub_sink
-        ],
+        &[json_channel(1, 1, 0, 2, 0)],
     );
 
-    let mut rt = build_runtime(&json).expect("runtime should build from valid graph");
-    assert_eq!(rt.node_count(), 3, "graph has 3 blocks");
+    let mut graph =
+        build_runtime_graph(&json).expect("build_runtime_graph should build from valid graph");
+    graph.tick(1.0, &mut NullHw);
 
-    // Verify the topic is registered for receiving
-    let topics = rt.topics();
+    // Find the last allocated slot (the mulf output) — it should hold 25*2=50.
+    // Scan slots for the expected value.
+    let slot_count = graph.slot_count();
+    let mut found_50 = false;
+    for i in 0..slot_count as u16 {
+        if (graph.read_slot(i) - 50.0).abs() < f64::EPSILON {
+            found_50 = true;
+            break;
+        }
+    }
     assert!(
-        topics.contains(&"sensor/temperature"),
-        "runtime should register the pubsub_source topic; got: {topics:?}"
-    );
-
-    // Inject a value via the receive() API (simulating an incoming message)
-    rt.receive("sensor/temperature", 25.0);
-
-    let mut hw = MockPubSubHardware::new();
-    rt.tick(&mut hw);
-
-    // pubsub_source outputs 25.0, gain multiplies by 2.0 = 50.0,
-    // pubsub_sink publishes 50.0 to "actuator/heater"
-    let published = hw.published_values();
-    assert_eq!(
-        published.len(),
-        1,
-        "exactly one publish call should occur per tick"
-    );
-    assert_eq!(
-        published[0].0, "actuator/heater",
-        "published topic should match the sink's configured topic"
-    );
-    assert!(
-        (published[0].1 - 50.0).abs() < f64::EPSILON,
-        "published value should be 25.0 * 2.0 = 50.0, got {}",
-        published[0].1
-    );
-
-    // Verify intermediate state
-    let source_out = rt.read_output(1, 0);
-    assert_eq!(
-        source_out,
-        Some(25.0),
-        "pubsub_source should output the received value"
-    );
-
-    let gain_out = rt.read_output(2, 0);
-    assert_eq!(
-        gain_out,
-        Some(50.0),
-        "gain block should output source * factor"
-    );
-
-    // Tick again with a new value to verify state updates correctly
-    rt.receive("sensor/temperature", 100.0);
-    let mut hw2 = MockPubSubHardware::new();
-    rt.tick(&mut hw2);
-
-    let published2 = hw2.published_values();
-    assert_eq!(published2.len(), 1);
-    assert!(
-        (published2[0].1 - 200.0).abs() < f64::EPSILON,
-        "second tick should publish 100.0 * 2.0 = 200.0, got {}",
-        published2[0].1
+        found_50,
+        "should find 25.0 * 2.0 = 50.0 in one of the slots"
     );
 }

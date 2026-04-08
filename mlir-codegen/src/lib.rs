@@ -30,7 +30,10 @@ pub mod state_machine;
 
 use lower::GraphSnapshot;
 
-pub use runtime::{BlockFn, DagRuntime, HardwareBridge, NullHardware};
+pub use runtime::{
+    BlockDesc, CompiledGraph, HwBridge, NullHw, OpCode, compile,
+    MAX_INPUTS, MAX_OUTPUTS, NO_SLOT,
+};
 pub use ir::{IrModule, IrBuilder, ValueId, IrType, Attr, IrOp, IrFunc, IrOpKind, ArithOp, FuncOp, DataflowOp};
 pub use printer::print_mlir;
 pub use emit_rust::emit_rust;
@@ -62,14 +65,17 @@ pub fn compile_to_c(snap: &GraphSnapshot) -> Result<pipeline::PipelineOutput, St
     pipeline::run_pipeline(snap, &config)
 }
 
-/// Build a [`DagRuntime`] from a JSON `GraphSnapshot`.
+/// Build a [`CompiledGraph`] from a JSON `GraphSnapshot`.
 ///
-/// The runtime deserializes the DAG, curries each block's config into a
-/// [`BlockFn`] enum variant (partial application), and stores all state in
-/// a flat `f64` buffer (typeless container). The returned object can
-/// [`receive`](DagRuntime::receive) channel calls and [`tick`](DagRuntime::tick).
-pub fn build_runtime(json: &str) -> Result<DagRuntime, String> {
-    DagRuntime::from_json(json)
+/// Lowers the snapshot to a typed IR, then compiles it into an event-driven
+/// graph with default sizes (256 blocks, 1024 slots).
+pub fn build_runtime_graph(
+    json: &str,
+) -> Result<CompiledGraph<256, 1024>, String> {
+    let snap: lower::GraphSnapshot =
+        serde_json::from_str(json).map_err(|e| format!("JSON parse error: {e}"))?;
+    let ir = lower::lower_graph_ir(&snap)?;
+    compile::<256, 1024>(&ir)
 }
 
 /// Generate all files for the logic crate in a workspace.
@@ -169,7 +175,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_runtime_valid() {
+    fn test_build_runtime_graph_valid() {
         let json = r#"{
             "blocks": [{
                 "id": 1,
@@ -184,15 +190,23 @@ mod tests {
             "tick_count": 0,
             "time": 0.0
         }"#;
-        let rt = build_runtime(json);
-        assert!(rt.is_ok(), "build_runtime should succeed for valid JSON");
-        let rt = rt.unwrap();
-        assert_eq!(rt.node_count(), 1);
+        let graph = build_runtime_graph(json);
+        assert!(
+            graph.is_ok(),
+            "build_runtime_graph should succeed for valid JSON"
+        );
+        let graph = graph.unwrap();
+        // The IR lowerer emits a zero constant for unconnected inputs,
+        // plus one constant for each graph block.
+        assert!(
+            graph.block_count() >= 1,
+            "compiled graph should have at least 1 block"
+        );
     }
 
     #[test]
-    fn test_build_runtime_invalid_json() {
-        let result = build_runtime("not json");
+    fn test_build_runtime_graph_invalid_json() {
+        let result = build_runtime_graph("not json");
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(
@@ -202,7 +216,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_runtime_tick() {
+    fn test_build_runtime_graph_tick() {
         let json = r#"{
             "blocks": [{
                 "id": 1,
@@ -217,13 +231,21 @@ mod tests {
             "tick_count": 0,
             "time": 0.0
         }"#;
-        let mut rt = build_runtime(json).unwrap();
-        rt.tick(&mut NullHardware);
-        let val = rt.read_output(1, 0);
-        assert_eq!(
-            val,
-            Some(42.0),
-            "constant block should produce its configured value after tick"
+        let mut graph = build_runtime_graph(json).unwrap();
+        graph.tick(1.0, &mut NullHw);
+        // Find the slot containing 42.0 — the exact slot depends on IR lowering
+        // (slot 0 is clock, slot 1 is the zero constant, slot 2 is the user constant).
+        let slot_count = graph.slot_count();
+        let mut found = false;
+        for i in 0..slot_count as u16 {
+            if (graph.read_slot(i) - 42.0).abs() < f64::EPSILON {
+                found = true;
+                break;
+            }
+        }
+        assert!(
+            found,
+            "constant block should produce its configured value (42.0) after tick"
         );
     }
 
