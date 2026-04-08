@@ -267,6 +267,7 @@ pub fn lower_graph(snap: &GraphSnapshot) -> Result<String, String> {
             "multiply" => emit_multiply(&mut out, id, &inputs)?,
             "clamp" => emit_clamp(&mut out, id, block, &inputs)?,
             "adc_source" => emit_adc_read(&mut out, id, block)?,
+            "smbus_read" => emit_smbus_read_word(&mut out, id, block)?,
             "pwm_sink" => emit_pwm_write(&mut out, id, block, &inputs)?,
             "gpio_out" => emit_gpio_write(&mut out, id, block, &inputs)?,
             "gpio_in" => emit_gpio_read(&mut out, id, block)?,
@@ -405,6 +406,22 @@ fn emit_adc_read(out: &mut String, id: u32, block: &BlockSnapshot) -> Result<(),
     )
     .unwrap();
     Ok(())
+}
+
+fn emit_smbus_read_word(out: &mut String, id: u32, block: &BlockSnapshot) -> Result<(), String> {
+    let bus = config_u64(block, "bus");
+    let addr = config_u64(block, "addr");
+    let cmd = config_u64(block, "cmd");
+    let ssa = dialect::ssa_name(id, 0);
+    writeln!(
+        out,
+        "    {ssa} = {op} {{ bus = {bus_attr}, addr = {addr_attr}, cmd = {cmd_attr} }} : f64",
+        op = dialect::OP_SMBUS_READ_WORD,
+        bus_attr = dialect::i32_attr(bus as i32),
+        addr_attr = dialect::i32_attr(addr as i32),
+        cmd_attr = dialect::i32_attr(cmd as i32),
+    )
+    .map_err(|e| e.to_string())
 }
 
 fn emit_pwm_write(
@@ -745,6 +762,13 @@ pub fn lower_graph_ir(snap: &GraphSnapshot) -> Result<IrModule, String> {
             "adc_source" => {
                 let channel = config_u64(block, "channel") as u8;
                 let v = builder.adc_read(channel);
+                output_map.insert((id, 0), v);
+            }
+            "smbus_read" => {
+                let bus = config_u64(block, "bus") as u8;
+                let addr = config_u64(block, "addr") as u8;
+                let cmd = config_u64(block, "cmd") as u8;
+                let v = builder.smbus_read_word(bus, addr, cmd);
                 output_map.insert((id, 0), v);
             }
             "pwm_sink" => {
@@ -1687,5 +1711,48 @@ mod tests {
         let result = lower_graph_ir(&snap);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("cycle"));
+    }
+
+    #[test]
+    fn lower_smbus_read() {
+        let blocks = vec![{
+            let mut b = make_block(1, "smbus_read", serde_json::json!({
+                "bus": 0, "addr": 0x48, "cmd": 0x00
+            }));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot {
+            blocks,
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(
+            mlir.contains("dataflow.smbus_read_word"),
+            "expected dataflow.smbus_read_word op, got:\n{mlir}"
+        );
+    }
+
+    #[test]
+    fn lower_smbus_read_ir() {
+        let blocks = vec![{
+            let mut b = make_block(1, "smbus_read", serde_json::json!({
+                "bus": 0, "addr": 0x48, "cmd": 0x00
+            }));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot {
+            blocks,
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let ir = lower_graph_ir(&snap).unwrap();
+        let ops = &ir.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::SmBusReadWord)));
     }
 }

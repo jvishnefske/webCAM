@@ -119,6 +119,7 @@ fn emit_hw_bridge_trait(out: &mut String) {
          \x20   fn uart_read(&self, _port: u8) -> f64 { 0.0 }\n\
          \x20   fn uart_write(&mut self, _port: u8, _value: f64) {}\n\
          \x20   fn encoder_read(&self, _channel: u8) -> (f64, f64) { (0.0, 0.0) }\n\
+         \x20   fn smbus_read_word(&self, _bus: u8, _addr: u8, _cmd: u8) -> u16 { 0 }\n\
          \x20   fn subscribe(&self, _topic: &str) -> f64 { 0.0 }\n\
          \x20   fn publish(&mut self, _topic: &str, _value: f64) {}\n\
          }\n\n",
@@ -267,8 +268,8 @@ fn emit_op(out: &mut String, idx: usize, op: &IrOp) {
             let bus = attr_u8(op, "bus");
             let addr = attr_u8(op, "addr");
             let cmd = attr_u8(op, "cmd");
-            let _ = writeln!(out, "    // Op {idx}: dataflow.smbus_read_word {{bus = {bus}, addr = {addr}, cmd = {cmd}}}");
-            let _ = writeln!(out, "    state.v{} = hw.smbus_read_word({bus}, {addr}, {cmd});", r(0));
+            let _ = writeln!(out, "    // Op {idx}: dataflow.smbus_read_word {{bus = {bus}, addr = 0x{addr:02x}, cmd = 0x{cmd:02x}}}");
+            let _ = writeln!(out, "    state.v{} = hw.smbus_read_word({bus}, 0x{addr:02x}, 0x{cmd:02x}) as f64;", r(0));
         }
 
         IrOpKind::Func(FuncOp::Call { callee }) if callee == "subscribe" => {
