@@ -1755,4 +1755,49 @@ mod tests {
         use crate::ir::{DataflowOp, IrOpKind};
         assert!(ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::SmBusReadWord)));
     }
+
+    #[test]
+    fn lower_smbus_read_full_pipeline() {
+        // smbus_read → pubsub_sink: verify the complete lowering chain
+        let blocks = vec![
+            {
+                let mut b = make_block(1, "smbus_read", serde_json::json!({
+                    "bus": 0, "addr": 0x48, "cmd": 0x00
+                }));
+                b.inputs = vec![];
+                b.outputs = vec![PortDef {
+                    name: "value".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b
+            },
+            {
+                let mut b = make_block(2, "pubsub_sink", serde_json::json!({
+                    "topic": "sensor/temp"
+                }));
+                b.inputs = vec![PortDef {
+                    name: "in".to_string(),
+                    kind: PortKind::Float,
+                }];
+                b
+            },
+        ];
+        let snap = GraphSnapshot {
+            blocks,
+            channels: vec![make_channel(0, 1, 0, 2, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        // MLIR text path
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("dataflow.smbus_read_word"));
+        assert!(mlir.contains("dataflow.publish"));
+
+        // Typed IR path
+        let ir = lower_graph_ir(&snap).unwrap();
+        let ops = &ir.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::SmBusReadWord)));
+    }
 }
