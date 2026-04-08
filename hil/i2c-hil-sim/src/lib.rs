@@ -71,7 +71,7 @@ pub mod pmbus;
 pub mod runtime;
 pub mod smbus;
 
-pub use channel::{I2cResponse, I2cTransaction};
+pub use channel::{I2cChannel, I2cResponse, I2cTransaction};
 pub use bus::builder::SimBusBuilder;
 pub use bus::shared::{BusHandle, SharedBus};
 pub use bus::SimBus;
