@@ -263,6 +263,14 @@ fn emit_op(out: &mut String, idx: usize, op: &IrOp) {
             let _ = writeln!(out, "    // Op {idx}: dataflow.state_machine (not yet implemented)");
         }
 
+        IrOpKind::Dataflow(DataflowOp::SmBusReadWord) => {
+            let bus = attr_u8(op, "bus");
+            let addr = attr_u8(op, "addr");
+            let cmd = attr_u8(op, "cmd");
+            let _ = writeln!(out, "    // Op {idx}: dataflow.smbus_read_word {{bus = {bus}, addr = {addr}, cmd = {cmd}}}");
+            let _ = writeln!(out, "    state.v{} = hw.smbus_read_word({bus}, {addr}, {cmd});", r(0));
+        }
+
         IrOpKind::Func(FuncOp::Call { callee }) if callee == "subscribe" => {
             let topic = attr_str(op, "topic");
             let _ = writeln!(out, "    // Op {idx}: func.call @subscribe {{topic = \"{topic}\"}}");

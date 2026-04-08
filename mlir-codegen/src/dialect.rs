@@ -26,6 +26,7 @@ pub const OP_STALLGUARD_READ: &str = "dataflow.stallguard_read";
 pub const OP_SUBSCRIBE: &str = "dataflow.subscribe";
 pub const OP_PUBLISH: &str = "dataflow.publish";
 pub const OP_STATE_MACHINE: &str = "dataflow.state_machine";
+pub const OP_SMBUS_READ_WORD: &str = "dataflow.smbus_read_word";
 
 // -- MLIR type strings ------------------------------------------------------
 

@@ -81,6 +81,8 @@ pub enum DataflowOp {
     MessageFieldExtract,
     /// `dataflow.state_machine` -- region-based FSM op.
     StateMachine,
+    /// `dataflow.smbus_read_word` -- SMBus read word protocol (write cmd byte, read 2 bytes).
+    SmBusReadWord,
 }
 
 impl IrOpKind {
@@ -106,6 +108,7 @@ impl IrOpKind {
                 DataflowOp::ChannelWrite => "channel_write",
                 DataflowOp::MessageFieldExtract => "message_field",
                 DataflowOp::StateMachine => "state_machine",
+                DataflowOp::SmBusReadWord => "smbus_read_word",
             }),
             Self::Custom(s) => s.clone(),
         }
@@ -395,6 +398,20 @@ impl IrBuilder {
         (results[0], results[1])
     }
 
+    /// SMBus read word: result = hw.smbus_read_word(bus, addr, cmd).
+    pub fn smbus_read_word(&mut self, bus: u8, addr: u8, cmd: u8) -> ValueId {
+        self.typed_op(
+            IrOpKind::Dataflow(DataflowOp::SmBusReadWord),
+            &[],
+            &[
+                ("bus", Attr::I64(bus as i64)),
+                ("addr", Attr::I64(addr as i64)),
+                ("cmd", Attr::I64(cmd as i64)),
+            ],
+            1,
+        )[0]
+    }
+
     // ── Pub/Sub ops (modeled as func.call) ─────────────────────────
 
     /// Subscribe: result = func.call @subscribe(topic).
@@ -652,6 +669,18 @@ mod tests {
         assert_eq!(op.attrs.get("port"), Some(&Attr::I64(3)));
         assert_eq!(op.operands, vec![val]);
         assert_eq!(op.results.len(), 0);
+    }
+
+    #[test]
+    fn smbus_read_word_builder() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let result = b.smbus_read_word(0, 0x48, 0x00);
+        let module = b.build();
+        let op = &module.funcs[0].ops[0];
+        assert_eq!(op.kind, IrOpKind::Dataflow(DataflowOp::SmBusReadWord));
+        assert_eq!(op.results.len(), 1);
+        assert_eq!(op.results[0], result);
     }
 
     #[test]
