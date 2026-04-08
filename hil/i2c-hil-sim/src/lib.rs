@@ -62,6 +62,7 @@
 #![deny(clippy::unwrap_in_result)]
 
 pub mod bus;
+pub mod channel;
 pub mod device;
 pub mod device_set;
 pub mod devices;
@@ -70,6 +71,7 @@ pub mod pmbus;
 pub mod runtime;
 pub mod smbus;
 
+pub use channel::{I2cResponse, I2cTransaction};
 pub use bus::builder::SimBusBuilder;
 pub use bus::shared::{BusHandle, SharedBus};
 pub use bus::SimBus;
