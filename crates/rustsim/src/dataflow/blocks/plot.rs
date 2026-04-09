@@ -6,6 +6,7 @@ use tsify_next::Tsify;
 
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[schemars(default)]
 pub struct PlotConfig {
     /// Maximum number of samples to keep.
     #[serde(default = "default_max_samples")]
@@ -14,6 +15,12 @@ pub struct PlotConfig {
 
 fn default_max_samples() -> usize {
     1000
+}
+
+impl Default for PlotConfig {
+    fn default() -> Self {
+        Self { max_samples: 500 }
+    }
 }
 
 pub struct PlotBlock {

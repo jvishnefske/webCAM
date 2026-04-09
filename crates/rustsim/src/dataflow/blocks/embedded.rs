@@ -16,6 +16,7 @@ use tsify_next::Tsify;
 
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[schemars(default)]
 pub struct AdcConfig {
     pub channel: u8,
     pub resolution_bits: u8,
@@ -91,6 +92,7 @@ impl SimModel for AdcBlock {
 
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[schemars(default)]
 pub struct PwmConfig {
     pub channel: u8,
     pub frequency_hz: u32,
@@ -168,6 +170,7 @@ impl SimModel for PwmBlock {
 
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[schemars(default)]
 pub struct GpioOutConfig {
     pub pin: u8,
 }
@@ -240,6 +243,7 @@ impl SimModel for GpioOutBlock {
 
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[schemars(default)]
 pub struct GpioInConfig {
     pub pin: u8,
 }
@@ -314,6 +318,7 @@ impl SimModel for GpioInBlock {
 
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[schemars(default)]
 pub struct UartTxConfig {
     pub port: u8,
     pub baud: u32,
@@ -390,6 +395,7 @@ impl SimModel for UartTxBlock {
 
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[schemars(default)]
 pub struct UartRxConfig {
     pub port: u8,
     pub baud: u32,
@@ -470,6 +476,7 @@ impl SimModel for UartRxBlock {
 
 #[derive(Debug, Default, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[schemars(default)]
 pub struct EncoderConfig {
     pub channel: u8,
 }
@@ -546,6 +553,7 @@ impl SimModel for EncoderBlock {
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(default)]
+#[schemars(default)]
 pub struct Ssd1306DisplayConfig {
     pub i2c_bus: u8,
     pub address: u8,
@@ -632,6 +640,7 @@ impl SimModel for Ssd1306DisplayBlock {
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(default)]
+#[schemars(default)]
 pub struct Tmc2209StepperConfig {
     pub uart_port: u8,
     pub uart_addr: u8,
@@ -724,6 +733,7 @@ impl SimModel for Tmc2209StepperBlock {
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(default)]
+#[schemars(default)]
 pub struct Tmc2209StallGuardConfig {
     pub uart_port: u8,
     pub uart_addr: u8,

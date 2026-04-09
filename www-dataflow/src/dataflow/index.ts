@@ -6,7 +6,7 @@ import { $, $btn, $input } from '../dom.js';
 import { DataflowManager } from './graph.js';
 import { DataflowEditor } from './editor.js';
 import { drawPlot } from './plot.js';
-import { DEFAULT_CONFIGS } from './palette.js';
+import { getBlockDefaults } from './palette.js';
 import { createZip } from './zip.js';
 import { HilClient } from './hil-client.js';
 import { renderPinTable } from './pin-table.js';
@@ -565,7 +565,7 @@ function setupSidebarPalette(): void {
       item.textContent = bt.name;
       item.addEventListener('click', () => {
         if (!mgr || !editor) return;
-        const config = (DEFAULT_CONFIGS as unknown as Record<string, Record<string, unknown>>)[bt.block_type] ?? {};
+        const config = getBlockDefaults(bt.block_type);
         mgr.addBlock(bt.block_type, config, 200, 200);
         editor.updateSnapshot();
         editor.onChange?.();

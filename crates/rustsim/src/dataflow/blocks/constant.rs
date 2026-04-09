@@ -6,8 +6,15 @@ use tsify_next::Tsify;
 
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[schemars(default)]
 pub struct ConstantConfig {
     pub value: f64,
+}
+
+impl Default for ConstantConfig {
+    fn default() -> Self {
+        Self { value: 1.0 }
+    }
 }
 
 pub struct ConstantBlock {

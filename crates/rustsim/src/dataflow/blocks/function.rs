@@ -15,12 +15,23 @@ pub enum FunctionOp {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[schemars(default)]
 pub struct FunctionConfig {
     pub op: FunctionOp,
     #[serde(default)]
     pub param1: f64,
     #[serde(default)]
     pub param2: f64,
+}
+
+impl Default for FunctionConfig {
+    fn default() -> Self {
+        Self {
+            op: FunctionOp::Gain,
+            param1: 1.0,
+            param2: 0.0,
+        }
+    }
 }
 
 pub struct FunctionBlock {

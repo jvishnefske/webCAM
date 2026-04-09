@@ -11,6 +11,7 @@ use tsify_next::Tsify;
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(default)]
+#[schemars(default)]
 pub struct PubSubConfig {
     pub topic: String,
     #[tsify(type = "\"Float\" | \"Bytes\" | \"Text\" | \"Series\" | \"Any\"")]

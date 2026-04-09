@@ -46,6 +46,7 @@ use tsify_next::Tsify;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(default)]
+#[schemars(default)]
 pub struct StateMachineConfig {
     pub states: Vec<String>,
     pub initial: String,

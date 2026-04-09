@@ -688,6 +688,13 @@ pub fn dataflow_block_schema(block_type: &str) -> String {
     block_schema_inner(block_type)
 }
 
+/// Get default config JSON for a block type (extracted from Default impls).
+/// Returns a JSON string with the default config values, or "{}" for unknown types.
+#[wasm_bindgen]
+pub fn dataflow_block_defaults(block_type: &str) -> String {
+    block_defaults_inner(block_type)
+}
+
 fn block_schema_inner(block_type: &str) -> String {
     use schemars::schema_for;
 
@@ -712,6 +719,54 @@ fn block_schema_inner(block_type: &str) -> String {
         _ => Ok("{}".to_string()),
     };
     schema.unwrap_or_else(|_| "{}".to_string())
+}
+
+fn block_defaults_inner(block_type: &str) -> String {
+    use dataflow::blocks::*;
+
+    let json = match block_type {
+        "constant" => serde_json::to_string(&constant::ConstantConfig::default()),
+        "gain" => serde_json::to_string(&function::FunctionConfig::default()),
+        "clamp" => serde_json::to_string(&function::FunctionConfig {
+            op: function::FunctionOp::Clamp,
+            param1: 0.0,
+            param2: 100.0,
+        }),
+        "add" => serde_json::to_string(&function::FunctionConfig {
+            op: function::FunctionOp::Add,
+            param1: 0.0,
+            param2: 0.0,
+        }),
+        "multiply" => serde_json::to_string(&function::FunctionConfig {
+            op: function::FunctionOp::Multiply,
+            param1: 0.0,
+            param2: 0.0,
+        }),
+        "plot" => serde_json::to_string(&plot::PlotConfig::default()),
+        "udp_source" => serde_json::to_string(&udp::UdpConfig::default()),
+        "udp_sink" => serde_json::to_string(&udp::UdpConfig {
+            address: "127.0.0.1:9001".to_string(),
+        }),
+        "adc_source" => serde_json::to_string(&embedded::AdcConfig::default()),
+        "pwm_sink" => serde_json::to_string(&embedded::PwmConfig::default()),
+        "gpio_out" => serde_json::to_string(&embedded::GpioOutConfig::default()),
+        "gpio_in" => serde_json::to_string(&embedded::GpioInConfig::default()),
+        "uart_tx" => serde_json::to_string(&embedded::UartTxConfig::default()),
+        "uart_rx" => serde_json::to_string(&embedded::UartRxConfig::default()),
+        "encoder" => serde_json::to_string(&embedded::EncoderConfig::default()),
+        "ssd1306_display" => serde_json::to_string(&embedded::Ssd1306DisplayConfig::default()),
+        "tmc2209_stepper" => serde_json::to_string(&embedded::Tmc2209StepperConfig::default()),
+        "tmc2209_stallguard" => {
+            serde_json::to_string(&embedded::Tmc2209StallGuardConfig::default())
+        }
+        "pubsub_source" | "pubsub_sink" => {
+            serde_json::to_string(&pubsub::PubSubConfig::default())
+        }
+        "state_machine" => serde_json::to_string(&state_machine::StateMachineConfig::default()),
+        "json_encode" | "json_decode" => Ok("{}".to_string()),
+        _ => Ok("{}".to_string()),
+    };
+    json.unwrap_or_else(|_| "{}".to_string())
 }
 
 #[cfg(test)]
@@ -1364,5 +1419,145 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&schema).unwrap();
         assert!(parsed["properties"]["states"].is_object());
         assert!(parsed["properties"]["initial"].is_object());
+    }
+
+    // ── Block defaults tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_block_defaults_constant() {
+        let json = block_defaults_inner("constant");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["value"], 1.0);
+    }
+
+    #[test]
+    fn test_block_defaults_gain() {
+        let json = block_defaults_inner("gain");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["op"], "Gain");
+        assert_eq!(parsed["param1"], 1.0);
+        assert_eq!(parsed["param2"], 0.0);
+    }
+
+    #[test]
+    fn test_block_defaults_clamp() {
+        let json = block_defaults_inner("clamp");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["op"], "Clamp");
+        assert_eq!(parsed["param1"], 0.0);
+        assert_eq!(parsed["param2"], 100.0);
+    }
+
+    #[test]
+    fn test_block_defaults_plot() {
+        let json = block_defaults_inner("plot");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["max_samples"], 500);
+    }
+
+    #[test]
+    fn test_block_defaults_adc() {
+        let json = block_defaults_inner("adc_source");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["channel"], 0);
+        assert_eq!(parsed["resolution_bits"], 12);
+    }
+
+    #[test]
+    fn test_block_defaults_pwm() {
+        let json = block_defaults_inner("pwm_sink");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["channel"], 0);
+        assert_eq!(parsed["frequency_hz"], 1000);
+    }
+
+    #[test]
+    fn test_block_defaults_gpio() {
+        let json = block_defaults_inner("gpio_out");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["pin"], 13);
+
+        let json = block_defaults_inner("gpio_in");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["pin"], 2);
+    }
+
+    #[test]
+    fn test_block_defaults_uart() {
+        let json = block_defaults_inner("uart_tx");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["port"], 0);
+        assert_eq!(parsed["baud"], 115200);
+
+        let json = block_defaults_inner("uart_rx");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["port"], 0);
+        assert_eq!(parsed["baud"], 115200);
+    }
+
+    #[test]
+    fn test_block_defaults_udp() {
+        let json = block_defaults_inner("udp_source");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["address"], "127.0.0.1:9000");
+
+        let json = block_defaults_inner("udp_sink");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["address"], "127.0.0.1:9001");
+    }
+
+    #[test]
+    fn test_block_defaults_pubsub() {
+        let json = block_defaults_inner("pubsub_source");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["topic"], "default");
+        assert_eq!(parsed["port_kind"], "Float");
+    }
+
+    #[test]
+    fn test_block_defaults_state_machine() {
+        let json = block_defaults_inner("state_machine");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["states"][0], "idle");
+        assert_eq!(parsed["initial"], "idle");
+    }
+
+    #[test]
+    fn test_block_defaults_tmc2209() {
+        let json = block_defaults_inner("tmc2209_stepper");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["steps_per_rev"], 200);
+        assert_eq!(parsed["microsteps"], 16);
+
+        let json = block_defaults_inner("tmc2209_stallguard");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["threshold"], 50);
+    }
+
+    #[test]
+    fn test_block_defaults_ssd1306() {
+        let json = block_defaults_inner("ssd1306_display");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["i2c_bus"], 0);
+        assert_eq!(parsed["address"], 60); // 0x3C
+    }
+
+    #[test]
+    fn test_block_defaults_encoder() {
+        let json = block_defaults_inner("encoder");
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["channel"], 0);
+    }
+
+    #[test]
+    fn test_block_defaults_unknown_returns_empty() {
+        let json = block_defaults_inner("nonexistent");
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn test_block_defaults_json_encode_decode() {
+        assert_eq!(block_defaults_inner("json_encode"), "{}");
+        assert_eq!(block_defaults_inner("json_decode"), "{}");
     }
 }

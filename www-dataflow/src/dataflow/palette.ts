@@ -1,29 +1,17 @@
 /** Searchable block type picker for the dataflow editor. */
 
-import type { BlockTypeInfo, BlockConfigMap } from './types.js';
+import type { BlockTypeInfo } from './types.js';
 import type { DataflowManager } from './graph.js';
+import { dataflow_block_defaults } from '../../pkg/rustsim.js';
 
-export const DEFAULT_CONFIGS: { [K in keyof BlockConfigMap]: BlockConfigMap[K] } = {
-  constant: { value: 1.0 },
-  gain: { op: 'Gain', param1: 1.0, param2: 0.0 },
-  clamp: { op: 'Clamp', param1: 0.0, param2: 100.0 },
-  plot: { max_samples: 500 },
-  udp_source: { address: '127.0.0.1:9000' },
-  udp_sink: { address: '127.0.0.1:9001' },
-  adc_source: { channel: 0, resolution_bits: 12 },
-  pwm_sink: { channel: 0, frequency_hz: 1000 },
-  gpio_out: { pin: 13 },
-  gpio_in: { pin: 2 },
-  uart_tx: { port: 0, baud: 115200 },
-  uart_rx: { port: 0, baud: 115200 },
-  pubsub_source: { topic: 'default', port_kind: 'Float' },
-  pubsub_sink: { topic: 'default', port_kind: 'Float' },
-  state_machine: { states: ['idle'], initial: 'idle', transitions: [], input_topics: [], output_topics: [] },
-  encoder: { channel: 0 },
-  ssd1306_display: { i2c_bus: 0, address: 60 },
-  tmc2209_stepper: { uart_port: 0, uart_addr: 0, steps_per_rev: 200, microsteps: 16 },
-  tmc2209_stallguard: { uart_port: 0, uart_addr: 0, threshold: 50 },
-};
+/** Get default config for a block type from Rust Default impls via WASM. */
+export function getBlockDefaults(blockType: string): Record<string, unknown> {
+    try {
+        return JSON.parse(dataflow_block_defaults(blockType));
+    } catch {
+        return {};
+    }
+}
 
 /** Show palette at screen position, create block at world position. */
 export function showPalette(
@@ -74,7 +62,7 @@ export function showPalette(
       item.className = 'df-palette-item';
       item.textContent = bt.name;
       item.addEventListener('click', () => {
-        const config = (DEFAULT_CONFIGS as unknown as Record<string, Record<string, unknown>>)[bt.block_type] ?? {};
+        const config = getBlockDefaults(bt.block_type);
         mgr.addBlock(bt.block_type, config, worldX, worldY);
         palette.remove();
         onBlockAdded();

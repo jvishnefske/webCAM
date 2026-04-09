@@ -10,8 +10,17 @@ use tsify_next::Tsify;
 
 #[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
+#[schemars(default)]
 pub struct UdpConfig {
     pub address: String,
+}
+
+impl Default for UdpConfig {
+    fn default() -> Self {
+        Self {
+            address: "127.0.0.1:9000".to_string(),
+        }
+    }
 }
 
 /// Receives UDP datagrams and emits them as Bytes.
