@@ -2,79 +2,98 @@ version = 1
 status = "ready_for_implementation"
 
 [project]
-name = "block-auto-registry"
-description = "Auto-register blocks via inventory crate — implement trait + add crate = block appears in palette"
+name = "schema-driven-forms"
+description = "Replace hardcoded inspector UI with JSON Schema-driven form generation from Rust config types"
 worktree_base = ".worktrees"
 
-# ── Task 1: Add inventory crate + BlockRegistration type ──────────
+# ── Task 1: Add schemars to rustsim + derive JsonSchema on configs ──
 
 [[tasks]]
 id = "task-001"
-title = "Define BlockRegistration struct and inventory collection in module-traits"
+title = "Add schemars dep and derive JsonSchema on all block config structs"
 acceptance = """
-- module-traits/src/registry.rs defines BlockRegistration { block_type, display_name, category, create_from_json: fn(&str) -> Result<Box<dyn Module>, String> }
-- inventory::collect!(BlockRegistration) declared
-- `cargo check -p module-traits` passes
-- No existing block code changes yet
+- schemars = \"1\" added to crates/rustsim/Cargo.toml
+- All block config structs (ConstantConfig, FunctionConfig, AdcConfig, etc.) derive JsonSchema
+- `cargo check -p rustsim` passes
 """
 deps = []
 status = "pending"
 
-# ── Task 2: Add register_block! macro ─────────────────────────────
+# ── Task 2: WASM export for block config schema ──────────────────
 
 [[tasks]]
 id = "task-002"
-title = "Create register_block! macro that submits BlockRegistration to inventory"
+title = "Add dataflow_block_schema(block_type) WASM export returning JSON Schema"
 acceptance = """
-- Macro in module-traits: register_block!(block_type, display_name, category, |config_json| { parse + construct })
-- Expands to inventory::submit!(BlockRegistration { ... })
-- `cargo check -p module-traits` passes
+- New function: dataflow_block_schema(block_type: &str) -> String (returns JSON Schema)
+- Uses schemars::schema_for! to generate schema for each config type
+- Returns empty object {} for unknown block types
+- `cargo test -p rustsim -- block_schema` has tests for constant, gain, adc_source
+- Schema includes type, properties, required fields, enum values, defaults
 """
 deps = ["task-001"]
 status = "pending"
 
-# ── Task 3: Register all 23 built-in blocks via inventory ─────────
+# ── Task 3: Vanilla TS schema form renderer ──────────────────────
 
 [[tasks]]
 id = "task-003"
-title = "Replace hard-coded create_block match with inventory iteration"
+title = "Create renderSchemaForm() that generates DOM from JSON Schema"
 acceptance = """
-- Each block file (constant.rs, function.rs, embedded.rs, etc.) calls register_block! at module level
-- create_block() iterates inventory::iter::<BlockRegistration> instead of match
-- available_block_types() iterates inventory::iter::<BlockRegistration> instead of hardcoded vec
-- All 23 block types still appear in palette
-- `cargo test -p rustsim -- create_block` passes (all existing tests)
-- `cargo test -p rustsim` passes (full suite)
+- New file: www-dataflow/src/dataflow/schema-form.ts
+- Function: renderSchemaForm(container, schema, data, onChange) -> void
+- Handles JSON Schema types: string, number, integer, boolean
+- Handles enum (oneOf/enum) as <select>
+- Handles nested objects (renders sub-sections)
+- Uses existing Tailwind classes matching current inspector style
+- All DOM via document.createElement (no innerHTML)
+- `cd www-dataflow && npx tsc --noEmit` passes
+- Unit tests in schema-form.test.ts using jsdom
 """
-deps = ["task-002"]
+deps = []
 status = "pending"
 
-# ── Task 4: Verify WASM build + frontend ──────────────────────────
+# ── Task 4: Wire schema form into inspector ──────────────────────
 
 [[tasks]]
 id = "task-004"
-title = "Verify wasm-pack build and frontend palette shows all blocks"
+title = "Replace hardcoded inspector in index.ts with schema-driven form"
 acceptance = """
-- `wasm-pack build crates/rustsim --target web` succeeds
-- Frontend palette shows all 23 block types
-- Blocks can be added, connected, ticked
-- `make lint` passes
-- `cargo test -p rustsim` all pass
+- updateBlockInfo() calls dataflow_block_schema() to get schema
+- Passes schema + current config to renderSchemaForm()
+- Apply button reads form data and calls mgr.updateBlock()
+- Delete button unchanged
+- All block types render correct inspector forms
+- `cd www-dataflow && npx tsc --noEmit` passes
 """
-deps = ["task-003"]
+deps = ["task-002", "task-003"]
 status = "pending"
 
-# ── Task 5: Document how to add a new block ───────────────────────
+# ── Task 5: Schema defaults replace palette DEFAULT_CONFIGS ──────
 
 [[tasks]]
 id = "task-005"
-title = "Add CONTRIBUTING.md section on adding new blocks"
+title = "Generate palette default configs from JSON Schema default values"
 acceptance = """
-- docs/CONTRIBUTING.md or CLAUDE.md has section explaining:
-  1. Create struct implementing Module + Tick
-  2. Call register_block! macro
-  3. Block auto-appears in palette
-- Example code snippet included
+- palette.ts reads schema defaults via dataflow_block_schema()
+- DEFAULT_CONFIGS map removed or reduced to overrides-only
+- New blocks added to palette automatically get defaults from schema
+- `cd www-dataflow && npx tsc --noEmit` passes
+- `cd www-dataflow && npm test` passes
 """
 deps = ["task-004"]
+status = "pending"
+
+# ── Task 6: Verify full build ────────────────────────────────────
+
+[[tasks]]
+id = "task-006"
+title = "Verify make all passes with schema-driven forms"
+acceptance = """
+- `make lint` passes
+- `make wasm` builds
+- `make ts` passes all frontends
+- Manual: add block, inspector shows schema-generated form, Apply works
+"""
+deps = ["task-005"]
 status = "pending"
