@@ -35,7 +35,7 @@ lint: ## Run clippy on all host crates (matches CI)
 	cargo clippy --workspace $(WORKSPACE_EXCLUDES) --all-targets -- -D warnings
 
 test: ## Run all library crate tests with coverage (llvm-cov)
-	cargo llvm-cov --fail-under-functions 92 --workspace $(WORKSPACE_EXCLUDES)
+	PAGER=cat cargo llvm-cov --fail-under-functions 92 --workspace $(WORKSPACE_EXCLUDES)
 
 wasm: wasm-cam wasm-dataflow ## Build all WASM targets
 
