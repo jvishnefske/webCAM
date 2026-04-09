@@ -679,6 +679,41 @@ pub fn panel_collect_outputs(panel_id: u32) -> Result<String, JsValue> {
     })
 }
 
+// ── Block Schema WASM API ──────────────────────────────────────────
+
+/// Get the JSON Schema for a block type's config.
+/// Returns a JSON string containing the schema, or "{}" for unknown types.
+#[wasm_bindgen]
+pub fn dataflow_block_schema(block_type: &str) -> String {
+    block_schema_inner(block_type)
+}
+
+fn block_schema_inner(block_type: &str) -> String {
+    use schemars::schema_for;
+
+    let schema = match block_type {
+        "constant" => serde_json::to_string(&schema_for!(dataflow::blocks::constant::ConstantConfig)),
+        "gain" | "add" | "multiply" | "clamp" => serde_json::to_string(&schema_for!(dataflow::blocks::function::FunctionConfig)),
+        "plot" => serde_json::to_string(&schema_for!(dataflow::blocks::plot::PlotConfig)),
+        "udp_source" | "udp_sink" => serde_json::to_string(&schema_for!(dataflow::blocks::udp::UdpConfig)),
+        "adc_source" => serde_json::to_string(&schema_for!(dataflow::blocks::embedded::AdcConfig)),
+        "pwm_sink" => serde_json::to_string(&schema_for!(dataflow::blocks::embedded::PwmConfig)),
+        "gpio_out" => serde_json::to_string(&schema_for!(dataflow::blocks::embedded::GpioOutConfig)),
+        "gpio_in" => serde_json::to_string(&schema_for!(dataflow::blocks::embedded::GpioInConfig)),
+        "uart_tx" => serde_json::to_string(&schema_for!(dataflow::blocks::embedded::UartTxConfig)),
+        "uart_rx" => serde_json::to_string(&schema_for!(dataflow::blocks::embedded::UartRxConfig)),
+        "encoder" => serde_json::to_string(&schema_for!(dataflow::blocks::embedded::EncoderConfig)),
+        "ssd1306_display" => serde_json::to_string(&schema_for!(dataflow::blocks::embedded::Ssd1306DisplayConfig)),
+        "tmc2209_stepper" => serde_json::to_string(&schema_for!(dataflow::blocks::embedded::Tmc2209StepperConfig)),
+        "tmc2209_stallguard" => serde_json::to_string(&schema_for!(dataflow::blocks::embedded::Tmc2209StallGuardConfig)),
+        "state_machine" => serde_json::to_string(&schema_for!(dataflow::blocks::state_machine::StateMachineConfig)),
+        "pubsub_source" | "pubsub_sink" => serde_json::to_string(&schema_for!(dataflow::blocks::pubsub::PubSubConfig)),
+        "json_encode" | "json_decode" => Ok("{}".to_string()),
+        _ => Ok("{}".to_string()),
+    };
+    schema.unwrap_or_else(|_| "{}".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1290,5 +1325,44 @@ mod tests {
         PANEL_RUNTIMES.with(|r| {
             assert!(!r.borrow().contains_key(&99999));
         });
+    }
+
+    // ── Block schema tests ─────────────────────────────────────────
+
+    #[test]
+    fn test_block_schema_constant() {
+        let schema = block_schema_inner("constant");
+        let parsed: serde_json::Value = serde_json::from_str(&schema).unwrap();
+        assert!(parsed["properties"]["value"].is_object());
+    }
+
+    #[test]
+    fn test_block_schema_gain() {
+        let schema = block_schema_inner("gain");
+        let parsed: serde_json::Value = serde_json::from_str(&schema).unwrap();
+        assert!(parsed["properties"]["op"].is_object());
+        assert!(parsed["properties"]["param1"].is_object());
+    }
+
+    #[test]
+    fn test_block_schema_adc() {
+        let schema = block_schema_inner("adc_source");
+        let parsed: serde_json::Value = serde_json::from_str(&schema).unwrap();
+        assert!(parsed["properties"]["channel"].is_object());
+        assert!(parsed["properties"]["resolution_bits"].is_object());
+    }
+
+    #[test]
+    fn test_block_schema_unknown_returns_empty() {
+        let schema = block_schema_inner("nonexistent");
+        assert_eq!(schema, "{}");
+    }
+
+    #[test]
+    fn test_block_schema_state_machine() {
+        let schema = block_schema_inner("state_machine");
+        let parsed: serde_json::Value = serde_json::from_str(&schema).unwrap();
+        assert!(parsed["properties"]["states"].is_object());
+        assert!(parsed["properties"]["initial"].is_object());
     }
 }
