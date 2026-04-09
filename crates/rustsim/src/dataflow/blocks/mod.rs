@@ -290,4 +290,10 @@ mod tests {
         assert!(b.as_sim_model().is_none());
     }
 
+    #[test]
+    fn schema_generation_compiles() {
+        let schema = schemars::schema_for!(super::constant::ConstantConfig);
+        let json = serde_json::to_string(&schema).unwrap();
+        assert!(json.contains("value"));
+    }
 }

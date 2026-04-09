@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
 #[cfg_attr(feature = "tsify", tsify(into_wasm_abi))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum FieldType {
     F32,
     F64,
@@ -27,6 +28,7 @@ pub enum FieldType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
 #[cfg_attr(feature = "tsify", tsify(into_wasm_abi))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct MessageField {
     pub name: String,
     pub field_type: FieldType,
@@ -36,6 +38,7 @@ pub struct MessageField {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
 #[cfg_attr(feature = "tsify", tsify(into_wasm_abi))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub struct MessageSchema {
     pub name: String,
     pub fields: Vec<MessageField>,
@@ -54,6 +57,7 @@ pub struct MessageData {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
 #[cfg_attr(feature = "tsify", tsify(into_wasm_abi))]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 pub enum PortKind {
     Float,
     Bytes,

@@ -43,7 +43,7 @@ use tsify_next::Tsify;
 // Config types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(default)]
 pub struct StateMachineConfig {
@@ -69,7 +69,7 @@ impl Default for StateMachineConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct TransitionConfig {
     pub from: String,
@@ -79,7 +79,7 @@ pub struct TransitionConfig {
     pub actions: Vec<TransitionAction>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(tag = "type")]
 pub enum TransitionGuard {
@@ -94,7 +94,7 @@ pub enum TransitionGuard {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct FieldCondition {
     pub field: String,
@@ -102,7 +102,7 @@ pub struct FieldCondition {
     pub value: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub enum CompareOp {
     Eq,
@@ -126,14 +126,14 @@ impl CompareOp {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct TransitionAction {
     pub topic: String,
     pub message: Vec<(String, f64)>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 pub struct TopicBinding {
     pub topic: String,

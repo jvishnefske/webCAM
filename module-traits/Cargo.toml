@@ -8,9 +8,11 @@ description = "Trait definitions for the RustCAM dataflow module system"
 [features]
 default = []
 tsify = ["dep:tsify-next", "dep:wasm-bindgen"]
+schemars = ["dep:schemars"]
 
 [dependencies]
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 tsify-next = { version = "0.5", features = ["js"], optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
+schemars = { version = "1", default-features = false, features = ["derive"], optional = true }

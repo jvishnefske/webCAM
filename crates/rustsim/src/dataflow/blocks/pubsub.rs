@@ -8,7 +8,7 @@ use tsify_next::Tsify;
 // Config
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize, Tsify)]
+#[derive(Debug, Serialize, Deserialize, Tsify, schemars::JsonSchema)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(default)]
 pub struct PubSubConfig {
