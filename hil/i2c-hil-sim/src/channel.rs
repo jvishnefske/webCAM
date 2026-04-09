@@ -7,13 +7,18 @@
 /// A single I2C transaction request.
 #[derive(Clone, Copy, Debug)]
 pub struct I2cTransaction {
+    /// 7-bit I2C device address.
     pub addr: u8,
+    /// Number of valid bytes in `write_buf`.
     pub write_len: u8,
+    /// Data to write (up to 4 bytes).
     pub write_buf: [u8; 4],
+    /// Number of bytes to read back.
     pub read_len: u8,
 }
 
 impl I2cTransaction {
+    /// Create a write-then-read transaction.
     pub fn write_read(addr: u8, write: &[u8], read_len: u8) -> Self {
         let mut buf = [0u8; 4];
         let len = write.len().min(4);
@@ -26,18 +31,24 @@ impl I2cTransaction {
         }
     }
 
+    /// Create a write-only transaction (read_len = 0).
     pub fn write(addr: u8, data: &[u8]) -> Self {
         Self::write_read(addr, data, 0)
     }
 }
 
+/// Response from a completed I2C transaction.
 #[derive(Clone, Copy, Debug)]
 pub struct I2cResponse {
+    /// Read-back data (up to 4 bytes).
     pub data: [u8; 4],
+    /// Number of valid bytes in `data`.
     pub len: u8,
+    /// Whether the transaction succeeded.
     pub ok: bool,
 }
 
+#[allow(clippy::derivable_impls)]
 impl Default for I2cResponse {
     fn default() -> Self {
         Self { data: [0; 4], len: 0, ok: false }
@@ -45,6 +56,7 @@ impl Default for I2cResponse {
 }
 
 impl I2cResponse {
+    /// Create a successful response with the given data.
     pub fn ok(data: &[u8]) -> Self {
         let mut buf = [0u8; 4];
         let len = data.len().min(4);
@@ -52,6 +64,7 @@ impl I2cResponse {
         Self { data: buf, len: len as u8, ok: true }
     }
 
+    /// Create an error response.
     pub fn err() -> Self {
         Self::default()
     }
@@ -69,6 +82,12 @@ pub struct I2cChannel<const N: usize> {
     head: usize,
     tail: usize,
     count: usize,
+}
+
+impl<const N: usize> Default for I2cChannel<N> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<const N: usize> I2cChannel<N> {
