@@ -13,7 +13,7 @@ struct Args {
     port: u16,
 
     /// Path to the www directory to serve.
-    #[arg(long, default_value = "www")]
+    #[arg(long, default_value = "www-dataflow")]
     www_dir: PathBuf,
 
     /// Don't open browser on startup.
