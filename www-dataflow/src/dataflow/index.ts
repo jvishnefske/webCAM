@@ -538,7 +538,9 @@ function setupSidebarPalette(): void {
     let lastCat = '';
 
     for (const bt of blockTypes) {
-      if (filter && !bt.name.toLowerCase().includes(lower) && !bt.block_type.toLowerCase().includes(lower)) {
+      const tags = bt.tags as string[] | undefined;
+      const matchesTags = tags?.some(t => t.toLowerCase().includes(lower)) ?? false;
+      if (filter && !bt.name.toLowerCase().includes(lower) && !bt.block_type.toLowerCase().includes(lower) && !matchesTags) {
         continue;
       }
       if (bt.category !== lastCat) {
@@ -563,6 +565,12 @@ function setupSidebarPalette(): void {
         item.style.borderLeftColor = 'transparent';
       });
       item.textContent = bt.name;
+      if (tags && tags.length > 0) {
+        const tagSpan = document.createElement('span');
+        tagSpan.className = 'text-[9px] text-text-dim ml-1';
+        tagSpan.textContent = tags.slice(0, 3).join(' \u00b7 ');
+        item.appendChild(tagSpan);
+      }
       item.addEventListener('click', () => {
         if (!mgr || !editor) return;
         const config = getBlockDefaults(bt.block_type);

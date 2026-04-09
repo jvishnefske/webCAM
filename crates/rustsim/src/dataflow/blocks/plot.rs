@@ -87,6 +87,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
         block_type: "plot",
         display_name: "Plot",
         category: "Sinks",
+        tags: &["sink", "float-input", "display"],
         create_from_json: |json| {
             let cfg: PlotConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
             Ok(Box::new(PlotBlock::from_config(cfg)))

@@ -13,5 +13,6 @@ pub struct BlockRegistration {
     pub block_type: &'static str,
     pub display_name: &'static str,
     pub category: &'static str,
+    pub tags: &'static [&'static str],
     pub create_from_json: fn(&str) -> Result<Box<dyn Module>, String>,
 }

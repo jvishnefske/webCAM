@@ -44,6 +44,7 @@ pub fn available_block_types() -> Vec<BlockTypeInfo> {
             block_type: r.block_type,
             name: r.display_name,
             category: r.category,
+            tags: r.tags.iter().map(|t| t.to_string()).collect(),
         })
         .collect()
 }
@@ -54,6 +55,7 @@ pub struct BlockTypeInfo {
     pub block_type: &'static str,
     pub name: &'static str,
     pub category: &'static str,
+    pub tags: Vec<String>,
 }
 
 #[cfg(test)]

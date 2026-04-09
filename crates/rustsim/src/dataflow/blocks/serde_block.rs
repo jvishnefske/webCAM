@@ -84,12 +84,14 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
         block_type: "json_encode",
         display_name: "JSON Encode",
         category: "Serde",
+        tags: &["communication", "float-input", "bytes-output", "stateless"],
         create_from_json: |_json| Ok(Box::new(JsonEncodeBlock::new())),
     });
     reg.push(super::registry::BlockRegistration {
         block_type: "json_decode",
         display_name: "JSON Decode",
         category: "Serde",
+        tags: &["communication", "bytes-input", "float-output", "stateless"],
         create_from_json: |_json| Ok(Box::new(JsonDecodeBlock::new())),
     });
 }

@@ -333,6 +333,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
         block_type: "state_machine",
         display_name: "State Machine",
         category: "Logic",
+        tags: &["logic", "stateful", "float-input", "float-output"],
         create_from_json: |json| {
             let cfg: StateMachineConfig =
                 serde_json::from_str(json).map_err(|e| e.to_string())?;

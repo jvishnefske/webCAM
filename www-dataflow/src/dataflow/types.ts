@@ -40,6 +40,7 @@ export interface BlockTypeInfo {
   block_type: string;
   name: string;
   category: string;
+  tags: string[];
 }
 
 /** UI-only position data for the node editor. */

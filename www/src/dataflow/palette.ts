@@ -60,7 +60,9 @@ export function showPalette(
     let lastCat = '';
 
     for (const bt of blockTypes) {
-      if (filter && !bt.name.toLowerCase().includes(lowerFilter) && !bt.block_type.toLowerCase().includes(lowerFilter)) {
+      const tags = bt.tags as string[] | undefined;
+      const matchesTags = tags?.some(t => t.toLowerCase().includes(lowerFilter)) ?? false;
+      if (filter && !bt.name.toLowerCase().includes(lowerFilter) && !bt.block_type.toLowerCase().includes(lowerFilter) && !matchesTags) {
         continue;
       }
       if (bt.category !== lastCat) {
@@ -73,6 +75,12 @@ export function showPalette(
       const item = document.createElement('div');
       item.className = 'df-palette-item';
       item.textContent = bt.name;
+      if (tags && tags.length > 0) {
+        const tagSpan = document.createElement('span');
+        tagSpan.className = 'text-[9px] text-text-dim ml-1';
+        tagSpan.textContent = tags.slice(0, 3).join(' \u00b7 ');
+        item.appendChild(tagSpan);
+      }
       item.addEventListener('click', () => {
         const config = DEFAULT_CONFIGS[bt.block_type] ?? {};
         mgr.addBlock(bt.block_type, config, worldX, worldY);

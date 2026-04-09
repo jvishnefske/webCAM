@@ -173,6 +173,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
         block_type: "gain",
         display_name: "Gain",
         category: "Math",
+        tags: &["math", "float-input", "float-output", "stateless"],
         create_from_json: |json| {
             let cfg: FunctionConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
             Ok(Box::new(FunctionBlock::from_config(cfg)))
@@ -182,18 +183,21 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
         block_type: "add",
         display_name: "Add",
         category: "Math",
+        tags: &["math", "float-input", "float-output", "stateless"],
         create_from_json: |_json| Ok(Box::new(FunctionBlock::add())),
     });
     reg.push(super::registry::BlockRegistration {
         block_type: "multiply",
         display_name: "Multiply",
         category: "Math",
+        tags: &["math", "float-input", "float-output", "stateless"],
         create_from_json: |_json| Ok(Box::new(FunctionBlock::multiply())),
     });
     reg.push(super::registry::BlockRegistration {
         block_type: "clamp",
         display_name: "Clamp",
         category: "Math",
+        tags: &["math", "float-input", "float-output", "stateless"],
         create_from_json: |json| {
             let cfg: FunctionConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
             Ok(Box::new(FunctionBlock::from_config(cfg)))
