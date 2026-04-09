@@ -1,6 +1,7 @@
 /** Dataflow mode: wires up the graph manager, editor, and plot display. */
 
-import { dataflow_codegen, dataflow_codegen_multi } from '../../pkg/rustsim.js';
+import { dataflow_codegen, dataflow_codegen_multi, dataflow_block_schema } from '../../pkg/rustsim.js';
+import { renderSchemaForm } from './schema-form.js';
 import { $, $btn, $input } from '../dom.js';
 import { DataflowManager } from './graph.js';
 import { DataflowEditor } from './editor.js';
@@ -395,57 +396,42 @@ function updateBlockInfo(blockId: number | null, snap: GraphSnapshot | null): vo
     infoEl.appendChild(valDiv);
   }
 
-  // Config section
-  const configKeys = Object.keys(block.config ?? {});
-  if (configKeys.length > 0) {
-    const configDiv = document.createElement('div');
-    configDiv.className = 'mt-2 text-xs';
-    const configLabel = document.createElement('b');
-    configLabel.textContent = 'Config';
-    configDiv.appendChild(configLabel);
+  // Config section — schema-driven form
+  try {
+    const schemaJson = dataflow_block_schema(block.block_type);
+    const schema = JSON.parse(schemaJson);
+    if (schema.properties) {
+      const configDiv = document.createElement('div');
+      configDiv.className = 'mt-2 text-xs';
+      const configLabel = document.createElement('b');
+      configLabel.textContent = 'Config';
+      configDiv.appendChild(configLabel);
 
-    const inputs: Record<string, HTMLInputElement> = {};
-    for (const key of configKeys) {
-      const row = document.createElement('div');
-      row.className = 'mt-1';
-      const label = document.createElement('label');
-      label.className = 'block text-text-dim text-[11px]';
-      label.textContent = key;
-      row.appendChild(label);
-      const input = document.createElement('input');
-      const val = block.config[key];
-      if (typeof val === 'number') {
-        input.type = 'number';
-        input.step = 'any';
-        input.value = String(val);
-      } else {
-        input.type = 'text';
-        input.value = String(val ?? '');
-      }
-      input.className = 'w-full bg-bg border border-border rounded text-text text-xs px-2 py-1 mt-0.5 outline-none';
-      row.appendChild(input);
-      configDiv.appendChild(row);
-      inputs[key] = input;
+      const formContainer = document.createElement('div');
+      formContainer.className = 'mt-1';
+
+      let currentConfig = { ...(block.config as Record<string, unknown>) };
+
+      renderSchemaForm(formContainer, schema, currentConfig, (updated) => {
+        currentConfig = updated;
+      });
+      configDiv.appendChild(formContainer);
+
+      const applyBtn = document.createElement('button');
+      applyBtn.className = 'btn btn-primary btn-sm mt-2';
+      applyBtn.textContent = 'Apply';
+      applyBtn.addEventListener('click', () => {
+        if (!mgr || !editor) return;
+        mgr.updateBlock(blockId, block.block_type, currentConfig as Record<string, unknown>);
+        const newSnap = mgr.snapshot();
+        editor.updateSnapshot();
+        updateBlockInfo(blockId, newSnap);
+      });
+      configDiv.appendChild(applyBtn);
+      infoEl.appendChild(configDiv);
     }
-
-    const applyBtn = document.createElement('button');
-    applyBtn.className = 'btn btn-primary btn-sm mt-2';
-    applyBtn.textContent = 'Apply';
-    applyBtn.addEventListener('click', () => {
-      if (!mgr || !editor) return;
-      const newConfig: Record<string, unknown> = {};
-      for (const key of configKeys) {
-        const raw = inputs[key].value;
-        const origVal = block.config[key];
-        newConfig[key] = typeof origVal === 'number' ? parseFloat(raw) || 0 : raw;
-      }
-      mgr.updateBlock(blockId, block.block_type, newConfig);
-      const newSnap = mgr.snapshot();
-      editor.updateSnapshot();
-      updateBlockInfo(blockId, newSnap);
-    });
-    configDiv.appendChild(applyBtn);
-    infoEl.appendChild(configDiv);
+  } catch {
+    // Fallback: if schema fails, skip config section
   }
 
   // Delete block button
