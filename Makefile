@@ -144,4 +144,4 @@ embed-assets: dag-frontend ## Gzip frontend assets and generate Rust source
 	bash tools/embed-assets.sh
 	
 require-safe: ## Verify no unsafe code in application crates (excludes HAL/embassy patches)
-	! git grep -l 'unsafe ' -- 'crates/*/src/**/*.rs' 'mlir-codegen/src/**/*.rs' 'module-traits/src/**/*.rs' 'dag-core/src/**/*.rs' 'dag-runtime/src/**/*.rs' 'configurable-blocks/src/**/*.rs' 'pubsub/src/**/*.rs' 'parser/src/**/*.rs' ':!**/test*'
+	GIT_PAGER=cat git grep -l 'unsafe ' -- 'crates/*/src/**/*.rs' 'mlir-codegen/src/**/*.rs' 'module-traits/src/**/*.rs' 'dag-core/src/**/*.rs' 'dag-runtime/src/**/*.rs' 'configurable-blocks/src/**/*.rs' 'pubsub/src/**/*.rs' 'parser/src/**/*.rs' ':!**/test*'
