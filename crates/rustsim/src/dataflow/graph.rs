@@ -43,6 +43,29 @@ pub struct GraphSnapshot {
     pub time: f64,
 }
 
+/// Migrate v1 state machine channels: shift incoming port indices by +1
+/// to account for the new `state_in` port at index 0.
+///
+/// Old layout (pre-Phase-3): guard_0 was at port 0.
+/// New layout (Phase-3+):    state_in is at port 0, guard_0 is at port 1.
+///
+/// Call this once when deserializing a saved `GraphSnapshot` that may have
+/// been produced before the `state_in` port was added.
+pub fn migrate_state_machine_ports(snap: &mut GraphSnapshot) {
+    let sm_block_ids: std::collections::HashSet<u32> = snap
+        .blocks
+        .iter()
+        .filter(|b| b.block_type == "state_machine")
+        .map(|b| b.id)
+        .collect();
+
+    for ch in &mut snap.channels {
+        if sm_block_ids.contains(&ch.to_block.0) {
+            ch.to_port += 1;
+        }
+    }
+}
+
 pub struct DataflowGraph {
     blocks: HashMap<BlockId, Box<dyn Module>>,
     channels: Vec<Channel>,
@@ -893,5 +916,146 @@ mod tests {
         let result = g.connect(c, 0, BlockId(999), 0);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("destination block not found"));
+    }
+
+    // ── migrate_state_machine_ports tests ────────────────────────────
+
+    /// Helper: build a minimal BlockSnapshot for testing migration.
+    fn make_block_snap(id: u32, block_type: &str) -> BlockSnapshot {
+        BlockSnapshot {
+            id,
+            block_type: block_type.to_string(),
+            name: block_type.to_string(),
+            inputs: vec![],
+            outputs: vec![],
+            config: serde_json::Value::Null,
+            output_values: vec![],
+            target: None,
+            custom_codegen: None,
+            is_delay: false,
+        }
+    }
+
+    /// Helper: build a Channel directly (bypasses graph validation).
+    fn make_channel(id: u32, from_block: u32, from_port: usize, to_block: u32, to_port: usize) -> Channel {
+        Channel {
+            id: super::super::channel::ChannelId(id),
+            from_block: BlockId(from_block),
+            from_port,
+            to_block: BlockId(to_block),
+            to_port,
+        }
+    }
+
+    #[test]
+    fn migrate_shifts_sm_input_ports() {
+        // Old-style: channel goes to port 0 of a state_machine block.
+        // After migration, to_port should be 1 (guard_0 shifted by +1 for state_in at 0).
+        let mut snap = GraphSnapshot {
+            blocks: vec![
+                make_block_snap(1, "constant"),
+                make_block_snap(2, "state_machine"),
+            ],
+            channels: vec![make_channel(1, 1, 0, 2, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        super::migrate_state_machine_ports(&mut snap);
+
+        assert_eq!(snap.channels[0].to_port, 1, "to_port should be shifted from 0 to 1");
+    }
+
+    #[test]
+    fn migrate_ignores_non_sm_blocks() {
+        // Channel connects to a gain block (not state_machine) — should not be shifted.
+        let mut snap = GraphSnapshot {
+            blocks: vec![
+                make_block_snap(1, "constant"),
+                make_block_snap(2, "gain"),
+            ],
+            channels: vec![make_channel(1, 1, 0, 2, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        super::migrate_state_machine_ports(&mut snap);
+
+        assert_eq!(snap.channels[0].to_port, 0, "non-SM channel should not be shifted");
+    }
+
+    #[test]
+    fn migrate_shifts_multiple_channels() {
+        // Multiple channels all pointing to the same SM block, each at different ports.
+        let mut snap = GraphSnapshot {
+            blocks: vec![
+                make_block_snap(1, "constant"),
+                make_block_snap(2, "constant"),
+                make_block_snap(3, "constant"),
+                make_block_snap(4, "state_machine"),
+            ],
+            channels: vec![
+                make_channel(1, 1, 0, 4, 0), // guard_0 was at port 0
+                make_channel(2, 2, 0, 4, 1), // guard_1 was at port 1
+                make_channel(3, 3, 0, 4, 2), // guard_2 was at port 2
+            ],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        super::migrate_state_machine_ports(&mut snap);
+
+        assert_eq!(snap.channels[0].to_port, 1, "guard_0 should shift to port 1");
+        assert_eq!(snap.channels[1].to_port, 2, "guard_1 should shift to port 2");
+        assert_eq!(snap.channels[2].to_port, 3, "guard_2 should shift to port 3");
+    }
+
+    #[test]
+    fn migrate_no_sm_blocks_is_noop() {
+        // Graph with no state_machine blocks: channels unchanged.
+        let mut snap = GraphSnapshot {
+            blocks: vec![
+                make_block_snap(1, "constant"),
+                make_block_snap(2, "gain"),
+                make_block_snap(3, "register"),
+            ],
+            channels: vec![
+                make_channel(1, 1, 0, 2, 0),
+                make_channel(2, 2, 0, 3, 0),
+            ],
+            tick_count: 5,
+            time: 0.05,
+        };
+
+        super::migrate_state_machine_ports(&mut snap);
+
+        // Nothing should change
+        assert_eq!(snap.channels[0].to_port, 0);
+        assert_eq!(snap.channels[1].to_port, 0);
+        assert_eq!(snap.tick_count, 5);
+    }
+
+    #[test]
+    fn migrate_mixed_sm_and_non_sm() {
+        // Mixed graph: one channel to SM (should shift), one to gain (should not).
+        let mut snap = GraphSnapshot {
+            blocks: vec![
+                make_block_snap(1, "constant"),
+                make_block_snap(2, "constant"),
+                make_block_snap(3, "state_machine"),
+                make_block_snap(4, "gain"),
+            ],
+            channels: vec![
+                make_channel(1, 1, 0, 3, 0), // to SM → shifts
+                make_channel(2, 2, 0, 4, 0), // to gain → unchanged
+            ],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        super::migrate_state_machine_ports(&mut snap);
+
+        assert_eq!(snap.channels[0].to_port, 1, "SM channel should shift");
+        assert_eq!(snap.channels[1].to_port, 0, "gain channel should not shift");
     }
 }

@@ -265,3 +265,96 @@ fn simulation_mode_produces_real_values() {
     let gpio_out2 = output_value_by_id(&graph, gpio_in.0, 0);
     assert_eq!(gpio_out2, Some(Value::Float(0.0)));
 }
+
+// ── task-007: Register + StateMachine feedback loop ──────────────
+
+/// End-to-end test: Register(z⁻¹) feeds state into StateMachine, which
+/// outputs next_state back into Register, forming a feedback loop.
+///
+/// Topology:
+///   trigger(1.0) ──→ sm.guard_0  (port 1, after state_in at port 0)
+///   register.out ──→ sm.state_in (port 0)
+///   sm.next_state ──→ register.in
+///
+/// StateMachine config:
+///   states: ["idle", "running"]
+///   idle → running when guard_0 > 0.5 (unconditionally true here)
+///
+/// Expected tick-by-tick behavior:
+///   Tick 1: register outputs 0.0 (initial=idle). SM receives state_in=0 (idle),
+///           guard_0=1.0 → transitions to running (next_state=1.0).
+///           Register stores 1.0 (SM output from this tick).
+///   Tick 2: register outputs 1.0 (stored from tick 1 = running).
+///           SM receives state_in=1 (running). No transition from running defined.
+///           next_state stays 1.0 (running).
+///   Tick 3: Same — stays in running state.
+#[test]
+fn register_state_machine_feedback_loop() {
+    let mut graph = DataflowGraph::new();
+
+    // State machine: idle → running when guard_0 is high
+    let sm_config = r#"{
+        "states": ["idle", "running"],
+        "initial": "idle",
+        "transitions": [
+            { "from": "idle", "to": "running", "guard": { "type": "GuardPort", "port": 0 } }
+        ]
+    }"#;
+    let sm = add(&mut graph, "state_machine", sm_config);
+
+    // Constant trigger: guard_0 always high (port 1 of SM after migration)
+    let trigger = add(&mut graph, "constant", r#"{"value": 1.0}"#);
+
+    // Register: holds the SM next_state output and feeds it back as state_in
+    let register = add(&mut graph, "register", r#"{"initial_value": 0.0}"#);
+
+    // Wire: register.out → sm.state_in (port 0)
+    graph.connect(register, 0, sm, 0).unwrap();
+    // Wire: trigger → sm.guard_0 (port 1 — the new layout with state_in at 0)
+    graph.connect(trigger, 0, sm, 1).unwrap();
+    // Wire: sm.next_state (port 0) → register.in (feedback)
+    graph.connect(sm, 0, register, 0).unwrap();
+
+    // Tick 1:
+    // Register(init=0) outputs 0.0 → SM state_in=0 (idle).
+    // trigger outputs 1.0 → guard_0 = 1.0 > 0.5 → transition idle→running.
+    // SM next_state = 1.0. Register stores 1.0.
+    graph.tick(0.01);
+    let sm_next_state = output_value_by_id(&graph, sm.0, 0);
+    assert_eq!(
+        sm_next_state,
+        Some(Value::Float(1.0)),
+        "Tick 1: SM should transition idle→running (next_state=1.0)"
+    );
+
+    // active_idle (port 1) should be 0.0, active_running (port 2) should be 1.0
+    let active_idle = output_value_by_id(&graph, sm.0, 1);
+    let active_running = output_value_by_id(&graph, sm.0, 2);
+    assert_eq!(active_idle, Some(Value::Float(0.0)), "Tick 1: active_idle=0");
+    assert_eq!(active_running, Some(Value::Float(1.0)), "Tick 1: active_running=1");
+
+    // Tick 2:
+    // Register outputs 1.0 (stored from tick 1) → SM state_in=1 (running).
+    // No transition from running defined → stays in running.
+    // SM next_state = 1.0.
+    graph.tick(0.01);
+    let sm_next_state2 = output_value_by_id(&graph, sm.0, 0);
+    assert_eq!(
+        sm_next_state2,
+        Some(Value::Float(1.0)),
+        "Tick 2: SM should stay in running (next_state=1.0)"
+    );
+
+    let active_running2 = output_value_by_id(&graph, sm.0, 2);
+    assert_eq!(active_running2, Some(Value::Float(1.0)), "Tick 2: active_running=1");
+
+    // Tick 3: still running
+    graph.tick(0.01);
+    let sm_next_state3 = output_value_by_id(&graph, sm.0, 0);
+    assert_eq!(
+        sm_next_state3,
+        Some(Value::Float(1.0)),
+        "Tick 3: SM should remain in running"
+    );
+    assert_eq!(graph.snapshot().tick_count, 3);
+}
