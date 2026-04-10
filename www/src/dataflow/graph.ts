@@ -4,8 +4,9 @@ import {
   dataflow_new, dataflow_destroy, dataflow_add_block, dataflow_remove_block,
   dataflow_update_block, dataflow_connect, dataflow_disconnect, dataflow_advance,
   dataflow_run, dataflow_set_speed, dataflow_snapshot, dataflow_block_types,
+  dataflow_function_defs, mcu_families, mcu_definition, mcu_pins, mcu_peripherals,
 } from '../../pkg/rustsim.js';
-import type { GraphSnapshot, BlockTypeInfo, NodePosition } from './types.js';
+import type { GraphSnapshot, BlockTypeInfo, NodePosition, FunctionDef, McuDef } from './types.js';
 import type { TelemetryPublisher } from './telemetry.js';
 import type { SavedProject } from './storage.js';
 
@@ -128,5 +129,31 @@ export class DataflowManager {
 
   static blockTypes(): BlockTypeInfo[] {
     return JSON.parse(dataflow_block_types());
+  }
+
+  /** Get the full function definition registry from WASM.
+   *  This is the single source of truth for all block schemas. */
+  static functionDefs(): FunctionDef[] {
+    return dataflow_function_defs();
+  }
+
+  /** List supported MCU target families. */
+  static mcuFamilies(): string[] {
+    return mcu_families();
+  }
+
+  /** Get the full MCU definition for a target family (pins, peripherals, etc). */
+  static mcuDefinition(family: string): McuDef {
+    return mcu_definition(family);
+  }
+
+  /** Get just the pin definitions for a target family. */
+  static mcuPins(family: string): import('./types.js').PinDef[] {
+    return mcu_pins(family);
+  }
+
+  /** Get peripheral instances for a target family. */
+  static mcuPeripherals(family: string): import('./types.js').PeripheralInst[] {
+    return mcu_peripherals(family);
   }
 }

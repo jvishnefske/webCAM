@@ -322,6 +322,16 @@ impl IrBuilder {
         )[0]
     }
 
+    /// Emit select: result = cond > 0 ? a : b.
+    pub fn select(&mut self, cond: ValueId, a: ValueId, b: ValueId) -> ValueId {
+        self.typed_op(
+            IrOpKind::Arith(ArithOp::Select),
+            &[cond, a, b],
+            &[],
+            1,
+        )[0]
+    }
+
     // ── Hardware I/O ops ───────────────────────────────────────────
 
     /// ADC read: result = hw.adc_read(channel).

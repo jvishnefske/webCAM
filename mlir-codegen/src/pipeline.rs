@@ -351,7 +351,7 @@ mod tests {
     fn lower_only_produces_mlir() {
         let snap = simple_graph();
         let output = lower_only(&snap).unwrap();
-        assert!(output.mlir_text.contains("dataflow.constant"));
+        assert!(output.mlir_text.contains("arith.constant"));
         assert!(output.mlir_optimized.is_none());
         assert!(output.c_source.is_none());
     }

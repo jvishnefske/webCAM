@@ -173,6 +173,7 @@ impl Tick for PubSubSourceBlock {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
     reg.push(super::registry::BlockRegistration {
         block_type: "pubsub_sink",

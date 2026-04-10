@@ -138,7 +138,7 @@ mod tests {
             "time": 0.0
         }"#;
         let mlir = graph_json_to_mlir(json).unwrap();
-        assert!(mlir.contains("dataflow.constant"));
+        assert!(mlir.contains("arith.constant"));
         assert!(mlir.contains("99"));
         assert!(mlir.contains("func.func @tick"));
     }
@@ -171,7 +171,7 @@ mod tests {
             time: 0.0,
         };
         let output = compile_to_c(&snap).unwrap();
-        assert!(output.mlir_text.contains("dataflow.constant"));
+        assert!(output.mlir_text.contains("arith.constant"));
     }
 
     #[test]
@@ -365,11 +365,11 @@ mod tests {
         };
         let output = compile_to_c(&snap).unwrap();
         assert!(
-            output.mlir_text.contains("dataflow.constant"),
+            output.mlir_text.contains("arith.constant"),
             "MLIR should contain constant op"
         );
         assert!(
-            output.mlir_text.contains("dataflow.gain"),
+            output.mlir_text.contains("arith.mulf"),
             "MLIR should contain gain op"
         );
         assert!(

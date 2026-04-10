@@ -5,7 +5,7 @@ import { $, $btn, $input } from '../dom.js';
 import { DataflowManager } from './graph.js';
 import { DataflowEditor } from './editor.js';
 import { drawPlot } from './plot.js';
-import { DEFAULT_CONFIGS } from './palette.js';
+import { DEFAULT_CONFIGS, initDefaultConfigs } from './palette.js';
 import { createZip } from './zip.js';
 import { HilClient } from './hil-client.js';
 import { renderPinTable } from './pin-table.js';
@@ -32,6 +32,14 @@ let triggerAutoSave: (() => void) | null = null;
 let telemetry: TelemetryPublisher | null = null;
 
 export function initDataflow(): void {
+  // Initialize default configs from WASM function def schema
+  try {
+    const defs = DataflowManager.functionDefs();
+    initDefaultConfigs(defs);
+  } catch (_) {
+    // Fall back to legacy hardcoded configs if WASM API not available
+  }
+
   mgr = new DataflowManager(0.01);
   const container = $('dataflow-workspace') as HTMLDivElement;
   editor = new DataflowEditor(container, mgr);

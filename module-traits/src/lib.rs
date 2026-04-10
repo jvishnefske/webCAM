@@ -17,6 +17,7 @@ extern crate alloc;
 pub mod analysis;
 pub mod codegen_trait;
 pub mod deployment;
+pub mod function_def;
 pub mod hardware;
 pub mod inventory;
 pub mod module;
@@ -26,6 +27,9 @@ pub mod value;
 
 pub use analysis::{AnalysisMetadata, AnalysisModel};
 pub use codegen_trait::Codegen;
+pub use function_def::{
+    FuncPortDef, FunctionDef, FunctionOp, ParamDef, ParamKind, builtin_function_defs,
+};
 pub use module::Module;
 pub use sim::{SimModel, SimPeripherals};
 pub use tick::Tick;
