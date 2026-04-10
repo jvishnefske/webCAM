@@ -13,7 +13,6 @@
 //! - [`dialect`] — MLIR op names, type strings, attribute formatting
 //! - [`c_types`] — PortKind → C type mapping
 //! - [`lower`] — GraphSnapshot → `.mlir` text generation
-//! - [`state_machine`] — FSM blocks → MLIR region-based control flow
 //! - [`peripherals`] — Generate safe Rust state modules
 //! - [`pipeline`] — Orchestrate mlir-opt → mlir-translate pipeline
 
@@ -26,7 +25,6 @@ pub mod peripherals;
 pub mod pipeline;
 pub mod printer;
 pub mod runtime;
-pub mod state_machine;
 
 use lower::GraphSnapshot;
 
@@ -165,6 +163,7 @@ mod tests {
                 config: serde_json::json!({"value": 1.0}),
                 output_values: vec![],
                 custom_codegen: None,
+                is_delay: false,
             }],
             channels: vec![],
             tick_count: 0,
@@ -264,6 +263,7 @@ mod tests {
                 config: serde_json::json!({"value": 1.0}),
                 output_values: vec![],
                 custom_codegen: None,
+                is_delay: false,
             }],
             channels: vec![],
             tick_count: 0,
@@ -335,6 +335,7 @@ mod tests {
                     config: serde_json::json!({"value": 5.0}),
                     output_values: vec![],
                     custom_codegen: None,
+                    is_delay: false,
                 },
                 lower::BlockSnapshot {
                     id: 2,
@@ -351,6 +352,7 @@ mod tests {
                     config: serde_json::json!({"param1": 2.0}),
                     output_values: vec![],
                     custom_codegen: None,
+                    is_delay: false,
                 },
             ],
             channels: vec![lower::Channel {

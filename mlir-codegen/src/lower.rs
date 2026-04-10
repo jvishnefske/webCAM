@@ -5,7 +5,7 @@
 //! `mlir_op` mappings so the lowerer can resolve block types to MLIR ops
 //! from the schema rather than hardcoding them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use module_traits::function_def::{builtin_function_defs, FunctionDef};
@@ -13,7 +13,6 @@ use module_traits::value::PortKind;
 use serde_json::Value as JsonValue;
 
 use crate::dialect;
-use crate::state_machine;
 
 /// Look up a [`FunctionDef`] by block type id.
 fn lookup_function_def(block_type: &str) -> Option<FunctionDef> {
@@ -42,6 +41,8 @@ pub struct BlockSnapshot {
     pub output_values: Vec<Option<JsonValue>>,
     #[serde(default)]
     pub custom_codegen: Option<String>,
+    #[serde(default)]
+    pub is_delay: bool,
 }
 
 /// Mirrors `PortDef` from module-traits.
@@ -94,7 +95,11 @@ fn is_skipped(bt: &str) -> bool {
 // Topological sort (inlined — same Kahn's algorithm as topo.rs)
 // ---------------------------------------------------------------------------
 
-fn topological_sort(block_ids: &[BlockId], channels: &[Channel]) -> Result<Vec<BlockId>, String> {
+fn topological_sort(
+    block_ids: &[BlockId],
+    channels: &[Channel],
+    delay_blocks: &HashSet<BlockId>,
+) -> Result<Vec<BlockId>, String> {
     use std::collections::VecDeque;
 
     let mut in_degree: HashMap<BlockId, usize> = block_ids.iter().map(|&id| (id, 0)).collect();
@@ -103,6 +108,9 @@ fn topological_sort(block_ids: &[BlockId], channels: &[Channel]) -> Result<Vec<B
 
     for ch in channels {
         if in_degree.contains_key(&ch.from_block) && in_degree.contains_key(&ch.to_block) {
+            if delay_blocks.contains(&ch.to_block) {
+                continue;
+            }
             *in_degree.entry(ch.to_block).or_insert(0) += 1;
             adj.entry(ch.from_block).or_default().push(ch.to_block);
         }
@@ -203,7 +211,8 @@ fn config_str<'a>(block: &'a BlockSnapshot, key: &str) -> &'a str {
 /// 3. Each block emitted as dataflow dialect ops in topological order
 pub fn lower_graph(snap: &GraphSnapshot) -> Result<String, String> {
     let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let sorted = topological_sort(&block_ids, &snap.channels)?;
+    let no_delays = HashSet::new();
+    let sorted = topological_sort(&block_ids, &snap.channels, &no_delays)?;
     let block_map: HashMap<u32, &BlockSnapshot> = snap.blocks.iter().map(|b| (b.id, b)).collect();
 
     // Collect state slots: each non-skipped block output needs a state memref index.
@@ -232,14 +241,6 @@ pub fn lower_graph(snap: &GraphSnapshot) -> Result<String, String> {
     writeln!(out).unwrap();
     writeln!(out, "module {{").unwrap();
     writeln!(out).unwrap();
-
-    // Emit state machine type declarations (before the tick function)
-    for &BlockId(id) in &sorted {
-        let block = block_map[&id];
-        if block.block_type == "state_machine" {
-            state_machine::emit_state_machine_type(&mut out, block)?;
-        }
-    }
 
     // Tick function
     writeln!(
@@ -289,7 +290,23 @@ pub fn lower_graph(snap: &GraphSnapshot) -> Result<String, String> {
             "tmc2209_stepper" => emit_stepper(&mut out, id, block, &inputs)?,
             "tmc2209_stallguard" => emit_stallguard(&mut out, id, block)?,
             "state_machine" => {
-                state_machine::emit_state_machine_tick(&mut out, id, block, &inputs)?
+                // Emit as pure function call (state machine is now stateless)
+                let n_out = block.outputs.len();
+                let result_names: Vec<String> = (0..n_out).map(|p| dialect::ssa_name(id, p)).collect();
+                let result_name_str = result_names.join(", ");
+                let result_types: Vec<&str> = (0..n_out).map(|_| "f64").collect();
+                let result_type_str = result_types.join(", ");
+                let args = inputs.join(", ");
+                writeln!(out, "    {result_name_str} = func.call @block_{id}({args}) : ({result_type_str}) -> ({result_type_str})").unwrap();
+            }
+            "register" => {
+                let ssa = dialect::ssa_name(id, 0);
+                let initial = block.config.get("initial_value")
+                    .and_then(|v| v.as_f64()).unwrap_or(0.0);
+                writeln!(out, "    {ssa} = dataflow.delay {initial} : f64").unwrap();
+                if let Some(input) = inputs.first() {
+                    writeln!(out, "    dataflow.delay_store {input}, {ssa} : f64").unwrap();
+                }
             }
             "pubsub_sink" => emit_pubsub_sink(&mut out, id, block, &inputs)?,
             "pubsub_source" => emit_pubsub_source(&mut out, id, block)?,
@@ -757,7 +774,8 @@ fn resolve_inputs_ir(
 /// This is the typed replacement for [`lower_graph()`] (which produces string MLIR).
 pub fn lower_graph_ir(snap: &GraphSnapshot) -> Result<IrModule, String> {
     let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let sorted = topological_sort(&block_ids, &snap.channels)?;
+    let no_delays = HashSet::new();
+    let sorted = topological_sort(&block_ids, &snap.channels, &no_delays)?;
     let block_map: HashMap<u32, &BlockSnapshot> = snap.blocks.iter().map(|b| (b.id, b)).collect();
 
     let mut builder = IrBuilder::new();
@@ -936,6 +954,7 @@ mod tests {
             config,
             output_values: vec![],
             custom_codegen: None,
+            is_delay: false,
         }
     }
 
