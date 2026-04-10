@@ -11,6 +11,7 @@ pub mod embedded;
 pub mod function;
 pub mod plot;
 pub mod pubsub;
+pub mod register;
 pub mod registry;
 pub mod serde_block;
 pub mod state_machine;
@@ -26,6 +27,7 @@ fn legacy_registrations() -> Vec<BlockRegistration> {
     // Only register block types that are NOT covered by FunctionDef.
     // Legacy blocks: embedded peripherals (need SimModel), state_machine, udp
     embedded::register(&mut reg);
+    register::register(&mut reg);
     state_machine::register(&mut reg);
     udp::register(&mut reg);
     reg

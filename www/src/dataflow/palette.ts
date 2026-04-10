@@ -32,6 +32,7 @@ const LEGACY_CONFIGS: Record<string, Record<string, unknown>> = {
   gpio_in: { pin: 2 },
   uart_tx: { port: 0, baud: 115200 },
   uart_rx: { port: 0, baud: 115200 },
+  register: { initial_value: 0 },
   state_machine: { states: ['idle'], initial: 'idle', transitions: [], input_topics: [], output_topics: [] },
   encoder: { channel: 0 },
   ssd1306_display: { i2c_bus: 0, address: 60 },
