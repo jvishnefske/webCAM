@@ -1,6 +1,6 @@
 //! The dataflow graph: owns blocks and channels, runs the tick loop.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;
@@ -28,6 +28,9 @@ pub struct BlockSnapshot {
     /// When present, emit.rs uses this instead of built-in code generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_codegen: Option<String>,
+    /// Whether this block is a delay element (z⁻¹) that breaks feedback cycles.
+    #[serde(default)]
+    pub is_delay: bool,
 }
 
 /// Snapshot of the entire graph.
@@ -224,9 +227,25 @@ impl DataflowGraph {
 
     /// Execute one simulation step.
     pub fn tick(&mut self, dt: f64) {
-        // Topological-ish execution: iterate blocks in id order (sources first).
-        let mut block_ids: Vec<BlockId> = self.blocks.keys().copied().collect();
-        block_ids.sort_by_key(|id| id.0);
+        use crate::dataflow::codegen::topo::topological_sort;
+
+        // Build set of delay blocks (z⁻¹ elements) for back-edge exclusion.
+        let delay_blocks: HashSet<BlockId> = self.blocks.iter()
+            .filter(|(_, block)| block.is_delay())
+            .map(|(&id, _)| id)
+            .collect();
+
+        // Topological sort for correct evaluation order.
+        let all_ids: Vec<BlockId> = self.blocks.keys().copied().collect();
+        let block_ids = match topological_sort(&all_ids, &self.channels, &delay_blocks) {
+            Ok(sorted) => sorted,
+            Err(_) => {
+                // Fallback to ID order if cycle detected (shouldn't happen with delay exclusion)
+                let mut ids = all_ids;
+                ids.sort_by_key(|id| id.0);
+                ids
+            }
+        };
 
         for &bid in &block_ids {
             let block = self.blocks.get(&bid).unwrap();
@@ -305,6 +324,7 @@ impl DataflowGraph {
                 let config =
                     serde_json::from_str(&block.config_json()).unwrap_or(serde_json::Value::Null);
                 let custom_codegen = block.as_codegen().and_then(|cg| cg.emit_rust("host").ok());
+                let is_delay = block.is_delay();
                 BlockSnapshot {
                     id,
                     block_type: block.block_type().to_string(),
@@ -315,6 +335,7 @@ impl DataflowGraph {
                     output_values,
                     target: None,
                     custom_codegen,
+                    is_delay,
                 }
             })
             .collect();
@@ -450,6 +471,7 @@ mod tests {
             output_values: vec![Some(Value::Float(42.0))],
             target: Some(TargetFamily::Rp2040),
             custom_codegen: None,
+            is_delay: false,
         };
 
         let json = serde_json::to_string(&snap).unwrap();
@@ -472,6 +494,7 @@ mod tests {
             output_values: vec![None],
             target: None,
             custom_codegen: None,
+            is_delay: false,
         };
 
         let json = serde_json::to_string(&snap).unwrap();
@@ -707,6 +730,136 @@ mod tests {
         let snap = g.snapshot();
         let gs = snap.blocks.iter().find(|b| b.id == gain.0).unwrap();
         assert_eq!(gs.output_values[0].as_ref().unwrap().as_float(), Some(12.0));
+    }
+
+    #[test]
+    fn tick_with_register_feedback_loop() {
+        // Create: Constant(5.0) → Gain(2.0) → Register(init=0) → Gain
+        // This forms a feedback loop through the Register delay block.
+        // The topo sort should handle the cycle via delay-block back-edge exclusion.
+        //
+        // Tick 1: Register outputs 0.0 (initial), Gain outputs 0.0, Constant outputs 5.0
+        // Tick 2: Register outputs 0.0 (stored from Gain tick 1), Gain receives Register=0.0 + routed...
+        //
+        // Simplified test: Constant → Register → Gain, verify no panic and correct propagation.
+        use crate::dataflow::blocks::register::{RegisterBlock, RegisterConfig};
+
+        let mut g = DataflowGraph::new();
+        let constant = g.add_block(Box::new(ConstantBlock::new(5.0)));
+        let register = g.add_block(Box::new(RegisterBlock::new(RegisterConfig {
+            initial_value: 0.0,
+        })));
+        let gain = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+
+        // Constant → Register → Gain, with Gain output feeding back into Register
+        // But since each input port can only have one connection, we wire:
+        // Constant(out) → Register(in), Register(out) → Gain(in)
+        g.connect(constant, 0, register, 0).unwrap();
+        g.connect(register, 0, gain, 0).unwrap();
+
+        // First tick: Register outputs initial value 0.0, Gain gets 0.0 → outputs 0.0
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let reg_snap = snap.blocks.iter().find(|b| b.id == register.0).unwrap();
+        assert_eq!(
+            reg_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(0.0),
+            "Register should output initial value on first tick"
+        );
+
+        // Second tick: Register stored 5.0 from Constant, outputs 5.0; Gain gets 5.0 → outputs 10.0
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let reg_snap = snap.blocks.iter().find(|b| b.id == register.0).unwrap();
+        assert_eq!(
+            reg_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(5.0),
+            "Register should output stored value (5.0) on second tick"
+        );
+        let gain_snap = snap.blocks.iter().find(|b| b.id == gain.0).unwrap();
+        assert_eq!(
+            gain_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(10.0),
+            "Gain should output 2.0 * 5.0 = 10.0 on second tick"
+        );
+    }
+
+    #[test]
+    fn tick_with_true_feedback_cycle() {
+        // Create a true feedback cycle: Register → Gain → Register
+        // This would be a cycle without delay-block exclusion.
+        // With the Register as a delay block, topo sort breaks the cycle.
+        //
+        // Execution order (topo sort): Register first, then Gain.
+        // Register is z⁻¹: outputs previous stored value, then stores new input.
+        //
+        // Tick 1: Register outputs 1.0 (initial), no input yet from Gain (no prior output).
+        //         Gain receives 1.0, outputs 3.0.
+        // Tick 2: Register reads Gain's previous output (3.0), outputs 1.0 (stored from init),
+        //         stores 3.0. Gain receives 1.0, outputs 3.0.
+        // Tick 3: Register reads Gain's previous output (3.0), outputs 3.0 (stored from tick 2),
+        //         stores 3.0. Gain receives 3.0, outputs 9.0.
+        use crate::dataflow::blocks::register::{RegisterBlock, RegisterConfig};
+
+        let mut g = DataflowGraph::new();
+        let register = g.add_block(Box::new(RegisterBlock::new(RegisterConfig {
+            initial_value: 1.0,
+        })));
+        let gain = g.add_block(Box::new(FunctionBlock::gain(3.0)));
+
+        // Register(out) → Gain(in), Gain(out) → Register(in)
+        g.connect(register, 0, gain, 0).unwrap();
+        g.connect(gain, 0, register, 0).unwrap();
+
+        // Tick 1: Register outputs 1.0 (initial), Gain gets 1.0 → outputs 3.0
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let reg_snap = snap.blocks.iter().find(|b| b.id == register.0).unwrap();
+        assert_eq!(
+            reg_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(1.0),
+            "Register should output initial value 1.0"
+        );
+        let gain_snap = snap.blocks.iter().find(|b| b.id == gain.0).unwrap();
+        assert_eq!(
+            gain_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(3.0),
+            "Gain should output 3.0 * 1.0 = 3.0"
+        );
+
+        // Tick 2: Register reads Gain(3.0) from tick 1, outputs stored 1.0, stores 3.0.
+        //         Gain receives Register's output 1.0, outputs 3.0.
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let reg_snap = snap.blocks.iter().find(|b| b.id == register.0).unwrap();
+        assert_eq!(
+            reg_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(1.0),
+            "Register should output 1.0 on second tick (z⁻¹ delay)"
+        );
+        let gain_snap = snap.blocks.iter().find(|b| b.id == gain.0).unwrap();
+        assert_eq!(
+            gain_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(3.0),
+            "Gain should still output 3.0 on second tick"
+        );
+
+        // Tick 3: Register reads Gain(3.0) from tick 2, outputs stored 3.0, stores 3.0.
+        //         Gain receives 3.0, outputs 9.0.
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let reg_snap = snap.blocks.iter().find(|b| b.id == register.0).unwrap();
+        assert_eq!(
+            reg_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(3.0),
+            "Register should output 3.0 on third tick"
+        );
+        let gain_snap = snap.blocks.iter().find(|b| b.id == gain.0).unwrap();
+        assert_eq!(
+            gain_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(9.0),
+            "Gain should output 3.0 * 3.0 = 9.0 on third tick"
+        );
     }
 
     #[test]

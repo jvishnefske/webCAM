@@ -184,6 +184,7 @@ mod tests {
         assert_eq!(reg.block_type(), "register");
         assert!(reg.is_delay());
         assert!(reg.as_tick().is_some());
+        assert!(reg.as_codegen().is_some());
         assert!(reg.as_analysis().is_none());
         assert!(reg.as_sim_model().is_none());
     }

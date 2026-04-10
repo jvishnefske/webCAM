@@ -48,6 +48,15 @@ pub trait Module {
     fn as_analysis(&self) -> Option<&dyn AnalysisModel> {
         None
     }
+
+    /// Whether this block is a delay element (z⁻¹).
+    ///
+    /// Delay blocks break feedback cycles in the dataflow graph. Their output
+    /// at tick N equals their input at tick N-1. The topological sort excludes
+    /// incoming edges to delay blocks so that cycles through them are allowed.
+    fn is_delay(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

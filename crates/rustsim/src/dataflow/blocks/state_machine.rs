@@ -446,7 +446,7 @@ impl Codegen for StateMachineBlock {
             code.push_str("        }\n");
         }
 
-        code.push_str("        _ => state_idx,\n    };\n");
+        code.push_str("        _ => state_idx as usize,\n    };\n");
 
         // Emit active flags
         let mut tuple_parts = vec!["next_state as f64".to_string()];

@@ -95,7 +95,7 @@ pub fn find_parallel_groups(
             .collect();
 
         let sorted_blocks =
-            super::topo::topological_sort(&component_block_ids, &component_channels)?;
+            super::topo::topological_sort(&component_block_ids, &component_channels, &HashSet::new())?;
 
         groups.push(ParallelGroup {
             blocks: sorted_blocks,

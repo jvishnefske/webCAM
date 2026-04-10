@@ -340,6 +340,7 @@ mod tests {
                 config: serde_json::json!({"value": 42.0}),
                 output_values: vec![],
                 custom_codegen: None,
+                is_delay: false,
             }],
             channels: vec![],
             tick_count: 0,
