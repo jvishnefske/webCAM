@@ -285,15 +285,61 @@ mod tests {
         assert_eq!(block.block_type(), "tmc2209_stallguard");
     }
 
+    // ── New data-driven block creation tests ──────────────────────
+
+    #[test]
+    fn create_block_subtract() {
+        let block = create_block("subtract", "{}").unwrap();
+        assert_eq!(block.block_type(), "subtract");
+        assert_eq!(block.input_ports().len(), 2);
+        assert_eq!(block.output_ports().len(), 1);
+    }
+
+    #[test]
+    fn create_block_select() {
+        let block = create_block("select", "{}").unwrap();
+        assert_eq!(block.block_type(), "select");
+        assert_eq!(block.input_ports().len(), 3);
+        assert_eq!(block.output_ports().len(), 1);
+    }
+
+    #[test]
+    fn create_block_channel_read() {
+        let block = create_block("channel_read", r#"{"channel":"adc0"}"#).unwrap();
+        assert_eq!(block.block_type(), "channel_read");
+        assert_eq!(block.input_ports().len(), 0);
+        assert_eq!(block.output_ports().len(), 1);
+    }
+
+    #[test]
+    fn create_block_channel_write() {
+        let block = create_block("channel_write", r#"{"channel":"pwm0"}"#).unwrap();
+        assert_eq!(block.block_type(), "channel_write");
+        assert_eq!(block.input_ports().len(), 1);
+        assert_eq!(block.output_ports().len(), 0);
+    }
+
     #[test]
     fn create_block_invalid_json_errors() {
-        // Exercise all map_err closures by passing invalid JSON to each block type
+        // Exercise error paths by passing invalid JSON to each block type
         let bad = "not json";
         for bt in &[
+            // Data-driven blocks
             "constant",
             "gain",
+            "add",
+            "multiply",
+            "subtract",
             "clamp",
+            "select",
+            "channel_read",
+            "channel_write",
             "plot",
+            "json_encode",
+            "json_decode",
+            "pubsub_sink",
+            "pubsub_source",
+            // Legacy blocks
             "udp_source",
             "udp_sink",
             "adc_source",
@@ -303,8 +349,6 @@ mod tests {
             "uart_tx",
             "uart_rx",
             "state_machine",
-            "pubsub_sink",
-            "pubsub_source",
             "encoder",
             "ssd1306_display",
             "tmc2209_stepper",
