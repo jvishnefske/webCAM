@@ -30,11 +30,11 @@
 //! }
 //! ```
 //!
-//! Input ports: guard ports first (`guard_0`, `guard_1`, ..., Float), then one per input_topic (Message).
-//! Output ports: `state` (Float), `active_<name>` per state (Float), then one per output_topic (Message).
+//! Input ports: `state_in` (Float), then guard ports (`guard_0`, `guard_1`, ..., Float), then one per input_topic (Message).
+//! Output ports: `next_state` (Float), `active_<name>` per state (Float), then one per output_topic (Message).
 
 use crate::dataflow::block::{
-    MessageData, MessageSchema, Module, PortDef, PortKind, Tick, Value,
+    Codegen, MessageData, MessageSchema, Module, PortDef, PortKind, Tick, Value,
 };
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;
@@ -147,20 +147,11 @@ pub struct TopicBinding {
 
 pub struct StateMachineBlock {
     pub(crate) config: StateMachineConfig,
-    pub(crate) current_state: usize,
 }
 
 impl StateMachineBlock {
     pub fn from_config(config: StateMachineConfig) -> Self {
-        let current_state = config
-            .states
-            .iter()
-            .position(|s| s == &config.initial)
-            .unwrap_or(0);
-        Self {
-            config,
-            current_state,
-        }
+        Self { config }
     }
 
     /// Number of guard ports required (max GuardPort index + 1).
@@ -236,9 +227,10 @@ impl Module for StateMachineBlock {
     }
 
     fn input_ports(&self) -> Vec<PortDef> {
-        let mut ports: Vec<PortDef> = (0..self.n_guard_ports())
-            .map(|i| PortDef::new(&format!("guard_{i}"), PortKind::Float))
-            .collect();
+        let mut ports = vec![PortDef::new("state_in", PortKind::Float)];
+        for i in 0..self.n_guard_ports() {
+            ports.push(PortDef::new(&format!("guard_{i}"), PortKind::Float));
+        }
         for binding in &self.config.input_topics {
             ports.push(PortDef::new(
                 &binding.topic,
@@ -249,7 +241,7 @@ impl Module for StateMachineBlock {
     }
 
     fn output_ports(&self) -> Vec<PortDef> {
-        let mut ports = vec![PortDef::new("state", PortKind::Float)];
+        let mut ports = vec![PortDef::new("next_state", PortKind::Float)];
         for state_name in &self.config.states {
             ports.push(PortDef::new(
                 &format!("active_{state_name}"),
@@ -272,35 +264,55 @@ impl Module for StateMachineBlock {
     fn as_tick(&mut self) -> Option<&mut dyn Tick> {
         Some(self)
     }
+
+    fn as_codegen(&self) -> Option<&dyn Codegen> {
+        Some(self)
+    }
 }
 
 impl Tick for StateMachineBlock {
     fn tick(&mut self, inputs: &[Option<&Value>], _dt: f64) -> Vec<Option<Value>> {
-        let current_name = self.config.states[self.current_state].clone();
+        // Read state_in from inputs[0], clamp to valid range.
+        let n_states = self.config.states.len();
+        let state_in = inputs
+            .first()
+            .and_then(|v| v.as_ref())
+            .and_then(|v| v.as_float())
+            .unwrap_or(0.0);
+        let current_state = (state_in as usize).min(n_states.saturating_sub(1));
+        let current_name = self.config.states[current_state].clone();
+
+        // Guard and topic inputs start at inputs[1..].
+        let guard_and_topic_inputs = if inputs.len() > 1 {
+            &inputs[1..]
+        } else {
+            &[]
+        };
 
         // Evaluate transitions from current state (first match wins).
+        let mut next_state = current_state;
         let mut fired_actions: Vec<TransitionAction> = Vec::new();
         for t in &self.config.transitions {
             if t.from != current_name {
                 continue;
             }
-            if self.check_guard(&t.guard, inputs) {
+            if self.check_guard(&t.guard, guard_and_topic_inputs) {
                 if let Some(idx) = self.config.states.iter().position(|s| s == &t.to) {
-                    self.current_state = idx;
+                    next_state = idx;
                     fired_actions = t.actions.clone();
                     break;
                 }
             }
         }
 
-        // Build outputs: state index, active flags, then output topic messages.
+        // Build outputs: next_state index, active flags, then output topic messages.
         let mut outputs: Vec<Option<Value>> =
-            Vec::with_capacity(1 + self.config.states.len() + self.config.output_topics.len());
+            Vec::with_capacity(1 + n_states + self.config.output_topics.len());
 
-        outputs.push(Some(Value::Float(self.current_state as f64)));
+        outputs.push(Some(Value::Float(next_state as f64)));
 
-        for (i, _) in self.config.states.iter().enumerate() {
-            outputs.push(Some(Value::Float(if i == self.current_state {
+        for i in 0..n_states {
+            outputs.push(Some(Value::Float(if i == next_state {
                 1.0
             } else {
                 0.0
@@ -324,6 +336,129 @@ impl Tick for StateMachineBlock {
         }
 
         outputs
+    }
+}
+
+impl Codegen for StateMachineBlock {
+    fn emit_rust(&self, _target: &str) -> Result<String, String> {
+        let states = &self.config.states;
+        let n_guard = self.n_guard_ports();
+
+        // Build parameter list: state_in, guard_0..guard_N, topic inputs
+        let mut params = vec!["state_in: f64".to_string()];
+        for i in 0..n_guard {
+            params.push(format!("guard_{i}: f64"));
+        }
+        for binding in &self.config.input_topics {
+            // Topic inputs represented as f64 for codegen (simplified)
+            params.push(format!("{}: f64", binding.topic));
+        }
+        let params_str = params.join(", ");
+
+        // Build return tuple type: (next_state, active_0, active_1, ...)
+        let n_outputs = 1 + states.len();
+        let ret_types: Vec<&str> = (0..n_outputs).map(|_| "f64").collect();
+        let ret_str = ret_types.join(", ");
+
+        let mut code = String::new();
+        code.push_str(&format!(
+            "pub fn block_state_machine({params_str}) -> ({ret_str}) {{\n"
+        ));
+        code.push_str("    let state_idx = state_in as u8;\n");
+        code.push_str("    let next_state = match state_idx {\n");
+
+        // For each state, emit match arm with transition logic
+        for (si, state_name) in states.iter().enumerate() {
+            code.push_str(&format!("        {si} => {{\n"));
+
+            // Find transitions from this state
+            let transitions: Vec<&TransitionConfig> = self
+                .config
+                .transitions
+                .iter()
+                .filter(|t| t.from == *state_name)
+                .collect();
+
+            let mut first = true;
+            for t in &transitions {
+                let target_idx = states
+                    .iter()
+                    .position(|s| s == &t.to)
+                    .unwrap_or(si);
+
+                match &t.guard {
+                    TransitionGuard::GuardPort { port } => {
+                        let kw = if first { "if" } else { "else if" };
+                        code.push_str(&format!(
+                            "            {kw} guard_{port} > 0.5 {{ {target_idx} }}\n"
+                        ));
+                        first = false;
+                    }
+                    TransitionGuard::Topic { topic, condition } => {
+                        let kw = if first { "if" } else { "else if" };
+                        match condition {
+                            Some(cond) => {
+                                let op_str = match cond.op {
+                                    CompareOp::Eq => "==",
+                                    CompareOp::Ne => "!=",
+                                    CompareOp::Gt => ">",
+                                    CompareOp::Lt => "<",
+                                    CompareOp::Ge => ">=",
+                                    CompareOp::Le => "<=",
+                                };
+                                code.push_str(&format!(
+                                    "            {kw} {topic} {op_str} {:?} {{ {target_idx} }}\n",
+                                    cond.value
+                                ));
+                            }
+                            None => {
+                                // Topic present is sufficient (simplified: non-zero check)
+                                code.push_str(&format!(
+                                    "            {kw} {topic} != 0.0 {{ {target_idx} }}\n"
+                                ));
+                            }
+                        }
+                        first = false;
+                    }
+                    TransitionGuard::Unconditional => {
+                        if first {
+                            code.push_str(&format!(
+                                "            {target_idx}\n"
+                            ));
+                        } else {
+                            code.push_str(&format!(
+                                "            else {{ {target_idx} }}\n"
+                            ));
+                        }
+                        first = false;
+                    }
+                }
+            }
+
+            if transitions.is_empty() || transitions.iter().all(|t| !matches!(t.guard, TransitionGuard::Unconditional)) {
+                if !first {
+                    code.push_str(&format!("            else {{ {si} }}\n"));
+                } else {
+                    code.push_str(&format!("            {si}\n"));
+                }
+            }
+
+            code.push_str("        }\n");
+        }
+
+        code.push_str("        _ => state_idx,\n    };\n");
+
+        // Emit active flags
+        let mut tuple_parts = vec!["next_state as f64".to_string()];
+        for (i, _) in states.iter().enumerate() {
+            tuple_parts.push(format!(
+                "if next_state == {i} {{ 1.0 }} else {{ 0.0 }}"
+            ));
+        }
+        code.push_str(&format!("    ({})\n", tuple_parts.join(", ")));
+        code.push_str("}\n");
+
+        Ok(code)
     }
 }
 
@@ -430,8 +565,10 @@ mod tests {
     #[test]
     fn legacy_initial_state() {
         let mut sm = make_legacy_sm();
-        let result = sm.tick(&[], 0.01);
-        // state=0 (idle), active_idle=1, active_running=0, active_error=0
+        let state_in = Value::Float(0.0); // idle
+        // inputs: [state_in, guard_0, guard_1]
+        let result = sm.tick(&[Some(&state_in)], 0.01);
+        // next_state=0 (idle), active_idle=1, active_running=0, active_error=0
         assert_eq!(result[0], Some(Value::Float(0.0)));
         assert_eq!(result[1], Some(Value::Float(1.0)));
         assert_eq!(result[2], Some(Value::Float(0.0)));
@@ -443,14 +580,16 @@ mod tests {
         let mut sm = make_legacy_sm();
         let high = Value::Float(1.0);
         let low = Value::Float(0.0);
+        let state_idle = Value::Float(0.0);
+        let state_running = Value::Float(1.0);
 
-        // guard_0 = high -> idle->running
-        let result = sm.tick(&[Some(&high), Some(&low)], 0.01);
+        // state_in=0 (idle), guard_0=high, guard_1=low -> idle->running
+        let result = sm.tick(&[Some(&state_idle), Some(&high), Some(&low)], 0.01);
         assert_eq!(result[0], Some(Value::Float(1.0))); // running
         assert_eq!(result[2], Some(Value::Float(1.0))); // active_running
 
-        // guard_1 = high -> running->error
-        let result = sm.tick(&[Some(&low), Some(&high)], 0.01);
+        // state_in=1 (running), guard_0=low, guard_1=high -> running->error
+        let result = sm.tick(&[Some(&state_running), Some(&low), Some(&high)], 0.01);
         assert_eq!(result[0], Some(Value::Float(2.0))); // error
         assert_eq!(result[3], Some(Value::Float(1.0))); // active_error
     }
@@ -458,10 +597,9 @@ mod tests {
     #[test]
     fn legacy_unconditional_transition() {
         let mut sm = make_legacy_sm();
-        // Force to error state
-        sm.current_state = 2;
-        // error->idle is unconditional
-        let result = sm.tick(&[], 0.01);
+        let state_error = Value::Float(2.0);
+        // state_in=2 (error), error->idle is unconditional
+        let result = sm.tick(&[Some(&state_error)], 0.01);
         assert_eq!(result[0], Some(Value::Float(0.0))); // back to idle
     }
 
@@ -469,10 +607,12 @@ mod tests {
     fn topic_input_ports() {
         let sm = make_topic_sm();
         let ports = sm.input_ports();
-        // No guard ports, 1 topic input
-        assert_eq!(ports.len(), 1);
-        assert_eq!(ports[0].name, "motor_cmd");
-        match &ports[0].kind {
+        // state_in + no guard ports + 1 topic input = 2
+        assert_eq!(ports.len(), 2);
+        assert_eq!(ports[0].name, "state_in");
+        assert_eq!(ports[0].kind, PortKind::Float);
+        assert_eq!(ports[1].name, "motor_cmd");
+        match &ports[1].kind {
             PortKind::Message(schema) => {
                 assert_eq!(schema.name, "MotorCmd");
                 assert_eq!(schema.fields.len(), 1);
@@ -486,9 +626,9 @@ mod tests {
     fn topic_output_ports() {
         let sm = make_topic_sm();
         let ports = sm.output_ports();
-        // state + active_idle + active_running + motor_status
+        // next_state + active_idle + active_running + motor_status
         assert_eq!(ports.len(), 4);
-        assert_eq!(ports[0].name, "state");
+        assert_eq!(ports[0].name, "next_state");
         assert_eq!(ports[0].kind, PortKind::Float);
         assert_eq!(ports[1].name, "active_idle");
         assert_eq!(ports[2].name, "active_running");
@@ -504,12 +644,13 @@ mod tests {
     #[test]
     fn topic_guard_transition_with_message() {
         let mut sm = make_topic_sm();
+        let state_idle = Value::Float(0.0);
         let msg = Value::Message(MessageData {
             schema_name: "MotorCmd".to_string(),
             fields: vec![("speed".to_string(), 1.5)],
         });
-        // Topic input is at index 0 (no guard ports)
-        let result = sm.tick(&[Some(&msg)], 0.01);
+        // inputs: [state_in=0, motor_cmd msg]
+        let result = sm.tick(&[Some(&state_idle), Some(&msg)], 0.01);
         assert_eq!(result[0], Some(Value::Float(1.0))); // running
         assert_eq!(result[1], Some(Value::Float(0.0))); // active_idle=0
         assert_eq!(result[2], Some(Value::Float(1.0))); // active_running=1
@@ -518,12 +659,13 @@ mod tests {
     #[test]
     fn topic_guard_condition_not_met() {
         let mut sm = make_topic_sm();
+        let state_idle = Value::Float(0.0);
         let msg = Value::Message(MessageData {
             schema_name: "MotorCmd".to_string(),
             fields: vec![("speed".to_string(), 0.0)],
         });
         // speed=0.0, condition is Gt 0.0 -> fails
-        let result = sm.tick(&[Some(&msg)], 0.01);
+        let result = sm.tick(&[Some(&state_idle), Some(&msg)], 0.01);
         assert_eq!(result[0], Some(Value::Float(0.0))); // stays idle
         assert_eq!(result[1], Some(Value::Float(1.0))); // active_idle=1
     }
@@ -531,19 +673,21 @@ mod tests {
     #[test]
     fn topic_guard_no_message() {
         let mut sm = make_topic_sm();
-        // None input -> guard not satisfied
-        let result = sm.tick(&[None], 0.01);
+        let state_idle = Value::Float(0.0);
+        // state_in=0, topic input=None -> guard not satisfied
+        let result = sm.tick(&[Some(&state_idle), None], 0.01);
         assert_eq!(result[0], Some(Value::Float(0.0))); // stays idle
     }
 
     #[test]
     fn topic_action_emits_message() {
         let mut sm = make_topic_sm();
+        let state_idle = Value::Float(0.0);
         let msg = Value::Message(MessageData {
             schema_name: "MotorCmd".to_string(),
             fields: vec![("speed".to_string(), 1.5)],
         });
-        let result = sm.tick(&[Some(&msg)], 0.01);
+        let result = sm.tick(&[Some(&state_idle), Some(&msg)], 0.01);
         // Output index 3 = motor_status topic
         match &result[3] {
             Some(Value::Message(data)) => {
@@ -592,7 +736,39 @@ mod tests {
         assert_eq!(config["initial"], "idle");
         assert!(sm.as_tick().is_some());
         assert!(sm.as_analysis().is_none());
-        assert!(sm.as_codegen().is_none());
+        assert!(sm.as_codegen().is_some());
         assert!(sm.as_sim_model().is_none());
+    }
+
+    #[test]
+    fn codegen_emits_valid_rust() {
+        let sm = make_legacy_sm();
+        let cg = sm.as_codegen().expect("should have codegen");
+        let code = cg.emit_rust("host").expect("emit_rust should succeed");
+        // Should contain function signature
+        assert!(code.contains("pub fn block_state_machine("));
+        assert!(code.contains("state_in: f64"));
+        assert!(code.contains("guard_0: f64"));
+        assert!(code.contains("guard_1: f64"));
+        // Should contain match on state_idx
+        assert!(code.contains("let state_idx = state_in as u8;"));
+        assert!(code.contains("let next_state = match state_idx"));
+        // Should contain guard checks
+        assert!(code.contains("guard_0 > 0.5"));
+        assert!(code.contains("guard_1 > 0.5"));
+        // Should contain active flag outputs
+        assert!(code.contains("next_state as f64"));
+    }
+
+    #[test]
+    fn codegen_topic_sm() {
+        let sm = make_topic_sm();
+        let cg = sm.as_codegen().expect("should have codegen");
+        let code = cg.emit_rust("host").expect("emit_rust should succeed");
+        assert!(code.contains("pub fn block_state_machine("));
+        assert!(code.contains("state_in: f64"));
+        assert!(code.contains("motor_cmd: f64"));
+        // Should contain topic condition check
+        assert!(code.contains("motor_cmd >"));
     }
 }
