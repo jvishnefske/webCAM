@@ -76,14 +76,17 @@ fn state_machine_transitions_in_graph() {
     let mut graph = DataflowGraph::new();
 
     let trigger = add(&mut graph, "constant", r#"{"value":1.0}"#);
+    let state_init = add(&mut graph, "constant", r#"{"value":0.0}"#);
     let sm = add(
         &mut graph,
         "state_machine",
         r#"{"states":["idle","running","stopped"],"initial":"idle","transitions":[{"from":"idle","to":"running","guard":{"type":"GuardPort","port":0}},{"from":"running","to":"stopped","guard":{"type":"GuardPort","port":1}}]}"#,
     );
 
-    // Connect constant(1.0) to guard port 0 → idle→running
-    graph.connect(trigger, 0, sm, 0).unwrap();
+    // Connect state_init(0.0) to state_in (port 0)
+    graph.connect(state_init, 0, sm, 0).unwrap();
+    // Connect constant(1.0) to guard_0 (port 1) → idle→running
+    graph.connect(trigger, 0, sm, 1).unwrap();
 
     graph.tick(0.01);
 
@@ -92,11 +95,11 @@ fn state_machine_transitions_in_graph() {
     // State machine should have outputs
     assert!(!sm_block.output_values.is_empty());
 
-    // First output is state index: idle=0, running=1
-    // After one tick with guard_port 0 = 1.0, should transition to running (index 1)
+    // First output is next_state index: idle=0, running=1
+    // With state_in=0 (idle) and guard_0=1.0, should transition to running (index 1)
     assert_eq!(sm_block.output_values[0], Some(Value::Float(1.0)));
 
-    // Second tick: state persists as "running" (guard port 1 not connected → 0.0, no transition)
+    // Second tick: state_in is still 0.0 (constant), so it transitions idle→running again
     graph.tick(0.01);
     let snap2 = graph.snapshot();
     let sm_block2 = snap2.blocks.iter().find(|b| b.block_type == "state_machine").unwrap();

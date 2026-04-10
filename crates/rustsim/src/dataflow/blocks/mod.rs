@@ -161,8 +161,10 @@ mod tests {
         }"#;
         let block = create_block("state_machine", cfg).unwrap();
         assert_eq!(block.block_type(), "state_machine");
-        assert_eq!(block.input_ports().len(), 1);
-        assert_eq!(block.input_ports()[0].name, "cmd");
+        // state_in + 1 topic input = 2
+        assert_eq!(block.input_ports().len(), 2);
+        assert_eq!(block.input_ports()[0].name, "state_in");
+        assert_eq!(block.input_ports()[1].name, "cmd");
     }
 
     #[test]
@@ -173,8 +175,10 @@ mod tests {
             "transitions": [{"from": "a", "to": "b", "guard": {"type": "GuardPort", "port": 0}}]
         }"#;
         let block = create_block("state_machine", cfg).unwrap();
-        assert_eq!(block.input_ports().len(), 1);
-        assert_eq!(block.input_ports()[0].name, "guard_0");
+        // state_in + 1 guard port = 2
+        assert_eq!(block.input_ports().len(), 2);
+        assert_eq!(block.input_ports()[0].name, "state_in");
+        assert_eq!(block.input_ports()[1].name, "guard_0");
     }
 
     #[test]
