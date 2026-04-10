@@ -21,6 +21,7 @@ fn make_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSnap
         config,
         output_values: vec![],
         custom_codegen: None,
+        is_delay: false,
     }
 }
 

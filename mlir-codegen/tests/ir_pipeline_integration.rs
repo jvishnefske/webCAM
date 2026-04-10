@@ -25,6 +25,7 @@ fn make_block(
         config,
         output_values: vec![],
         custom_codegen: None,
+        is_delay: false,
     }
 }
 

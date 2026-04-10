@@ -211,8 +211,11 @@ fn config_str<'a>(block: &'a BlockSnapshot, key: &str) -> &'a str {
 /// 3. Each block emitted as dataflow dialect ops in topological order
 pub fn lower_graph(snap: &GraphSnapshot) -> Result<String, String> {
     let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let no_delays = HashSet::new();
-    let sorted = topological_sort(&block_ids, &snap.channels, &no_delays)?;
+    let delay_blocks: HashSet<BlockId> = snap.blocks.iter()
+        .filter(|b| b.is_delay)
+        .map(|b| BlockId(b.id))
+        .collect();
+    let sorted = topological_sort(&block_ids, &snap.channels, &delay_blocks)?;
     let block_map: HashMap<u32, &BlockSnapshot> = snap.blocks.iter().map(|b| (b.id, b)).collect();
 
     // Collect state slots: each non-skipped block output needs a state memref index.
@@ -774,8 +777,11 @@ fn resolve_inputs_ir(
 /// This is the typed replacement for [`lower_graph()`] (which produces string MLIR).
 pub fn lower_graph_ir(snap: &GraphSnapshot) -> Result<IrModule, String> {
     let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let no_delays = HashSet::new();
-    let sorted = topological_sort(&block_ids, &snap.channels, &no_delays)?;
+    let delay_blocks: HashSet<BlockId> = snap.blocks.iter()
+        .filter(|b| b.is_delay)
+        .map(|b| BlockId(b.id))
+        .collect();
+    let sorted = topological_sort(&block_ids, &snap.channels, &delay_blocks)?;
     let block_map: HashMap<u32, &BlockSnapshot> = snap.blocks.iter().map(|b| (b.id, b)).collect();
 
     let mut builder = IrBuilder::new();

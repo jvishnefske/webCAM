@@ -32,6 +32,7 @@ fn source_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSn
         config,
         output_values: vec![],
         custom_codegen: None,
+        is_delay: false,
     }
 }
 
@@ -52,6 +53,7 @@ fn process_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockS
         config,
         output_values: vec![],
         custom_codegen: None,
+        is_delay: false,
     }
 }
 
@@ -69,6 +71,7 @@ fn sink_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSnap
         config,
         output_values: vec![],
         custom_codegen: None,
+        is_delay: false,
     }
 }
 
@@ -95,6 +98,7 @@ fn dual_input_block(id: u32, block_type: &str, config: serde_json::Value) -> Blo
         config,
         output_values: vec![],
         custom_codegen: None,
+        is_delay: false,
     }
 }
 

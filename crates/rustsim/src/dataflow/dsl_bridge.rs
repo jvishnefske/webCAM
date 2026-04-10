@@ -53,6 +53,7 @@ pub fn ast_to_snapshot(graph: &parser::ast::Graph) -> Result<GraphSnapshot, Stri
             output_values: vec![None; module.output_ports().len()],
             target,
             custom_codegen,
+            is_delay: module.is_delay(),
         });
     }
 

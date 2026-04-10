@@ -75,6 +75,7 @@ pub fn partition_graph(snap: &GraphSnapshot) -> Result<PartitionResult, Partitio
             output_values: b.output_values.clone(),
             target: b.target,
             custom_codegen: b.custom_codegen.clone(),
+            is_delay: b.is_delay,
         });
     }
 
@@ -125,6 +126,7 @@ pub fn partition_graph(snap: &GraphSnapshot) -> Result<PartitionResult, Partitio
                 output_values: vec![],
                 target: Some(from_target),
                 custom_codegen: None,
+                is_delay: false,
             };
             target_blocks
                 .entry(from_target)
@@ -158,6 +160,7 @@ pub fn partition_graph(snap: &GraphSnapshot) -> Result<PartitionResult, Partitio
                 output_values: vec![None],
                 target: Some(to_target),
                 custom_codegen: None,
+                is_delay: false,
             };
             target_blocks
                 .entry(to_target)
@@ -231,6 +234,7 @@ mod tests {
             output_values: vec![None],
             target: Some(target),
             custom_codegen: None,
+            is_delay: false,
         }
     }
 
@@ -245,6 +249,7 @@ mod tests {
             output_values: vec![None],
             target: Some(target),
             custom_codegen: None,
+            is_delay: false,
         }
     }
 
@@ -259,6 +264,7 @@ mod tests {
             output_values: vec![],
             target: Some(target),
             custom_codegen: None,
+            is_delay: false,
         }
     }
 

@@ -303,8 +303,11 @@ pub trait Peripherals {
 /// Generate the logic crate's lib.rs with State struct and tick() function.
 fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
     let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let no_delays = HashSet::new();
-    let sorted = topological_sort(&block_ids, &snap.channels, &no_delays)?;
+    let delay_blocks: HashSet<BlockId> = snap.blocks.iter()
+        .filter(|b| b.is_delay)
+        .map(|b| BlockId(b.id))
+        .collect();
+    let sorted = topological_sort(&block_ids, &snap.channels, &delay_blocks)?;
     let block_map: std::collections::HashMap<u32, &BlockSnapshot> =
         snap.blocks.iter().map(|b| (b.id, b)).collect();
 
@@ -1025,8 +1028,11 @@ fn generate_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
 fn generate_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, String> {
     // Collect block IDs and run topological sort.
     let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let no_delays = HashSet::new();
-    let sorted = topological_sort(&block_ids, &snap.channels, &no_delays)?;
+    let delay_blocks: HashSet<BlockId> = snap.blocks.iter()
+        .filter(|b| b.is_delay)
+        .map(|b| BlockId(b.id))
+        .collect();
+    let sorted = topological_sort(&block_ids, &snap.channels, &delay_blocks)?;
 
     // Build a lookup from block ID to snapshot.
     let block_map: std::collections::HashMap<u32, &BlockSnapshot> =
@@ -1123,6 +1129,10 @@ fn generate_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, String> {
 
 fn generate_parallel_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, String> {
     let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
+    let delay_blocks: HashSet<BlockId> = snap.blocks.iter()
+        .filter(|b| b.is_delay)
+        .map(|b| BlockId(b.id))
+        .collect();
     let groups = find_parallel_groups(&block_ids, &snap.channels)?;
 
     let block_map: std::collections::HashMap<u32, &BlockSnapshot> =
@@ -1139,8 +1149,7 @@ fn generate_parallel_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, St
 
     // Declare state variables for all non-skipped blocks.
     writeln!(out, "    // State variables for block outputs.").unwrap();
-    let no_delays2 = HashSet::new();
-    let all_sorted = topological_sort(&block_ids, &snap.channels, &no_delays2)?;
+    let all_sorted = topological_sort(&block_ids, &snap.channels, &delay_blocks)?;
     for &BlockId(id) in &all_sorted {
         let block = block_map[&id];
         if is_skipped(&block.block_type) {
