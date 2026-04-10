@@ -247,6 +247,56 @@ pub fn dataflow_snapshot(graph_id: u32) -> Result<JsValue, JsValue> {
     })
 }
 
+/// Load a graph from a JSON `GraphSnapshot`, applying port-index migration for
+/// old state_machine graphs that predate the `state_in` port at index 0.
+///
+/// Returns the new graph id on success.
+#[wasm_bindgen]
+pub fn dataflow_load_snapshot(dt: f64, snapshot_json: &str) -> Result<u32, JsValue> {
+    let mut snap: dataflow::graph::GraphSnapshot =
+        serde_json::from_str(snapshot_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+
+    // Migrate v1 state machine port indices before replaying the graph.
+    dataflow::graph::migrate_state_machine_ports(&mut snap);
+
+    DATAFLOW_NEXT_ID.with(|next| {
+        let id = *next.borrow();
+        *next.borrow_mut() = id + 1;
+
+        let mut graph = dataflow::DataflowGraph::new();
+
+        // Replay blocks from the snapshot.  We insert them with fixed ids so
+        // channel references remain valid.
+        for block_snap in &snap.blocks {
+            let block = dataflow::blocks::create_block(
+                &block_snap.block_type,
+                &block_snap.config.to_string(),
+            )
+            .map_err(|e| JsValue::from_str(&e))?;
+            graph.add_block(block);
+        }
+
+        // Replay channels.
+        for ch in &snap.channels {
+            graph
+                .connect(
+                    dataflow::BlockId(ch.from_block.0),
+                    ch.from_port,
+                    dataflow::BlockId(ch.to_block.0),
+                    ch.to_port,
+                )
+                .map_err(|e| JsValue::from_str(&e))?;
+        }
+
+        DATAFLOW_GRAPHS.with(|g| g.borrow_mut().insert(id, graph));
+        DATAFLOW_SCHEDULERS.with(|s| {
+            s.borrow_mut().insert(id, dataflow::Scheduler::new(dt));
+        });
+
+        Ok(id)
+    })
+}
+
 /// List available block types as a typed JS array.
 #[wasm_bindgen]
 pub fn dataflow_block_types() -> JsValue {
