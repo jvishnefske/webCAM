@@ -15,8 +15,6 @@ pub mod types;
 
 #[cfg(feature = "mlir")]
 pub use emit::generate_workspace_mlir;
-#[cfg(feature = "mlir")]
-pub use emit::generate_workspace_mlir;
 pub use emit::{
     generate_distributed_workspace, generate_rust, generate_workspace, CodegenBackend,
     DistributedConfig, DistributedWorkspace, GeneratedCrate, GeneratedWorkspace, TransportConfig,
