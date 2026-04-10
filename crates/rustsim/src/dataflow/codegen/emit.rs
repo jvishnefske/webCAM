@@ -1,6 +1,6 @@
 //! Code emitter: generates a standalone Rust workspace from a dataflow graph snapshot.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::dataflow::block::BlockId;
@@ -303,7 +303,8 @@ pub trait Peripherals {
 /// Generate the logic crate's lib.rs with State struct and tick() function.
 fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
     let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let sorted = topological_sort(&block_ids, &snap.channels)?;
+    let no_delays = HashSet::new();
+    let sorted = topological_sort(&block_ids, &snap.channels, &no_delays)?;
     let block_map: std::collections::HashMap<u32, &BlockSnapshot> =
         snap.blocks.iter().map(|b| (b.id, b)).collect();
 
@@ -322,8 +323,10 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
         if is_skipped(&block.block_type) || is_peripheral(&block.block_type) {
             continue;
         }
-        if block.block_type == "state_machine" {
-            writeln!(out, "    pub sm_{id}: blocks::Block{id},").unwrap();
+        if block.block_type == "register" {
+            let initial = config_float(block, "initial_value");
+            writeln!(out, "    pub reg_{id}: f64,").unwrap();
+            let _ = initial; // used in Default impl below
         }
         for (port_idx, port) in block.outputs.iter().enumerate() {
             let ty = crate::dataflow::codegen::types::rust_type_no_std(&port.kind);
@@ -358,8 +361,9 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
             }
             continue;
         }
-        if block.block_type == "state_machine" {
-            writeln!(out, "            sm_{id}: blocks::Block{id}::default(),").unwrap();
+        if block.block_type == "register" {
+            let initial = config_float(block, "initial_value");
+            writeln!(out, "            reg_{id}: {initial}_f64,").unwrap();
         }
         for (port_idx, port) in block.outputs.iter().enumerate() {
             let default = crate::dataflow::codegen::types::rust_default_no_std(&port.kind);
@@ -562,26 +566,15 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 )
                 .unwrap();
             }
-            // State machine blocks
-            "state_machine" => {
-                let arg_str = args
-                    .iter()
-                    .map(|a| state_ref(a))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                if block.outputs.len() <= 1 {
-                    writeln!(
-                        out,
-                        "    state.out_{id}_p0 = state.sm_{id}.tick({arg_str});"
-                    )
-                    .unwrap();
+            // Register blocks → z⁻¹ delay
+            "register" => {
+                let input_expr = if args.is_empty() {
+                    "0.0".to_string()
                 } else {
-                    let vars: Vec<String> = (0..block.outputs.len())
-                        .map(|p| format!("state.out_{id}_p{p}"))
-                        .collect();
-                    let var_str = vars.join(", ");
-                    writeln!(out, "    ({var_str}) = state.sm_{id}.tick({arg_str});").unwrap();
-                }
+                    state_ref(&args[0])
+                };
+                writeln!(out, "    state.out_{id}_p0 = state.reg_{id};").unwrap();
+                writeln!(out, "    state.reg_{id} = {input_expr};").unwrap();
             }
             // Pure computation blocks → function calls
             _ => {
@@ -632,6 +625,19 @@ fn generate_logic_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
 
         writeln!(out, "/// Block {id}: {} ({bt})", block.name).unwrap();
 
+        // Check for custom codegen from the Codegen trait
+        if let Some(ref custom_code) = block.custom_codegen {
+            writeln!(out, "{custom_code}").unwrap();
+            writeln!(out).unwrap();
+            continue;
+        }
+
+        // Register blocks have state handled in lib.rs; no block function needed
+        if bt == "register" {
+            writeln!(out).unwrap();
+            continue;
+        }
+
         match bt {
             "constant" => {
                 let value = config_float(block, "value");
@@ -661,9 +667,6 @@ fn generate_logic_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 writeln!(out, "pub fn block_{id}(input: f64) -> f64 {{").unwrap();
                 writeln!(out, "    input.clamp({min}_f64, {max}_f64)").unwrap();
                 writeln!(out, "}}").unwrap();
-            }
-            "state_machine" => {
-                emit_state_machine_block(&mut out, block)?;
             }
             "udp_source" => {
                 let addr = block
@@ -717,208 +720,6 @@ fn generate_logic_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
     }
 
     Ok(out)
-}
-
-/// Emit a state machine block as a struct with enum and tick method.
-fn emit_state_machine_block(out: &mut String, block: &BlockSnapshot) -> Result<(), String> {
-    let id = block.id;
-    let config = &block.config;
-
-    let states: Vec<String> = config
-        .get("states")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    if states.is_empty() {
-        return Err(format!("state_machine block {id} has no states"));
-    }
-
-    let initial = config
-        .get("initial")
-        .and_then(|v| v.as_str())
-        .unwrap_or(&states[0]);
-
-    let transitions: Vec<serde_json::Value> = config
-        .get("transitions")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-
-    // Generate state enum
-    writeln!(out, "#[derive(Clone, Copy, Default)]").unwrap();
-    writeln!(out, "pub enum Block{id}State {{").unwrap();
-    for (i, state) in states.iter().enumerate() {
-        let variant = to_pascal_case(state);
-        if state == initial {
-            writeln!(out, "    #[default]").unwrap();
-        }
-        // If this is the first variant and initial wasn't found, mark it default
-        if i == 0 && !states.contains(&initial.to_string()) {
-            writeln!(out, "    #[default]").unwrap();
-        }
-        writeln!(out, "    {variant},").unwrap();
-    }
-    writeln!(out, "}}").unwrap();
-    writeln!(out).unwrap();
-
-    // Generate block struct
-    writeln!(out, "#[derive(Clone)]").unwrap();
-    writeln!(out, "pub struct Block{id} {{").unwrap();
-    writeln!(out, "    pub state: Block{id}State,").unwrap();
-    writeln!(out, "}}").unwrap();
-    writeln!(out).unwrap();
-
-    writeln!(out, "impl Default for Block{id} {{").unwrap();
-    writeln!(out, "    fn default() -> Self {{").unwrap();
-    writeln!(out, "        Self {{ state: Block{id}State::default() }}").unwrap();
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "}}").unwrap();
-    writeln!(out).unwrap();
-
-    // Generate tick method
-    // Inputs: one f64 per guard port
-    let n_guards = block.inputs.len();
-    let guard_params: Vec<String> = (0..n_guards).map(|i| format!("guard_{i}: f64")).collect();
-    let guard_param_str = guard_params.join(", ");
-
-    // Outputs: state index + one per state (active_<name>)
-    let n_outputs = 1 + states.len(); // state index + active flags
-    let output_type = if n_outputs == 1 {
-        "f64".to_string()
-    } else {
-        format!("({})", vec!["f64"; n_outputs].join(", "))
-    };
-
-    writeln!(out, "impl Block{id} {{").unwrap();
-    writeln!(
-        out,
-        "    pub fn tick(&mut self, {guard_param_str}) -> {output_type} {{"
-    )
-    .unwrap();
-    writeln!(out, "        self.state = match self.state {{").unwrap();
-
-    for state in &states {
-        let variant = to_pascal_case(state);
-        // Find transitions from this state
-        let from_transitions: Vec<&serde_json::Value> = transitions
-            .iter()
-            .filter(|t| t.get("from").and_then(|v| v.as_str()) == Some(state))
-            .collect();
-
-        write!(out, "            Block{id}State::{variant} => ").unwrap();
-
-        if from_transitions.is_empty() {
-            // Stay in current state
-            writeln!(out, "Block{id}State::{variant},").unwrap();
-        } else {
-            let mut first = true;
-            for t in &from_transitions {
-                let to_state = t.get("to").and_then(|v| v.as_str()).unwrap_or(state);
-                let to_variant = to_pascal_case(to_state);
-
-                // Resolve guard port index from either old or new format:
-                //   Old: {"guard_port": 0}
-                //   New: {"guard": {"type": "GuardPort", "port": 0}}
-                //   New: {"guard": {"type": "Topic", "topic": "..."}} — treated as port guard (MVP)
-                //   New: {"guard": {"type": "Unconditional"}} or absent — unconditional
-                let guard_port: Option<u64> =
-                    // Old format
-                    t.get("guard_port").and_then(|v| v.as_u64()).or_else(|| {
-                        // New format
-                        t.get("guard").and_then(|g| {
-                            let guard_type = g.get("type").and_then(|v| v.as_str())?;
-                            match guard_type {
-                                "GuardPort" => g.get("port").and_then(|v| v.as_u64()),
-                                // Topic guard: treat as port guard using the first available port (MVP)
-                                "Topic" => Some(0),
-                                _ => None,
-                            }
-                        })
-                    });
-
-                if let Some(port) = guard_port {
-                    if first {
-                        writeln!(
-                            out,
-                            "if guard_{port} > 0.5 {{ Block{id}State::{to_variant} }}"
-                        )
-                        .unwrap();
-                        first = false;
-                    } else {
-                        writeln!(
-                            out,
-                            "            else if guard_{port} > 0.5 {{ Block{id}State::{to_variant} }}"
-                        )
-                        .unwrap();
-                    }
-                } else {
-                    // Unconditional transition
-                    if first {
-                        writeln!(out, "Block{id}State::{to_variant},").unwrap();
-                    } else {
-                        writeln!(out, "            else {{ Block{id}State::{to_variant} }},")
-                            .unwrap();
-                    }
-                    first = false;
-                }
-            }
-            // If all transitions were conditional, add else clause to stay
-            if from_transitions.iter().all(|t| {
-                // Old format
-                t.get("guard_port").and_then(|v| v.as_u64()).is_some()
-                    || t.get("guard").and_then(|g| {
-                        let guard_type = g.get("type").and_then(|v| v.as_str())?;
-                        match guard_type {
-                            "GuardPort" => g.get("port").and_then(|v| v.as_u64()),
-                            "Topic" => Some(0),
-                            _ => None,
-                        }
-                    }).is_some()
-            }) {
-                writeln!(out, "            else {{ Block{id}State::{variant} }},").unwrap();
-            }
-        }
-    }
-
-    writeln!(out, "        }};").unwrap();
-    writeln!(out, "        let idx = self.state as u8 as f64;").unwrap();
-
-    // Output active flags
-    if n_outputs == 1 {
-        writeln!(out, "        idx").unwrap();
-    } else {
-        let mut active_exprs = vec!["idx".to_string()];
-        for state in &states {
-            let variant = to_pascal_case(state);
-            active_exprs.push(format!(
-                "if matches!(self.state, Block{id}State::{variant}) {{ 1.0 }} else {{ 0.0 }}"
-            ));
-        }
-        let expr = active_exprs.join(", ");
-        writeln!(out, "        ({expr})").unwrap();
-    }
-
-    writeln!(out, "    }}").unwrap();
-    writeln!(out, "}}").unwrap();
-
-    Ok(())
-}
-
-fn to_pascal_case(s: &str) -> String {
-    s.split('_')
-        .map(|word| {
-            let mut chars = word.chars();
-            match chars.next() {
-                None => String::new(),
-                Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
-            }
-        })
-        .collect()
 }
 
 fn is_skipped(block_type: &str) -> bool {
@@ -1211,9 +1012,6 @@ fn generate_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
                 writeln!(out, "    0.0").unwrap();
                 writeln!(out, "}}").unwrap();
             }
-            "state_machine" => {
-                emit_state_machine_block(&mut out, block)?;
-            }
             other => {
                 return Err(format!("unsupported block type for codegen: {other}"));
             }
@@ -1227,7 +1025,8 @@ fn generate_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
 fn generate_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, String> {
     // Collect block IDs and run topological sort.
     let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let sorted = topological_sort(&block_ids, &snap.channels)?;
+    let no_delays = HashSet::new();
+    let sorted = topological_sort(&block_ids, &snap.channels, &no_delays)?;
 
     // Build a lookup from block ID to snapshot.
     let block_map: std::collections::HashMap<u32, &BlockSnapshot> =
@@ -1340,7 +1139,8 @@ fn generate_parallel_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, St
 
     // Declare state variables for all non-skipped blocks.
     writeln!(out, "    // State variables for block outputs.").unwrap();
-    let all_sorted = topological_sort(&block_ids, &snap.channels)?;
+    let no_delays2 = HashSet::new();
+    let all_sorted = topological_sort(&block_ids, &snap.channels, &no_delays2)?;
     for &BlockId(id) in &all_sorted {
         let block = block_map[&id];
         if is_skipped(&block.block_type) {
@@ -1591,6 +1391,7 @@ mod tests {
             output_values: vec![Some(Value::Float(value))],
             target: None,
             custom_codegen: None,
+            is_delay: false,
         }
     }
 
@@ -1605,6 +1406,7 @@ mod tests {
             output_values: vec![Some(Value::Float(0.0))],
             target: None,
             custom_codegen: None,
+            is_delay: false,
         }
     }
 
@@ -1622,6 +1424,7 @@ mod tests {
             output_values: vec![Some(Value::Float(0.0))],
             target: None,
             custom_codegen: None,
+            is_delay: false,
         }
     }
 
@@ -1636,6 +1439,7 @@ mod tests {
             output_values: vec![],
             target: None,
             custom_codegen: None,
+            is_delay: false,
         }
     }
 
@@ -1775,6 +1579,7 @@ mod tests {
                 output_values: vec![],
                 target: None,
                 custom_codegen: None,
+                is_delay: false,
             }],
             channels: vec![],
             tick_count: 0,
@@ -1799,6 +1604,7 @@ mod tests {
                 output_values: vec![],
                 target: None,
                 custom_codegen: None,
+                is_delay: false,
             }],
             channels: vec![],
             tick_count: 0,
@@ -1878,6 +1684,7 @@ mod tests {
                     output_values: vec![],
                     target: None,
                     custom_codegen: None,
+                    is_delay: false,
                 },
                 BlockSnapshot {
                     id: 2,
@@ -1889,6 +1696,7 @@ mod tests {
                     output_values: vec![],
                     target: None,
                     custom_codegen: None,
+                    is_delay: false,
                 },
             ],
             channels: vec![ch(1, 1, 0, 2, 0)],
@@ -1977,6 +1785,7 @@ mod tests {
                     output_values: vec![],
                     target: None,
                     custom_codegen: None,
+                    is_delay: false,
                 },
                 make_gain_snapshot(2, 2.5),
                 BlockSnapshot {
@@ -1989,6 +1798,7 @@ mod tests {
                     output_values: vec![],
                     target: None,
                     custom_codegen: None,
+                    is_delay: false,
                 },
             ],
             channels: vec![ch(1, 1, 0, 2, 0), ch(2, 2, 0, 3, 0)],
@@ -2071,7 +1881,16 @@ mod tests {
     }
 
     #[test]
-    fn state_machine_codegen() {
+    fn state_machine_codegen_via_custom_codegen() {
+        // StateMachineBlock now emits its own code via the Codegen trait.
+        // The snapshot has custom_codegen = Some(...), and emit.rs uses the
+        // generic custom_codegen path plus pure function calls in the tick.
+        let custom_code = concat!(
+            "pub fn block_5(guard_0: f64, guard_1: f64) -> (f64, f64, f64, f64) {\n",
+            "    // custom state machine codegen\n",
+            "    (0.0, 1.0, 0.0, 0.0)\n",
+            "}"
+        );
         let snap = GraphSnapshot {
             blocks: vec![
                 make_constant_snapshot(1, 1.0),
@@ -2092,15 +1911,12 @@ mod tests {
                     config: serde_json::json!({
                         "states": ["idle", "running", "error"],
                         "initial": "idle",
-                        "transitions": [
-                            { "from": "idle", "to": "running", "guard_port": 0 },
-                            { "from": "running", "to": "error", "guard_port": 1 },
-                            { "from": "error", "to": "idle", "guard_port": null }
-                        ]
+                        "transitions": []
                     }),
                     output_values: vec![],
                     target: None,
-                    custom_codegen: None,
+                    custom_codegen: Some(custom_code.to_string()),
+                    is_delay: false,
                 },
             ],
             channels: vec![ch(1, 1, 0, 5, 0)],
@@ -2121,11 +1937,11 @@ mod tests {
             .1
             .as_str();
 
-        assert!(blocks_rs.contains("Block5State"));
-        assert!(blocks_rs.contains("Idle"));
-        assert!(blocks_rs.contains("Running"));
-        assert!(blocks_rs.contains("Error"));
-        assert!(blocks_rs.contains("pub fn tick(&mut self"));
+        // custom_codegen is emitted verbatim in blocks.rs
+        assert!(
+            blocks_rs.contains("custom state machine codegen"),
+            "blocks.rs should contain the custom codegen code"
+        );
 
         let lib_rs = ws
             .files
@@ -2135,8 +1951,16 @@ mod tests {
             .1
             .as_str();
 
-        assert!(lib_rs.contains("sm_5"));
-        assert!(lib_rs.contains("state.sm_5.tick("));
+        // No more sm_5 field — SM goes through pure function call path
+        assert!(
+            !lib_rs.contains("sm_5"),
+            "lib.rs should NOT contain sm_5 field"
+        );
+        // Should use the generic blocks::block_5() call
+        assert!(
+            lib_rs.contains("blocks::block_5("),
+            "lib.rs should call blocks::block_5() via generic path"
+        );
     }
 
     #[test]
@@ -2174,8 +1998,10 @@ mod tests {
     }
 
     #[test]
-    fn state_machine_has_output_fields_in_state_struct() {
-        // State machine with 4 outputs — State struct must have both sm_5 AND out_5_p0..p3
+    fn state_machine_output_fields_in_state_struct_no_sm_field() {
+        // State machine with 4 outputs — State struct must have out_5_p0..p3
+        // but NO sm_5 field (the old special-casing has been removed).
+        let custom_code = "pub fn block_5(guard_0: f64) -> (f64, f64, f64, f64) { (0.0, 1.0, 0.0, 0.0) }";
         let snap = GraphSnapshot {
             blocks: vec![
                 make_constant_snapshot(1, 1.0),
@@ -2193,14 +2019,12 @@ mod tests {
                     config: serde_json::json!({
                         "states": ["idle", "running", "error"],
                         "initial": "idle",
-                        "transitions": [
-                            { "from": "idle", "to": "running", "guard_port": 0 },
-                            { "from": "running", "to": "error", "guard_port": null }
-                        ]
+                        "transitions": []
                     }),
                     output_values: vec![],
                     target: None,
-                    custom_codegen: None,
+                    custom_codegen: Some(custom_code.to_string()),
+                    is_delay: false,
                 },
             ],
             channels: vec![ch(1, 1, 0, 5, 0)],
@@ -2221,22 +2045,18 @@ mod tests {
             .1
             .as_str();
 
-        // State struct must have the state machine instance field
+        // No sm_5 field — the old special-casing is removed
         assert!(
-            lib_rs.contains("sm_5: blocks::Block5"),
-            "Missing sm_5 field"
+            !lib_rs.contains("sm_5"),
+            "sm_5 field should NOT be present"
         );
-        // AND the output fields for tick() to write to
+        // Output fields for tick() to write to
         assert!(lib_rs.contains("out_5_p0: f64"), "Missing out_5_p0 field");
         assert!(lib_rs.contains("out_5_p1: f64"), "Missing out_5_p1 field");
         assert!(lib_rs.contains("out_5_p2: f64"), "Missing out_5_p2 field");
         assert!(lib_rs.contains("out_5_p3: f64"), "Missing out_5_p3 field");
 
-        // Default impl must also have both
-        assert!(
-            lib_rs.contains("sm_5: blocks::Block5::default()"),
-            "Missing sm_5 default"
-        );
+        // Default has output fields
         assert!(
             lib_rs.contains("out_5_p0: 0.0_f64"),
             "Missing out_5_p0 default"
@@ -2244,7 +2064,15 @@ mod tests {
     }
 
     #[test]
-    fn state_machine_topic_codegen() {
+    fn state_machine_with_custom_codegen_in_legacy_path() {
+        // SM blocks now use custom_codegen; verify the legacy generate_rust path
+        // emits the custom code verbatim in blocks.rs.
+        let custom_code = concat!(
+            "pub fn block_5(motor_cmd: f64) -> (f64, f64, f64) {\n",
+            "    // Idle + Running states\n",
+            "    (0.0, 1.0, 0.0)\n",
+            "}"
+        );
         let snap = GraphSnapshot {
             blocks: vec![BlockSnapshot {
                 id: 5,
@@ -2259,18 +2087,12 @@ mod tests {
                 config: serde_json::json!({
                     "states": ["idle", "running"],
                     "initial": "idle",
-                    "transitions": [{
-                        "from": "idle",
-                        "to": "running",
-                        "guard": {"type": "Topic", "topic": "motor_cmd", "condition": {"field": "speed", "op": "Gt", "value": 0.0}},
-                        "actions": []
-                    }],
-                    "input_topics": [{"topic": "motor_cmd", "schema": {"name": "motor_cmd", "fields": [{"name": "speed", "field_type": "F32"}]}}],
-                    "output_topics": []
+                    "transitions": []
                 }),
                 output_values: vec![],
                 target: None,
-                custom_codegen: None,
+                custom_codegen: Some(custom_code.to_string()),
+                is_delay: false,
             }],
             channels: vec![],
             tick_count: 0,
@@ -2284,8 +2106,10 @@ mod tests {
             .unwrap()
             .1
             .as_str();
-        assert!(blocks_rs.contains("Idle"), "should contain idle state");
-        assert!(blocks_rs.contains("Running"), "should contain running state");
+        assert!(
+            blocks_rs.contains("Idle + Running states"),
+            "should contain custom codegen output"
+        );
     }
 
     // Distributed multi-MCU tests -----------------------------------------------
@@ -2666,6 +2490,7 @@ mod tests {
             output_values: vec![],
             target: None,
             custom_codegen: None,
+            is_delay: false,
         };
         let mut out = String::new();
         emit_block_call(&mut out, 8, &block, "pwm_sink", &["d".into()], "    ");
@@ -2685,6 +2510,7 @@ mod tests {
             output_values: vec![],
             target: None,
             custom_codegen: None,
+            is_delay: false,
         };
         let mut out = String::new();
         emit_block_call(&mut out, 9, &block, "udp_sink", &["buf".into()], "    ");
@@ -2695,8 +2521,8 @@ mod tests {
     fn emit_block_call_multi_output() {
         let block = BlockSnapshot {
             id: 10,
-            block_type: "state_machine".to_string(),
-            name: "SM".to_string(),
+            block_type: "multiply".to_string(),
+            name: "Multi".to_string(),
             inputs: vec![PortDef::new("guard_0", PortKind::Float)],
             outputs: vec![
                 PortDef::new("state", PortKind::Float),
@@ -2706,9 +2532,10 @@ mod tests {
             output_values: vec![],
             target: None,
             custom_codegen: None,
+            is_delay: false,
         };
         let mut out = String::new();
-        emit_block_call(&mut out, 10, &block, "state_machine", &["g".into()], "    ");
+        emit_block_call(&mut out, 10, &block, "multiply", &["g".into()], "    ");
         assert!(out.contains("(out_10_p0, out_10_p1) = blocks::block_10(g);"));
     }
 
@@ -2800,6 +2627,7 @@ mod tests {
             output_values: vec![None; n_outputs],
             target: None,
             custom_codegen: None,
+            is_delay: false,
         }
     }
 
@@ -2889,17 +2717,23 @@ mod tests {
                         PortDef::new("stall", PortKind::Float),
                     ],
                 ),
-                make_embedded_block(
-                    11,
-                    "state_machine",
-                    serde_json::json!({"states": ["idle", "run"], "initial": "idle", "transitions": []}),
-                    vec![PortDef::new("guard_0", PortKind::Float)],
-                    vec![
-                        PortDef::new("state", PortKind::Float),
-                        PortDef::new("active_idle", PortKind::Float),
-                        PortDef::new("active_run", PortKind::Float),
-                    ],
-                ),
+                {
+                    let mut sm = make_embedded_block(
+                        11,
+                        "state_machine",
+                        serde_json::json!({"states": ["idle", "run"], "initial": "idle", "transitions": []}),
+                        vec![PortDef::new("guard_0", PortKind::Float)],
+                        vec![
+                            PortDef::new("state", PortKind::Float),
+                            PortDef::new("active_idle", PortKind::Float),
+                            PortDef::new("active_run", PortKind::Float),
+                        ],
+                    );
+                    sm.custom_codegen = Some(
+                        "pub fn block_11(guard_0: f64) -> (f64, f64, f64) { (0.0, 1.0, 0.0) }".to_string()
+                    );
+                    sm
+                },
                 make_embedded_block(
                     12,
                     "udp_source",
@@ -2933,7 +2767,7 @@ mod tests {
         assert!(result.contains("hw.display_write"));
         assert!(result.contains("hw.stepper_move"));
         assert!(result.contains("hw.stallguard_read"));
-        assert!(result.contains("sm_11.tick"));
+        assert!(result.contains("blocks::block_11("));
     }
 
     #[test]
@@ -3079,6 +2913,7 @@ mod tests {
                     output_values: vec![Some(Value::Float(0.0))],
                     target: None,
                     custom_codegen: None,
+                    is_delay: false,
                 },
             ],
             channels: vec![ch(1, 1, 0, 3, 0), ch(2, 2, 0, 3, 1)],
@@ -3136,11 +2971,60 @@ mod tests {
     }
 
     #[test]
-    fn to_pascal_case_various() {
-        assert_eq!(to_pascal_case("hello_world"), "HelloWorld");
-        assert_eq!(to_pascal_case("idle"), "Idle");
-        assert_eq!(to_pascal_case("my_state_name"), "MyStateName");
-        assert_eq!(to_pascal_case(""), "");
+    fn register_block_codegen() {
+        let snap = GraphSnapshot {
+            blocks: vec![
+                make_constant_snapshot(1, 3.0),
+                BlockSnapshot {
+                    id: 2,
+                    block_type: "register".to_string(),
+                    name: "Reg".to_string(),
+                    inputs: vec![PortDef::new("in", PortKind::Float)],
+                    outputs: vec![PortDef::new("out", PortKind::Float)],
+                    config: serde_json::json!({"initial_value": 5.0}),
+                    output_values: vec![],
+                    target: None,
+                    custom_codegen: None,
+                    is_delay: true,
+                },
+            ],
+            channels: vec![ch(1, 1, 0, 2, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let targets = vec![TargetWithBinding {
+            target: TargetFamily::Host,
+            binding: Binding::host_default(),
+        }];
+        let ws = generate_workspace(&snap, 0.01, &targets).unwrap();
+
+        let lib_rs = ws
+            .files
+            .iter()
+            .find(|(p, _)| p == "logic/src/lib.rs")
+            .unwrap()
+            .1
+            .as_str();
+
+        // State struct has reg_2 field
+        assert!(
+            lib_rs.contains("reg_2: f64"),
+            "Missing reg_2 state field, got:\n{lib_rs}"
+        );
+        // Default has initial value
+        assert!(
+            lib_rs.contains("reg_2: 5"),
+            "Missing reg_2 initial value, got:\n{lib_rs}"
+        );
+        // Tick has z^-1 delay pattern
+        assert!(
+            lib_rs.contains("state.out_2_p0 = state.reg_2"),
+            "Missing register read, got:\n{lib_rs}"
+        );
+        assert!(
+            lib_rs.contains("state.reg_2 ="),
+            "Missing register write, got:\n{lib_rs}"
+        );
     }
 
     #[test]
@@ -3196,6 +3080,7 @@ mod tests {
                 output_values: vec![],
                 target: None,
                 custom_codegen: Some("pub fn block_1() -> f64 { custom_adc_read() }".to_string()),
+                is_delay: false,
             }],
             channels: vec![],
             tick_count: 0,
@@ -3234,6 +3119,7 @@ mod tests {
             output_values: vec![],
             target: None,
             custom_codegen: None,
+            is_delay: false,
         };
         let mut out = String::new();
         emit_block_call(&mut out, 15, &block, "udp_sink", &[], "    ");
@@ -3253,6 +3139,7 @@ mod tests {
                 output_values: vec![],
                 target: None,
                 custom_codegen: None,
+                is_delay: false,
             }],
             channels: vec![],
             tick_count: 0,
