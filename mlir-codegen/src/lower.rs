@@ -1,17 +1,26 @@
-//! Lower a `GraphSnapshot` to textual MLIR in the `dataflow` dialect.
+//! Lower a `GraphSnapshot` to MLIR using standard arith/func dialects.
 //!
-//! This module replaces the string-interpolation Rust codegen in `emit.rs`
-//! with structured MLIR output. The generated `.mlir` is fed to `mlir-opt`
-//! and `mlir-translate` by the pipeline module.
+//! Math operations emit standard `arith.*` ops. I/O operations emit
+//! `func.call @channel_name(...)`. The [`FunctionDef`] registry provides
+//! `mlir_op` mappings so the lowerer can resolve block types to MLIR ops
+//! from the schema rather than hardcoding them.
 
 use std::collections::HashMap;
 use std::fmt::Write;
 
+use module_traits::function_def::{builtin_function_defs, FunctionDef};
 use module_traits::value::PortKind;
 use serde_json::Value as JsonValue;
 
 use crate::dialect;
 use crate::state_machine;
+
+/// Look up a [`FunctionDef`] by block type id.
+fn lookup_function_def(block_type: &str) -> Option<FunctionDef> {
+    builtin_function_defs()
+        .into_iter()
+        .find(|d| d.id == block_type)
+}
 
 // ---------------------------------------------------------------------------
 // Public types mirroring the main crate's graph types.
@@ -287,7 +296,37 @@ pub fn lower_graph(snap: &GraphSnapshot) -> Result<String, String> {
             "udp_source" => emit_udp_source(&mut out, id)?,
             "udp_sink" => emit_udp_sink(&mut out, id, &inputs)?,
             other => {
-                return Err(format!("unsupported block type for MLIR codegen: {other}"));
+                // Try schema-driven fallback: if the FunctionDef has a standard
+                // arith mlir_op and matching arity, emit it generically.
+                if let Some(def) = lookup_function_def(other) {
+                    if let Some(ref mlir_op) = def.mlir_op {
+                        let ssa = dialect::ssa_name(id, 0);
+                        match (mlir_op.as_str(), inputs.len()) {
+                            ("arith.addf" | "arith.subf" | "arith.mulf", _) if inputs.len() >= 2 => {
+                                let a = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
+                                let b = inputs.get(1).map(|s| s.as_str()).unwrap_or("%zero");
+                                writeln!(out, "    {ssa} = {mlir_op} {a}, {b} : f64").unwrap();
+                            }
+                            ("func.call", _) => {
+                                // Channel-binding function call
+                                if def.outputs.is_empty() {
+                                    let val = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
+                                    writeln!(out, "    func.call @{other}({val}) : (f64) -> ()").unwrap();
+                                } else {
+                                    writeln!(out, "    {ssa} = func.call @{other}() : () -> f64").unwrap();
+                                }
+                            }
+                            _ => {
+                                return Err(format!("unsupported block type for MLIR codegen: {other}"));
+                            }
+                        }
+                    } else {
+                        // No mlir_op → skip (UI-only block like plot)
+                        writeln!(out, "    // skipped: {other} (no MLIR mapping)").unwrap();
+                    }
+                } else {
+                    return Err(format!("unsupported block type for MLIR codegen: {other}"));
+                }
             }
         }
         writeln!(out).unwrap();
@@ -324,8 +363,12 @@ fn emit_gain(
     inputs: &[String],
 ) -> Result<(), String> {
     // Gain maps to: factor_const = arith.constant; out = arith.mulf(in, factor_const)
-    let factor = config_float(block, "param1")
-        .max(config_float(block, "gain")); // support both legacy and new param names
+    // Prefer "gain" (new schema), fall back to "param1" (legacy)
+    let factor = if block.config.get("gain").and_then(|v| v.as_f64()).is_some() {
+        config_float(block, "gain")
+    } else {
+        config_float(block, "param1")
+    };
     let input = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
     let factor_ssa = format!("%gain_factor_{id}");
     let ssa = dialect::ssa_name(id, 0);
@@ -370,8 +413,17 @@ fn emit_clamp(
     inputs: &[String],
 ) -> Result<(), String> {
     // clamp(x, lo, hi) = arith.maximumf(lo, arith.minimumf(hi, x))
-    let lo = config_float(block, "param1").max(config_float(block, "min"));
-    let hi = config_float(block, "param2").max(config_float(block, "max"));
+    // Prefer "min"/"max" (new schema), fall back to "param1"/"param2" (legacy)
+    let lo = if block.config.get("min").and_then(|v| v.as_f64()).is_some() {
+        config_float(block, "min")
+    } else {
+        config_float(block, "param1")
+    };
+    let hi = if block.config.get("max").and_then(|v| v.as_f64()).is_some() {
+        config_float(block, "max")
+    } else {
+        config_float(block, "param2")
+    };
     let input = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
     let lo_ssa = format!("%clamp_lo_{id}");
     let hi_ssa = format!("%clamp_hi_{id}");
@@ -634,13 +686,13 @@ fn emit_channel_read(out: &mut String, id: u32, block: &BlockSnapshot) -> Result
 
 fn emit_channel_write(
     out: &mut String,
-    _id: u32,
+    id: u32,
     block: &BlockSnapshot,
     inputs: &[String],
 ) -> Result<(), String> {
     let channel = config_str(block, "channel");
     let ch_name = if channel.is_empty() {
-        format!("ch_{_id}")
+        format!("ch_{id}")
     } else {
         channel.to_string()
     };
@@ -734,7 +786,12 @@ pub fn lower_graph_ir(snap: &GraphSnapshot) -> Result<IrModule, String> {
             }
             "gain" => {
                 let input = inputs.first().copied().unwrap_or(zero);
-                let factor = builder.constant_f64(config_float(block, "param1"));
+                let gain_val = if block.config.get("gain").and_then(|v| v.as_f64()).is_some() {
+                    config_float(block, "gain")
+                } else {
+                    config_float(block, "param1")
+                };
+                let factor = builder.constant_f64(gain_val);
                 let v = builder.mulf(input, factor);
                 output_map.insert((id, 0), v);
             }
@@ -758,8 +815,16 @@ pub fn lower_graph_ir(snap: &GraphSnapshot) -> Result<IrModule, String> {
             }
             "clamp" => {
                 let input = inputs.first().copied().unwrap_or(zero);
-                let lo = config_float(block, "param1").max(config_float(block, "min"));
-                let hi = config_float(block, "param2").max(config_float(block, "max"));
+                let lo = if block.config.get("min").and_then(|v| v.as_f64()).is_some() {
+                    config_float(block, "min")
+                } else {
+                    config_float(block, "param1")
+                };
+                let hi = if block.config.get("max").and_then(|v| v.as_f64()).is_some() {
+                    config_float(block, "max")
+                } else {
+                    config_float(block, "param2")
+                };
                 let v = builder.clamp(input, lo, hi);
                 output_map.insert((id, 0), v);
             }
@@ -1731,5 +1796,148 @@ mod tests {
         let result = lower_graph_ir(&snap);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("cycle"));
+    }
+
+    // ── New block type lowering tests ─────────────────────────────
+
+    #[test]
+    fn lower_select_block() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            make_block(2, "constant", serde_json::json!({"value": 10.0})),
+            make_block(3, "constant", serde_json::json!({"value": 20.0})),
+            {
+                let mut b = make_block(4, "select", serde_json::json!({}));
+                b.inputs = vec![
+                    PortDef { name: "cond".to_string(), kind: PortKind::Float },
+                    PortDef { name: "a".to_string(), kind: PortKind::Float },
+                    PortDef { name: "b".to_string(), kind: PortKind::Float },
+                ];
+                b
+            },
+        ];
+        let channels = vec![
+            make_channel(1, 1, 0, 4, 0),
+            make_channel(2, 2, 0, 4, 1),
+            make_channel(3, 3, 0, 4, 2),
+        ];
+        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("arith.cmpf"), "expected cmpf for select guard, got:\n{mlir}");
+        assert!(mlir.contains("arith.select"), "expected arith.select, got:\n{mlir}");
+    }
+
+    #[test]
+    fn lower_channel_read_write() {
+        let blocks = vec![
+            {
+                let mut b = make_block(1, "channel_read", serde_json::json!({"channel": "adc0"}));
+                b.inputs = vec![];
+                b
+            },
+            {
+                let mut b = make_block(2, "channel_write", serde_json::json!({"channel": "pwm0"}));
+                b.inputs = vec![PortDef { name: "value".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(
+            mlir.contains("func.call @channel_read_adc0"),
+            "expected channel_read call, got:\n{mlir}"
+        );
+        assert!(
+            mlir.contains("func.call @channel_write_pwm0"),
+            "expected channel_write call, got:\n{mlir}"
+        );
+    }
+
+    #[test]
+    fn lower_gain_new_schema() {
+        // Test gain block with new "gain" param key (not legacy "param1")
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 5.0})),
+            {
+                let mut b = make_block(2, "gain", serde_json::json!({"gain": 4.0}));
+                b.inputs = vec![PortDef { name: "in".to_string(), kind: PortKind::Float }];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("arith.constant 4"), "expected gain factor 4, got:\n{mlir}");
+        assert!(mlir.contains("arith.mulf %v1_p0"), "expected mulf using constant output, got:\n{mlir}");
+    }
+
+    #[test]
+    fn lower_clamp_new_schema() {
+        // Test clamp block with new "min"/"max" param keys
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 50.0})),
+            {
+                let mut b = make_block(2, "clamp", serde_json::json!({"min": -10.0, "max": 10.0}));
+                b.inputs = vec![PortDef { name: "in".to_string(), kind: PortKind::Float }];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("-10"), "expected min bound -10, got:\n{mlir}");
+        assert!(mlir.contains("arith.minimumf"), "expected minimumf for clamp, got:\n{mlir}");
+        assert!(mlir.contains("arith.maximumf"), "expected maximumf for clamp, got:\n{mlir}");
+    }
+
+    #[test]
+    fn lower_ir_select_block() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            make_block(2, "constant", serde_json::json!({"value": 5.0})),
+            make_block(3, "constant", serde_json::json!({"value": 9.0})),
+            {
+                let mut b = make_block(4, "select", serde_json::json!({}));
+                b.inputs = vec![
+                    PortDef { name: "cond".to_string(), kind: PortKind::Float },
+                    PortDef { name: "a".to_string(), kind: PortKind::Float },
+                    PortDef { name: "b".to_string(), kind: PortKind::Float },
+                ];
+                b
+            },
+        ];
+        let channels = vec![
+            make_channel(1, 1, 0, 4, 0),
+            make_channel(2, 2, 0, 4, 1),
+            make_channel(3, 3, 0, 4, 2),
+        ];
+        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let module = lower_graph_ir(&snap).unwrap();
+        // 4 constants (zero + 3 block constants) + 1 select = at least 5 ops
+        assert!(module.funcs[0].ops.len() >= 5, "expected at least 5 ops");
+    }
+
+    #[test]
+    fn lower_ir_channel_read_write() {
+        let blocks = vec![
+            {
+                let mut b = make_block(1, "channel_read", serde_json::json!({"channel": "sensor"}));
+                b.inputs = vec![];
+                b
+            },
+            {
+                let mut b = make_block(2, "channel_write", serde_json::json!({"channel": "actuator"}));
+                b.inputs = vec![PortDef { name: "value".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let module = lower_graph_ir(&snap).unwrap();
+        // zero const + subscribe(channel_read) + publish(channel_write) = 3 ops
+        assert!(module.funcs[0].ops.len() >= 3);
     }
 }

@@ -616,6 +616,99 @@ mod tests {
         assert!(!g.simulation_mode);
     }
 
+    // ── Data-driven block integration tests ──────────────────────────
+
+    #[test]
+    fn data_driven_constant_via_create_block() {
+        use crate::dataflow::blocks::create_block;
+        let mut g = DataflowGraph::new();
+        let block = create_block("constant", r#"{"value": 7.0}"#).unwrap();
+        let c = g.add_block(block);
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let b = snap.blocks.iter().find(|b| b.id == c.0).unwrap();
+        assert_eq!(b.output_values[0].as_ref().unwrap().as_float(), Some(7.0));
+    }
+
+    #[test]
+    fn data_driven_subtract_chain() {
+        use crate::dataflow::blocks::create_block;
+        let mut g = DataflowGraph::new();
+        let a = g.add_block(create_block("constant", r#"{"value": 10.0}"#).unwrap());
+        let b = g.add_block(create_block("constant", r#"{"value": 3.0}"#).unwrap());
+        let sub = g.add_block(create_block("subtract", "{}").unwrap());
+        g.connect(a, 0, sub, 0).unwrap();
+        g.connect(b, 0, sub, 1).unwrap();
+        g.tick(0.01);
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let sub_snap = snap.blocks.iter().find(|b| b.id == sub.0).unwrap();
+        assert_eq!(
+            sub_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(7.0)
+        );
+    }
+
+    #[test]
+    fn data_driven_select_block() {
+        use crate::dataflow::blocks::create_block;
+        let mut g = DataflowGraph::new();
+        let cond = g.add_block(create_block("constant", r#"{"value": 1.0}"#).unwrap());
+        let a = g.add_block(create_block("constant", r#"{"value": 10.0}"#).unwrap());
+        let b = g.add_block(create_block("constant", r#"{"value": 20.0}"#).unwrap());
+        let sel = g.add_block(create_block("select", "{}").unwrap());
+        g.connect(cond, 0, sel, 0).unwrap();
+        g.connect(a, 0, sel, 1).unwrap();
+        g.connect(b, 0, sel, 2).unwrap();
+        g.tick(0.01);
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let sel_snap = snap.blocks.iter().find(|b| b.id == sel.0).unwrap();
+        // cond > 0 → selects a (10.0)
+        assert_eq!(
+            sel_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(10.0)
+        );
+    }
+
+    #[test]
+    fn data_driven_channel_read_write() {
+        use crate::dataflow::blocks::create_block;
+        let mut g = DataflowGraph::new();
+        let cr = g.add_block(
+            create_block("channel_read", r#"{"channel": "adc0"}"#).unwrap(),
+        );
+        let cw = g.add_block(
+            create_block("channel_write", r#"{"channel": "pwm0"}"#).unwrap(),
+        );
+        g.connect(cr, 0, cw, 0).unwrap();
+        g.tick(0.01);
+        let snap = g.snapshot();
+        // channel_read returns 0.0 in WASM (no hardware)
+        let cr_snap = snap.blocks.iter().find(|b| b.id == cr.0).unwrap();
+        assert_eq!(
+            cr_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(0.0)
+        );
+        // channel_write is a sink — no outputs
+        let cw_snap = snap.blocks.iter().find(|b| b.id == cw.0).unwrap();
+        assert!(cw_snap.output_values.is_empty());
+    }
+
+    #[test]
+    fn data_driven_gain_new_schema() {
+        use crate::dataflow::blocks::create_block;
+        let mut g = DataflowGraph::new();
+        let c = g.add_block(create_block("constant", r#"{"value": 4.0}"#).unwrap());
+        let gain = g.add_block(create_block("gain", r#"{"gain": 3.0}"#).unwrap());
+        g.connect(c, 0, gain, 0).unwrap();
+        g.tick(0.01);
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let gs = snap.blocks.iter().find(|b| b.id == gain.0).unwrap();
+        assert_eq!(gs.output_values[0].as_ref().unwrap().as_float(), Some(12.0));
+    }
+
     #[test]
     fn connect_errors() {
         let mut g = DataflowGraph::new();
