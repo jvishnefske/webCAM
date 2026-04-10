@@ -1,13 +1,29 @@
 /** Searchable block type picker for the dataflow editor. */
 
-import type { BlockTypeInfo } from './types.js';
+import type { BlockTypeInfo, FunctionDef } from './types.js';
 import type { DataflowManager } from './graph.js';
 
-export const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
-  constant: { value: 1.0 },
-  gain: { op: 'Gain', param1: 1.0, param2: 0.0 },
-  clamp: { op: 'Clamp', param1: 0.0, param2: 100.0 },
-  plot: { max_samples: 500 },
+/** Build default configs from function def param defaults.
+ *  Falls back to legacy hardcoded configs for block types not in the registry. */
+export function buildDefaultConfigs(defs: FunctionDef[]): Record<string, Record<string, unknown>> {
+  const configs: Record<string, Record<string, unknown>> = {};
+  for (const def of defs) {
+    const cfg: Record<string, unknown> = {};
+    for (const p of def.params) {
+      switch (p.kind) {
+        case 'Float': cfg[p.name] = parseFloat(p.default) || 0; break;
+        case 'Int': cfg[p.name] = parseInt(p.default, 10) || 0; break;
+        case 'Bool': cfg[p.name] = p.default === 'true'; break;
+        case 'String': cfg[p.name] = p.default; break;
+      }
+    }
+    configs[def.id] = cfg;
+  }
+  return configs;
+}
+
+/** Legacy defaults for block types not yet in the FunctionDef registry. */
+const LEGACY_CONFIGS: Record<string, Record<string, unknown>> = {
   udp_source: { address: '127.0.0.1:9000' },
   udp_sink: { address: '127.0.0.1:9001' },
   adc_source: { channel: 0, resolution_bits: 12 },
@@ -16,14 +32,21 @@ export const DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
   gpio_in: { pin: 2 },
   uart_tx: { port: 0, baud: 115200 },
   uart_rx: { port: 0, baud: 115200 },
-  pubsub_source: { topic: 'default', port_kind: 'Float' },
-  pubsub_sink: { topic: 'default', port_kind: 'Float' },
   state_machine: { states: ['idle'], initial: 'idle', transitions: [], input_topics: [], output_topics: [] },
   encoder: { channel: 0 },
   ssd1306_display: { i2c_bus: 0, address: 60 },
   tmc2209_stepper: { uart_port: 0, uart_addr: 0, steps_per_rev: 200, microsteps: 16 },
   tmc2209_stallguard: { uart_port: 0, uart_addr: 0, threshold: 50 },
 };
+
+/** Merged default configs: schema-driven from WASM + legacy fallbacks. */
+export let DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = { ...LEGACY_CONFIGS };
+
+/** Initialize DEFAULT_CONFIGS from WASM function defs.
+ *  Call this once after WASM is loaded. */
+export function initDefaultConfigs(defs: FunctionDef[]): void {
+  DEFAULT_CONFIGS = { ...LEGACY_CONFIGS, ...buildDefaultConfigs(defs) };
+}
 
 /** Show palette at screen position, create block at world position. */
 export function showPalette(

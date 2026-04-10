@@ -1,6 +1,12 @@
 //! Built-in block implementations.
+//!
+//! The primary creation path uses [`data_driven::DataDrivenBlock`] driven by
+//! [`module_traits::builtin_function_defs`].  Legacy per-struct blocks
+//! (embedded, state_machine, udp) are kept for features not yet expressible
+//! as pure `FunctionDef` values.
 
 pub mod constant;
+pub mod data_driven;
 pub mod embedded;
 pub mod function;
 pub mod plot;
@@ -12,24 +18,33 @@ pub mod udp;
 
 use self::registry::BlockRegistration;
 use super::block::Module;
+use module_traits::function_def::builtin_function_defs;
 
-/// Collect all block registrations from every block module.
-fn all_registrations() -> Vec<BlockRegistration> {
+/// Collect legacy block registrations (blocks not yet converted to data-driven).
+fn legacy_registrations() -> Vec<BlockRegistration> {
     let mut reg = Vec::new();
-    constant::register(&mut reg);
-    function::register(&mut reg);
-    plot::register(&mut reg);
-    serde_block::register(&mut reg);
-    udp::register(&mut reg);
+    // Only register block types that are NOT covered by FunctionDef.
+    // Legacy blocks: embedded peripherals (need SimModel), state_machine, udp
     embedded::register(&mut reg);
     state_machine::register(&mut reg);
-    pubsub::register(&mut reg);
+    udp::register(&mut reg);
     reg
 }
 
 /// Create a block from its type name and JSON config.
+///
+/// Tries the data-driven [`FunctionDef`] registry first, then falls back
+/// to legacy per-struct block registrations.
 pub fn create_block(block_type: &str, config_json: &str) -> Result<Box<dyn Module>, String> {
-    all_registrations()
+    // Try data-driven first
+    let defs = builtin_function_defs();
+    if let Some(def) = defs.into_iter().find(|d| d.id == block_type) {
+        return data_driven::DataDrivenBlock::new(def, config_json)
+            .map(|b| Box::new(b) as Box<dyn Module>);
+    }
+
+    // Fall back to legacy per-struct blocks
+    legacy_registrations()
         .iter()
         .find(|r| r.block_type == block_type)
         .map(|r| (r.create_from_json)(config_json))
@@ -37,15 +52,37 @@ pub fn create_block(block_type: &str, config_json: &str) -> Result<Box<dyn Modul
 }
 
 /// List all available block types for the palette.
+///
+/// Merges data-driven function defs with legacy block registrations.
 pub fn available_block_types() -> Vec<BlockTypeInfo> {
-    all_registrations()
+    let mut types: Vec<BlockTypeInfo> = builtin_function_defs()
         .iter()
-        .map(|r| BlockTypeInfo {
-            block_type: r.block_type,
-            name: r.display_name,
-            category: r.category,
+        .map(|d| BlockTypeInfo {
+            block_type: leak_str(&d.id),
+            name: leak_str(&d.display_name),
+            category: leak_str(&d.category),
         })
-        .collect()
+        .collect();
+
+    // Add legacy blocks that aren't covered by FunctionDef
+    let dd_ids: std::collections::HashSet<&str> = types.iter().map(|t| t.block_type).collect();
+    for r in legacy_registrations() {
+        if !dd_ids.contains(r.block_type) {
+            types.push(BlockTypeInfo {
+                block_type: r.block_type,
+                name: r.display_name,
+                category: r.category,
+            });
+        }
+    }
+
+    types
+}
+
+/// Leak a string to get a `&'static str` — only called at palette-build time
+/// (a small, bounded set of strings), not on every tick.
+fn leak_str(s: &str) -> &'static str {
+    Box::leak(s.to_string().into_boxed_str())
 }
 
 #[derive(Debug, serde::Serialize, tsify_next::Tsify)]

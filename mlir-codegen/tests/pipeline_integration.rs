@@ -63,7 +63,7 @@ fn test_pipeline_default_config() {
 
     // The MLIR text should always be produced regardless of external tool availability
     assert!(
-        output.mlir_text.contains("dataflow.constant"),
+        output.mlir_text.contains("arith.constant"),
         "pipeline output should contain the lowered constant op"
     );
     assert!(
@@ -95,12 +95,12 @@ fn test_pipeline_multi_block_chain() {
         mlir_codegen::pipeline::run_pipeline(&snap, &config).expect("run_pipeline should succeed");
 
     assert!(
-        output.mlir_text.contains("dataflow.constant"),
+        output.mlir_text.contains("arith.constant"),
         "MLIR should contain the constant op; got:\n{}",
         output.mlir_text
     );
     assert!(
-        output.mlir_text.contains("dataflow.gain"),
+        output.mlir_text.contains("arith.mulf"),
         "MLIR should contain the gain op; got:\n{}",
         output.mlir_text
     );
@@ -111,7 +111,7 @@ fn test_pipeline_multi_block_chain() {
         output.mlir_text
     );
     assert!(
-        output.mlir_text.contains("dataflow.gain(%v1_p0)"),
+        output.mlir_text.contains("arith.mulf %v1_p0"),
         "gain op should be wired to constant output; got:\n{}",
         output.mlir_text
     );

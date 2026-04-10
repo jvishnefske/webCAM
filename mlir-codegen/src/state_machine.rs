@@ -137,7 +137,7 @@ pub fn emit_state_machine_tick(
                             .unwrap();
                             writeln!(
                                 out,
-                                "        {field_ssa} = dataflow.message_field {guard_ssa}, \"{field}\" : f64"
+                                "        {field_ssa} = builtin.extract_field {guard_ssa}, \"{field}\" : f64"
                             )
                             .unwrap();
                             writeln!(
@@ -345,7 +345,7 @@ mod tests {
         let inputs = vec!["%g0".to_string(), "%g1".to_string()];
         let mut out = String::new();
         emit_state_machine_tick(&mut out, 10, &block, &inputs).unwrap();
-        assert!(out.contains("dataflow.state_machine"));
+        assert!(out.contains("scf.execute_region"));
         assert!(out.contains("^idle"));
         assert!(out.contains("^running"));
         assert!(out.contains("cf.cond_br"));
@@ -389,10 +389,10 @@ mod tests {
         let inputs = vec!["%motor_cmd".to_string()];
         let mut out = String::new();
         emit_state_machine_tick(&mut out, 20, &block, &inputs).unwrap();
-        assert!(out.contains("dataflow.state_machine"), "should contain state_machine op");
+        assert!(out.contains("scf.execute_region"), "should contain state_machine op");
         assert!(out.contains("^idle"), "should contain idle region");
         assert!(out.contains("^running"), "should contain running region");
-        assert!(out.contains("dataflow.message_field"), "should contain message_field op");
+        assert!(out.contains("builtin.extract_field"), "should contain message_field op");
         assert!(out.contains("speed"), "should reference speed field");
     }
 

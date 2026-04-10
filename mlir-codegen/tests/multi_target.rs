@@ -182,26 +182,26 @@ fn test_rp2040_adc_pwm_graph() {
 
     // Verify the MLIR contains the expected hardware ops
     assert!(
-        mlir.contains("dataflow.adc_read"),
-        "MLIR should contain dataflow.adc_read for the ADC source; got:\n{mlir}"
+        mlir.contains("func.call @adc_read"),
+        "MLIR should contain func.call @adc_read for the ADC source; got:\n{mlir}"
     );
     assert!(
-        mlir.contains("dataflow.pwm_write"),
-        "MLIR should contain dataflow.pwm_write for the PWM sink; got:\n{mlir}"
+        mlir.contains("func.call @pwm_write"),
+        "MLIR should contain func.call @pwm_write for the PWM sink; got:\n{mlir}"
     );
     assert!(
-        mlir.contains("dataflow.gain"),
-        "MLIR should contain dataflow.gain for the scaling block; got:\n{mlir}"
+        mlir.contains("arith.mulf"),
+        "MLIR should contain arith.mulf for the scaling block; got:\n{mlir}"
     );
 
-    // Verify channel configuration appears in the attributes
+    // Verify channel configuration appears in the function names
     assert!(
-        mlir.contains("channel = 0 : i32"),
-        "adc_read should have channel = 0 attribute; got:\n{mlir}"
+        mlir.contains("@adc_read_0"),
+        "adc_read should have channel 0 in function name; got:\n{mlir}"
     );
     assert!(
-        mlir.contains("channel = 1 : i32"),
-        "pwm_write should have channel = 1 attribute; got:\n{mlir}"
+        mlir.contains("@pwm_write_1"),
+        "pwm_write should have channel 1 in function name; got:\n{mlir}"
     );
 
     // Verify gain factor
@@ -212,7 +212,7 @@ fn test_rp2040_adc_pwm_graph() {
 
     // Verify wiring: gain should reference adc output SSA name
     assert!(
-        mlir.contains("dataflow.gain(%v1_p0)"),
+        mlir.contains("arith.mulf %v1_p0"),
         "gain input should be wired to adc output %v1_p0; got:\n{mlir}"
     );
 
@@ -264,20 +264,20 @@ fn test_stm32_multi_block_graph() {
 
     // Verify all four op types are present
     assert!(
-        mlir.contains("dataflow.constant"),
-        "MLIR should contain dataflow.constant; got:\n{mlir}"
+        mlir.contains("arith.constant"),
+        "MLIR should contain arith.constant; got:\n{mlir}"
     );
     assert!(
-        mlir.contains("dataflow.gain"),
-        "MLIR should contain dataflow.gain; got:\n{mlir}"
+        mlir.contains("arith.mulf"),
+        "MLIR should contain arith.mulf for gain; got:\n{mlir}"
     );
     assert!(
-        mlir.contains("dataflow.subtract"),
-        "MLIR should contain dataflow.subtract; got:\n{mlir}"
+        mlir.contains("arith.subf"),
+        "MLIR should contain arith.subf for subtract; got:\n{mlir}"
     );
     assert!(
-        mlir.contains("dataflow.clamp"),
-        "MLIR should contain dataflow.clamp; got:\n{mlir}"
+        mlir.contains("arith.minimumf") || mlir.contains("arith.maximumf"),
+        "MLIR should contain arith.minimumf/maximumf for clamp; got:\n{mlir}"
     );
 
     // Verify the constant values appear
@@ -298,13 +298,13 @@ fn test_stm32_multi_block_graph() {
 
     // Verify wiring: subtract should reference both setpoint and gain outputs
     assert!(
-        mlir.contains("dataflow.subtract(%v1_p0, %v3_p0)"),
+        mlir.contains("arith.subf %v1_p0, %v3_p0"),
         "subtract should be wired to setpoint (%v1_p0) and gain output (%v3_p0); got:\n{mlir}"
     );
 
     // Verify wiring: clamp should reference subtract output
     assert!(
-        mlir.contains("dataflow.clamp(%v4_p0)"),
+        mlir.contains("arith.minimumf %v4_p0"),
         "clamp should be wired to subtract output %v4_p0; got:\n{mlir}"
     );
 }

@@ -254,6 +254,61 @@ pub fn dataflow_block_types() -> JsValue {
     serde_wasm_bindgen::to_value(&types).unwrap_or(JsValue::NULL)
 }
 
+// ── Function Def Schema API ──────────────────────────────────────────
+
+/// Return the full function definition registry as JSON.
+///
+/// This is the single source of truth for all block types — the frontend
+/// uses this to build its palette, config panels, and validation instead
+/// of maintaining its own type mirrors.
+#[wasm_bindgen]
+pub fn dataflow_function_defs() -> Result<JsValue, JsValue> {
+    let defs = module_traits::builtin_function_defs();
+    serde_wasm_bindgen::to_value(&defs).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+// ── MCU Pin Schema API ──────────────────────────────────────────────
+
+/// List all supported MCU target families.
+#[wasm_bindgen]
+pub fn mcu_families() -> JsValue {
+    let families = module_traits::inventory::supported_families();
+    serde_wasm_bindgen::to_value(&families).unwrap_or(JsValue::NULL)
+}
+
+/// Return the full MCU definition for a target family as JSON.
+///
+/// Includes all pins, peripherals, alternate functions, and clock config.
+/// The frontend uses this to build BSP configuration panels.
+#[wasm_bindgen]
+pub fn mcu_definition(family: &str) -> Result<JsValue, JsValue> {
+    let mcu = module_traits::inventory::mcu_for(family)
+        .ok_or_else(|| JsValue::from_str(&format!("unknown MCU family: {family}")))?;
+    serde_wasm_bindgen::to_value(&mcu).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Return just the pin definitions for a target family.
+///
+/// Each pin includes its name, port, alternate functions, and ADC channel.
+/// The frontend uses this to populate channel binding dropdowns.
+#[wasm_bindgen]
+pub fn mcu_pins(family: &str) -> Result<JsValue, JsValue> {
+    let mcu = module_traits::inventory::mcu_for(family)
+        .ok_or_else(|| JsValue::from_str(&format!("unknown MCU family: {family}")))?;
+    serde_wasm_bindgen::to_value(&mcu.pins).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+/// Return peripheral instances for a target family.
+///
+/// Each peripheral includes its signals and available pin mappings.
+#[wasm_bindgen]
+pub fn mcu_peripherals(family: &str) -> Result<JsValue, JsValue> {
+    let mcu = module_traits::inventory::mcu_for(family)
+        .ok_or_else(|| JsValue::from_str(&format!("unknown MCU family: {family}")))?;
+    serde_wasm_bindgen::to_value(&mcu.peripherals)
+        .map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
 /// Generate a standalone Rust crate from a dataflow graph.
 /// Returns JSON: `{ "files": [["path", "content"], ...] }` or error.
 #[wasm_bindgen]

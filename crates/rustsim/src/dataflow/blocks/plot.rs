@@ -75,6 +75,7 @@ impl Tick for PlotBlock {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
     reg.push(super::registry::BlockRegistration {
         block_type: "plot",

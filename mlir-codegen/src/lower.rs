@@ -266,6 +266,9 @@ pub fn lower_graph(snap: &GraphSnapshot) -> Result<String, String> {
             "subtract" => emit_subtract(&mut out, id, &inputs)?,
             "multiply" => emit_multiply(&mut out, id, &inputs)?,
             "clamp" => emit_clamp(&mut out, id, block, &inputs)?,
+            "select" => emit_select(&mut out, id, &inputs)?,
+            "channel_read" => emit_channel_read(&mut out, id, block)?,
+            "channel_write" => emit_channel_write(&mut out, id, block, &inputs)?,
             "adc_source" => emit_adc_read(&mut out, id, block)?,
             "pwm_sink" => emit_pwm_write(&mut out, id, block, &inputs)?,
             "gpio_out" => emit_gpio_write(&mut out, id, block, &inputs)?,
@@ -307,8 +310,7 @@ fn emit_constant(out: &mut String, id: u32, block: &BlockSnapshot) -> Result<(),
     let ssa = dialect::ssa_name(id, 0);
     writeln!(
         out,
-        "    {ssa} = {op} {attr}",
-        op = dialect::OP_CONSTANT,
+        "    {ssa} = arith.constant {attr}",
         attr = dialect::float_attr(value),
     )
     .unwrap();
@@ -321,16 +323,19 @@ fn emit_gain(
     block: &BlockSnapshot,
     inputs: &[String],
 ) -> Result<(), String> {
-    let factor = config_float(block, "param1");
+    // Gain maps to: factor_const = arith.constant; out = arith.mulf(in, factor_const)
+    let factor = config_float(block, "param1")
+        .max(config_float(block, "gain")); // support both legacy and new param names
     let input = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
+    let factor_ssa = format!("%gain_factor_{id}");
     let ssa = dialect::ssa_name(id, 0);
     writeln!(
         out,
-        "    {ssa} = {op}({input}) {{ factor = {attr} }} : f64",
-        op = dialect::OP_GAIN,
+        "    {factor_ssa} = arith.constant {attr}",
         attr = dialect::float_attr(factor),
     )
     .unwrap();
+    writeln!(out, "    {ssa} = arith.mulf {input}, {factor_ssa} : f64").unwrap();
     Ok(())
 }
 
@@ -338,12 +343,7 @@ fn emit_add(out: &mut String, id: u32, inputs: &[String]) -> Result<(), String> 
     let a = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
     let b = inputs.get(1).map(|s| s.as_str()).unwrap_or("%zero");
     let ssa = dialect::ssa_name(id, 0);
-    writeln!(
-        out,
-        "    {ssa} = {op}({a}, {b}) : f64",
-        op = dialect::OP_ADD,
-    )
-    .unwrap();
+    writeln!(out, "    {ssa} = arith.addf {a}, {b} : f64").unwrap();
     Ok(())
 }
 
@@ -351,12 +351,7 @@ fn emit_multiply(out: &mut String, id: u32, inputs: &[String]) -> Result<(), Str
     let a = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
     let b = inputs.get(1).map(|s| s.as_str()).unwrap_or("%zero");
     let ssa = dialect::ssa_name(id, 0);
-    writeln!(
-        out,
-        "    {ssa} = {op}({a}, {b}) : f64",
-        op = dialect::OP_MUL,
-    )
-    .unwrap();
+    writeln!(out, "    {ssa} = arith.mulf {a}, {b} : f64").unwrap();
     Ok(())
 }
 
@@ -364,12 +359,7 @@ fn emit_subtract(out: &mut String, id: u32, inputs: &[String]) -> Result<(), Str
     let a = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
     let b = inputs.get(1).map(|s| s.as_str()).unwrap_or("%zero");
     let ssa = dialect::ssa_name(id, 0);
-    writeln!(
-        out,
-        "    {ssa} = {op}({a}, {b}) : f64",
-        op = dialect::OP_SUB,
-    )
-    .unwrap();
+    writeln!(out, "    {ssa} = arith.subf {a}, {b} : f64").unwrap();
     Ok(())
 }
 
@@ -379,18 +369,18 @@ fn emit_clamp(
     block: &BlockSnapshot,
     inputs: &[String],
 ) -> Result<(), String> {
-    let min = config_float(block, "param1");
-    let max = config_float(block, "param2");
+    // clamp(x, lo, hi) = arith.maximumf(lo, arith.minimumf(hi, x))
+    let lo = config_float(block, "param1").max(config_float(block, "min"));
+    let hi = config_float(block, "param2").max(config_float(block, "max"));
     let input = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
+    let lo_ssa = format!("%clamp_lo_{id}");
+    let hi_ssa = format!("%clamp_hi_{id}");
+    let min_ssa = format!("%clamp_min_{id}");
     let ssa = dialect::ssa_name(id, 0);
-    writeln!(
-        out,
-        "    {ssa} = {op}({input}) {{ min = {min_attr}, max = {max_attr} }} : f64",
-        op = dialect::OP_CLAMP,
-        min_attr = dialect::float_attr(min),
-        max_attr = dialect::float_attr(max),
-    )
-    .unwrap();
+    writeln!(out, "    {lo_ssa} = arith.constant {}", dialect::float_attr(lo)).unwrap();
+    writeln!(out, "    {hi_ssa} = arith.constant {}", dialect::float_attr(hi)).unwrap();
+    writeln!(out, "    {min_ssa} = arith.minimumf {input}, {hi_ssa} : f64").unwrap();
+    writeln!(out, "    {ssa} = arith.maximumf {min_ssa}, {lo_ssa} : f64").unwrap();
     Ok(())
 }
 
@@ -399,9 +389,7 @@ fn emit_adc_read(out: &mut String, id: u32, block: &BlockSnapshot) -> Result<(),
     let ssa = dialect::ssa_name(id, 0);
     writeln!(
         out,
-        "    {ssa} = {op} {{ channel = {attr} }} : f64",
-        op = dialect::OP_ADC_READ,
-        attr = dialect::i32_attr(channel as i32),
+        "    {ssa} = func.call @adc_read_{channel}() : () -> f64",
     )
     .unwrap();
     Ok(())
@@ -417,9 +405,7 @@ fn emit_pwm_write(
     let duty = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
     writeln!(
         out,
-        "    {op}({duty}) {{ channel = {attr} }}",
-        op = dialect::OP_PWM_WRITE,
-        attr = dialect::i32_attr(channel as i32),
+        "    func.call @pwm_write_{channel}({duty}) : (f64) -> ()",
     )
     .unwrap();
     Ok(())
@@ -435,9 +421,7 @@ fn emit_gpio_write(
     let val = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
     writeln!(
         out,
-        "    {op}({val}) {{ pin = {attr} }}",
-        op = dialect::OP_GPIO_WRITE,
-        attr = dialect::i32_attr(pin as i32),
+        "    func.call @gpio_write_{pin}({val}) : (f64) -> ()",
     )
     .unwrap();
     Ok(())
@@ -448,9 +432,7 @@ fn emit_gpio_read(out: &mut String, id: u32, block: &BlockSnapshot) -> Result<()
     let ssa = dialect::ssa_name(id, 0);
     writeln!(
         out,
-        "    {ssa} = {op} {{ pin = {attr} }} : f64",
-        op = dialect::OP_GPIO_READ,
-        attr = dialect::i32_attr(pin as i32),
+        "    {ssa} = func.call @gpio_read_{pin}() : () -> f64",
     )
     .unwrap();
     Ok(())
@@ -466,9 +448,7 @@ fn emit_uart_tx(
     let data = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
     writeln!(
         out,
-        "    {op}({data}) {{ port = {attr} }}",
-        op = dialect::OP_UART_TX,
-        attr = dialect::i32_attr(port as i32),
+        "    func.call @uart_tx_{port}({data}) : (f64) -> ()",
     )
     .unwrap();
     Ok(())
@@ -479,9 +459,7 @@ fn emit_uart_rx(out: &mut String, id: u32, block: &BlockSnapshot) -> Result<(), 
     let ssa = dialect::ssa_name(id, 0);
     writeln!(
         out,
-        "    {ssa} = {op} {{ port = {attr} }} : f64",
-        op = dialect::OP_UART_RX,
-        attr = dialect::i32_attr(port as i32),
+        "    {ssa} = func.call @uart_rx_{port}() : () -> f64",
     )
     .unwrap();
     Ok(())
@@ -493,9 +471,7 @@ fn emit_encoder_read(out: &mut String, id: u32, block: &BlockSnapshot) -> Result
     let ssa_vel = dialect::ssa_name(id, 1);
     writeln!(
         out,
-        "    {ssa_pos} = {op} {{ channel = {attr} }} : f64",
-        op = dialect::OP_ENCODER_READ,
-        attr = dialect::i32_attr(channel as i32),
+        "    {ssa_pos} = func.call @encoder_read_{channel}() : () -> f64",
     )
     .unwrap();
     // Velocity is a derived value — emit zero placeholder
@@ -519,10 +495,7 @@ fn emit_display_write(
     let line2 = inputs.get(1).map(|s| s.as_str()).unwrap_or("%zero");
     writeln!(
         out,
-        "    {op}({line1}, {line2}) {{ bus = {bus_attr}, addr = {addr_attr} }}",
-        op = dialect::OP_DISPLAY_WRITE,
-        bus_attr = dialect::i32_attr(bus as i32),
-        addr_attr = dialect::i32_attr(addr as i32),
+        "    func.call @display_write_{bus}_{addr}({line1}, {line2}) : (f64, f64) -> ()",
     )
     .unwrap();
     Ok(())
@@ -537,25 +510,21 @@ fn emit_stepper(
     let port = config_u64(block, "uart_port");
     let target = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
     let enable = inputs.get(1).map(|s| s.as_str()).unwrap_or("%zero");
-    let port_attr = dialect::i32_attr(port as i32);
 
     writeln!(
         out,
-        "    {op}({enable}) {{ port = {port_attr} }}",
-        op = dialect::OP_STEPPER_ENABLE,
+        "    func.call @stepper_enable_{port}({enable}) : (f64) -> ()",
     )
     .unwrap();
     writeln!(
         out,
-        "    {op}({target}) {{ port = {port_attr} }}",
-        op = dialect::OP_STEPPER_MOVE,
+        "    func.call @stepper_move_{port}({target}) : (f64) -> ()",
     )
     .unwrap();
     let ssa = dialect::ssa_name(id, 0);
     writeln!(
         out,
-        "    {ssa} = {op} {{ port = {port_attr} }} : f64",
-        op = dialect::OP_STEPPER_POSITION,
+        "    {ssa} = func.call @stepper_position_{port}() : () -> f64",
     )
     .unwrap();
     Ok(())
@@ -570,13 +539,10 @@ fn emit_stallguard(out: &mut String, id: u32, block: &BlockSnapshot) -> Result<(
 
     writeln!(
         out,
-        "    {ssa_val} = {op} {{ port = {port_attr}, addr = {addr_attr} }} : f64",
-        op = dialect::OP_STALLGUARD_READ,
-        port_attr = dialect::i32_attr(port as i32),
-        addr_attr = dialect::i32_attr(addr as i32),
+        "    {ssa_val} = func.call @stallguard_read_{port}_{addr}() : () -> f64",
     )
     .unwrap();
-    // Stall detection: value < threshold → 1.0
+    // Stall detection: value < threshold → 1.0 (arith dialect)
     writeln!(out, "    // stall detection: threshold = {threshold}").unwrap();
     let threshold_ssa = format!("%sg_thresh_{id}");
     writeln!(
@@ -608,12 +574,11 @@ fn emit_pubsub_sink(
     inputs: &[String],
 ) -> Result<(), String> {
     let topic = config_str(block, "topic");
+    let t = if topic.is_empty() { "unknown" } else { topic };
     let val = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
     writeln!(
         out,
-        "    {op}({val}) {{ topic = {attr} }}",
-        op = dialect::OP_PUBLISH,
-        attr = dialect::string_attr(if topic.is_empty() { "unknown" } else { topic }),
+        "    func.call @publish_{t}({val}) : (f64) -> ()",
     )
     .unwrap();
     Ok(())
@@ -621,12 +586,68 @@ fn emit_pubsub_sink(
 
 fn emit_pubsub_source(out: &mut String, id: u32, block: &BlockSnapshot) -> Result<(), String> {
     let topic = config_str(block, "topic");
+    let t = if topic.is_empty() { "unknown" } else { topic };
     let ssa = dialect::ssa_name(id, 0);
     writeln!(
         out,
-        "    {ssa} = {op} {{ topic = {attr} }} : f64",
-        op = dialect::OP_SUBSCRIBE,
-        attr = dialect::string_attr(if topic.is_empty() { "unknown" } else { topic }),
+        "    {ssa} = func.call @subscribe_{t}() : () -> f64",
+    )
+    .unwrap();
+    Ok(())
+}
+
+fn emit_select(out: &mut String, id: u32, inputs: &[String]) -> Result<(), String> {
+    let cond = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
+    let a = inputs.get(1).map(|s| s.as_str()).unwrap_or("%zero");
+    let b = inputs.get(2).map(|s| s.as_str()).unwrap_or("%zero");
+    let cmp_ssa = format!("%sel_cmp_{id}");
+    let ssa = dialect::ssa_name(id, 0);
+    // cond > 0 → i1
+    writeln!(
+        out,
+        "    {cmp_ssa} = arith.cmpf \"ogt\", {cond}, %zero : f64"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    {ssa} = arith.select {cmp_ssa}, {a}, {b} : f64"
+    )
+    .unwrap();
+    Ok(())
+}
+
+fn emit_channel_read(out: &mut String, id: u32, block: &BlockSnapshot) -> Result<(), String> {
+    let channel = config_str(block, "channel");
+    let ch_name = if channel.is_empty() {
+        format!("ch_{id}")
+    } else {
+        channel.to_string()
+    };
+    let ssa = dialect::ssa_name(id, 0);
+    writeln!(
+        out,
+        "    {ssa} = func.call @channel_read_{ch_name}() : () -> f64",
+    )
+    .unwrap();
+    Ok(())
+}
+
+fn emit_channel_write(
+    out: &mut String,
+    _id: u32,
+    block: &BlockSnapshot,
+    inputs: &[String],
+) -> Result<(), String> {
+    let channel = config_str(block, "channel");
+    let ch_name = if channel.is_empty() {
+        format!("ch_{_id}")
+    } else {
+        channel.to_string()
+    };
+    let val = inputs.first().map(|s| s.as_str()).unwrap_or("%zero");
+    writeln!(
+        out,
+        "    func.call @channel_write_{ch_name}({val}) : (f64) -> ()",
     )
     .unwrap();
     Ok(())
@@ -737,10 +758,37 @@ pub fn lower_graph_ir(snap: &GraphSnapshot) -> Result<IrModule, String> {
             }
             "clamp" => {
                 let input = inputs.first().copied().unwrap_or(zero);
-                let lo = config_float(block, "param1");
-                let hi = config_float(block, "param2");
+                let lo = config_float(block, "param1").max(config_float(block, "min"));
+                let hi = config_float(block, "param2").max(config_float(block, "max"));
                 let v = builder.clamp(input, lo, hi);
                 output_map.insert((id, 0), v);
+            }
+            "select" => {
+                let cond = inputs.first().copied().unwrap_or(zero);
+                let a = inputs.get(1).copied().unwrap_or(zero);
+                let b = inputs.get(2).copied().unwrap_or(zero);
+                let v = builder.select(cond, a, b);
+                output_map.insert((id, 0), v);
+            }
+            "channel_read" => {
+                let channel = config_str(block, "channel");
+                let ch_name = if channel.is_empty() {
+                    format!("ch_{id}")
+                } else {
+                    channel.to_string()
+                };
+                let v = builder.subscribe(&ch_name);
+                output_map.insert((id, 0), v);
+            }
+            "channel_write" => {
+                let channel = config_str(block, "channel");
+                let ch_name = if channel.is_empty() {
+                    format!("ch_{id}")
+                } else {
+                    channel.to_string()
+                };
+                let input = inputs.first().copied().unwrap_or(zero);
+                builder.publish(&ch_name, input);
             }
             "adc_source" => {
                 let channel = config_u64(block, "channel") as u8;
@@ -849,7 +897,7 @@ mod tests {
             time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("dataflow.constant"));
+        assert!(mlir.contains("arith.constant"));
         assert!(mlir.contains("42"));
         assert!(mlir.contains("%v1_p0"));
     }
@@ -875,8 +923,8 @@ mod tests {
             time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("dataflow.gain(%v1_p0)"));
-        assert!(mlir.contains("factor = 3"));
+        assert!(mlir.contains("arith.mulf %v1_p0"));
+        assert!(mlir.contains("3"), "expected gain factor 3 in output");
     }
 
     #[test]
@@ -907,7 +955,7 @@ mod tests {
             time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("dataflow.add(%v1_p0, %v2_p0)"));
+        assert!(mlir.contains("arith.addf %v1_p0, %v2_p0"));
     }
 
     #[test]
@@ -936,8 +984,8 @@ mod tests {
             time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("dataflow.adc_read"));
-        assert!(mlir.contains("dataflow.pwm_write(%v1_p0)"));
+        assert!(mlir.contains("func.call @adc_read"));
+        assert!(mlir.contains("func.call @pwm_write"));
     }
 
     #[test]
@@ -985,7 +1033,7 @@ mod tests {
             time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("dataflow.constant"));
+        assert!(mlir.contains("arith.constant"));
         assert!(!mlir.contains("plot"));
     }
 
@@ -1020,8 +1068,8 @@ mod tests {
             time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("dataflow.subscribe"));
-        assert!(mlir.contains("dataflow.publish"));
+        assert!(mlir.contains("func.call @subscribe"));
+        assert!(mlir.contains("func.call @publish"));
         assert!(mlir.contains("bridge_1_0"));
     }
 
@@ -1054,8 +1102,8 @@ mod tests {
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(
-            mlir.contains("dataflow.subtract(%v1_p0, %v2_p0)"),
-            "expected dataflow.subtract with wired inputs, got:\n{mlir}"
+            mlir.contains("arith.subf %v1_p0, %v2_p0"),
+            "expected arith.subf with wired inputs, got:\n{mlir}"
         );
     }
 
@@ -1085,16 +1133,12 @@ mod tests {
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(
-            mlir.contains("dataflow.clamp(%v1_p0)"),
-            "expected dataflow.clamp with wired input, got:\n{mlir}"
+            mlir.contains("arith.maximumf") && mlir.contains("arith.minimumf"),
+            "expected arith clamp ops, got:\n{mlir}"
         );
         assert!(
-            mlir.contains("min ="),
-            "expected min attribute in clamp, got:\n{mlir}"
-        );
-        assert!(
-            mlir.contains("max ="),
-            "expected max attribute in clamp, got:\n{mlir}"
+            mlir.contains("arith.constant"),
+            "expected arith.constant for clamp bounds, got:\n{mlir}"
         );
     }
 
@@ -1113,12 +1157,12 @@ mod tests {
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(
-            mlir.contains("dataflow.adc_read"),
-            "expected dataflow.adc_read op, got:\n{mlir}"
+            mlir.contains("func.call @adc_read"),
+            "expected func.call @adc_read op, got:\n{mlir}"
         );
         assert!(
-            mlir.contains("channel = 2 : i32"),
-            "expected channel attribute of 2, got:\n{mlir}"
+            mlir.contains("adc_read_2"),
+            "expected adc_read_2 channel call, got:\n{mlir}"
         );
     }
 
@@ -1145,12 +1189,12 @@ mod tests {
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(
-            mlir.contains("dataflow.pwm_write(%v1_p0)"),
-            "expected dataflow.pwm_write with wired input, got:\n{mlir}"
+            mlir.contains("func.call @pwm_write"),
+            "expected func.call @pwm_write with wired input, got:\n{mlir}"
         );
         assert!(
-            mlir.contains("channel = 3 : i32"),
-            "expected channel attribute of 3, got:\n{mlir}"
+            mlir.contains("pwm_write_3"),
+            "expected pwm_write_3 channel call, got:\n{mlir}"
         );
     }
 
@@ -1183,7 +1227,7 @@ mod tests {
         );
         // The gain block 2 must use %v1_p0 as its input operand
         assert!(
-            mlir.contains("dataflow.gain(%v1_p0)"),
+            mlir.contains("arith.mulf %v1_p0"),
             "expected gain to reference constant's SSA value, got:\n{mlir}"
         );
         // The gain block 2 produces %v2_p0
@@ -1219,8 +1263,8 @@ mod tests {
             time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("dataflow.gpio_read"), "got:\n{mlir}");
-        assert!(mlir.contains("dataflow.gpio_write"), "got:\n{mlir}");
+        assert!(mlir.contains("func.call @gpio_read"), "got:\n{mlir}");
+        assert!(mlir.contains("func.call @gpio_write"), "got:\n{mlir}");
     }
 
     #[test]
@@ -1249,8 +1293,8 @@ mod tests {
             time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("dataflow.uart_rx"), "got:\n{mlir}");
-        assert!(mlir.contains("dataflow.uart_tx"), "got:\n{mlir}");
+        assert!(mlir.contains("func.call @uart_rx"), "got:\n{mlir}");
+        assert!(mlir.contains("func.call @uart_tx"), "got:\n{mlir}");
     }
 
     #[test]
@@ -1277,7 +1321,7 @@ mod tests {
             time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("dataflow.encoder_read"), "got:\n{mlir}");
+        assert!(mlir.contains("func.call @encoder_read"), "got:\n{mlir}");
     }
 
     #[test]
@@ -1313,7 +1357,7 @@ mod tests {
             time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("dataflow.display_write"), "got:\n{mlir}");
+        assert!(mlir.contains("func.call @display_write"), "got:\n{mlir}");
     }
 
     #[test]
@@ -1344,9 +1388,9 @@ mod tests {
             time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("dataflow.stepper_move"), "got:\n{mlir}");
-        assert!(mlir.contains("dataflow.stepper_enable"), "got:\n{mlir}");
-        assert!(mlir.contains("dataflow.stepper_position"), "got:\n{mlir}");
+        assert!(mlir.contains("func.call @stepper_move"), "got:\n{mlir}");
+        assert!(mlir.contains("func.call @stepper_enable"), "got:\n{mlir}");
+        assert!(mlir.contains("func.call @stepper_position"), "got:\n{mlir}");
     }
 
     #[test]
@@ -1377,7 +1421,7 @@ mod tests {
             time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
-        assert!(mlir.contains("dataflow.stallguard_read"), "got:\n{mlir}");
+        assert!(mlir.contains("func.call @stallguard_read"), "got:\n{mlir}");
     }
 
     #[test]
@@ -1461,12 +1505,12 @@ mod tests {
         let mlir = lower_graph(&snap).unwrap();
         // First gain uses the constant's output
         assert!(
-            mlir.contains("dataflow.gain(%v1_p0)"),
+            mlir.contains("arith.mulf %v1_p0"),
             "expected first gain to use %v1_p0, got:\n{mlir}"
         );
         // Second gain uses the first gain's output
         assert!(
-            mlir.contains("dataflow.gain(%v2_p0)"),
+            mlir.contains("arith.mulf %v2_p0"),
             "expected second gain to use %v2_p0, got:\n{mlir}"
         );
         // The final output SSA is %v3_p0

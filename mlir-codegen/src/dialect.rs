@@ -1,31 +1,59 @@
-//! Dataflow MLIR dialect: op names, type strings, and attribute formatting.
+//! MLIR dialect ops, type strings, and attribute formatting.
+//!
+//! Math operations use the standard MLIR `arith` dialect.
+//! I/O operations use `func.call` to named channel functions.
+//! Only truly hardware-specific ops remain in a minimal `builtin` namespace.
 
-/// MLIR dialect namespace prefix.
-pub const DIALECT: &str = "dataflow";
+/// MLIR namespace for hardware-specific ops not covered by standard dialects.
+pub const DIALECT: &str = "builtin";
 
-// -- Op names ---------------------------------------------------------------
+// -- Standard MLIR dialect ops (arith, func) --------------------------------
 
-pub const OP_CONSTANT: &str = "dataflow.constant";
-pub const OP_GAIN: &str = "dataflow.gain";
-pub const OP_ADD: &str = "dataflow.add";
-pub const OP_MUL: &str = "dataflow.mul";
-pub const OP_SUB: &str = "dataflow.subtract";
-pub const OP_CLAMP: &str = "dataflow.clamp";
-pub const OP_ADC_READ: &str = "dataflow.adc_read";
-pub const OP_PWM_WRITE: &str = "dataflow.pwm_write";
-pub const OP_GPIO_READ: &str = "dataflow.gpio_read";
-pub const OP_GPIO_WRITE: &str = "dataflow.gpio_write";
-pub const OP_UART_TX: &str = "dataflow.uart_tx";
-pub const OP_UART_RX: &str = "dataflow.uart_rx";
-pub const OP_ENCODER_READ: &str = "dataflow.encoder_read";
-pub const OP_DISPLAY_WRITE: &str = "dataflow.display_write";
-pub const OP_STEPPER_MOVE: &str = "dataflow.stepper_move";
-pub const OP_STEPPER_ENABLE: &str = "dataflow.stepper_enable";
-pub const OP_STEPPER_POSITION: &str = "dataflow.stepper_position";
-pub const OP_STALLGUARD_READ: &str = "dataflow.stallguard_read";
-pub const OP_SUBSCRIBE: &str = "dataflow.subscribe";
-pub const OP_PUBLISH: &str = "dataflow.publish";
-pub const OP_STATE_MACHINE: &str = "dataflow.state_machine";
+/// `arith.constant` — replaces the old `dataflow.constant`.
+pub const OP_CONSTANT: &str = "arith.constant";
+/// `arith.mulf` — gain is mul by a constant factor.
+pub const OP_GAIN: &str = "arith.mulf";
+/// `arith.addf`
+pub const OP_ADD: &str = "arith.addf";
+/// `arith.mulf` (two-input multiply)
+pub const OP_MUL: &str = "arith.mulf";
+/// `arith.subf`
+pub const OP_SUB: &str = "arith.subf";
+/// Clamp is compound: `arith.maximumf(min, arith.minimumf(max, x))`
+pub const OP_CLAMP: &str = "arith.maximumf";
+
+// -- I/O: modeled as func.call to named channel functions -------------------
+
+/// `func.call @adc_read_{ch}` — read from a typed ADC channel.
+pub const OP_ADC_READ: &str = "func.call";
+/// `func.call @pwm_write_{ch}` — write to a typed PWM channel.
+pub const OP_PWM_WRITE: &str = "func.call";
+/// `func.call @gpio_read_{pin}` — read GPIO pin.
+pub const OP_GPIO_READ: &str = "func.call";
+/// `func.call @gpio_write_{pin}` — write GPIO pin.
+pub const OP_GPIO_WRITE: &str = "func.call";
+/// `func.call @uart_tx_{port}` — transmit on UART.
+pub const OP_UART_TX: &str = "func.call";
+/// `func.call @uart_rx_{port}` — receive from UART.
+pub const OP_UART_RX: &str = "func.call";
+/// `func.call @encoder_read_{ch}` — read encoder position.
+pub const OP_ENCODER_READ: &str = "func.call";
+/// `func.call @display_write_{bus}_{addr}` — write to display.
+pub const OP_DISPLAY_WRITE: &str = "func.call";
+/// `func.call @stepper_move_{port}` — move stepper motor.
+pub const OP_STEPPER_MOVE: &str = "func.call";
+/// `func.call @stepper_enable_{port}` — enable stepper.
+pub const OP_STEPPER_ENABLE: &str = "func.call";
+/// `func.call @stepper_position_{port}` — read stepper position.
+pub const OP_STEPPER_POSITION: &str = "func.call";
+/// `func.call @stallguard_read_{port}` — read stallguard value.
+pub const OP_STALLGUARD_READ: &str = "func.call";
+/// `func.call @subscribe_{topic}` — subscribe to pub/sub topic.
+pub const OP_SUBSCRIBE: &str = "func.call";
+/// `func.call @publish_{topic}` — publish to pub/sub topic.
+pub const OP_PUBLISH: &str = "func.call";
+/// `scf.execute_region` — state machine uses structured control flow.
+pub const OP_STATE_MACHINE: &str = "scf.execute_region";
 
 // -- MLIR type strings ------------------------------------------------------
 

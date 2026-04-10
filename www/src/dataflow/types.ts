@@ -1,8 +1,65 @@
-/** Dataflow graph types mirroring the Rust structures. */
+/** Dataflow graph types — schema-driven from WASM. */
 
 export interface PortDef {
   name: string;
   kind: string; // "Float" | "Bytes" | "Text" | "Series" | "Any"
+}
+
+// -- Schema types (pushed from WASM) --
+
+export type ParamKind = 'Float' | 'Int' | 'String' | 'Bool';
+
+export interface ParamDef {
+  name: string;
+  kind: ParamKind;
+  default: string;
+}
+
+export interface FuncPortDef {
+  name: string;
+  kind: string;
+}
+
+export interface FunctionDef {
+  id: string;
+  display_name: string;
+  category: string;
+  op: string;
+  inputs: FuncPortDef[];
+  outputs: FuncPortDef[];
+  params: ParamDef[];
+  mlir_op: string | null;
+}
+
+// -- MCU / BSP types (pushed from WASM) --
+
+export interface PinDef {
+  name: string;
+  port: string;
+  number: number;
+  alt_functions: AltFunction[];
+  adc_channel: number | null;
+  five_v_tolerant: boolean;
+}
+
+export interface AltFunction {
+  af: number;
+  peripheral: string;
+  signal: string;
+}
+
+export interface PeripheralInst {
+  name: string;
+  kind: string;
+  signals: { signal: string; pin: string; af: number | null }[];
+}
+
+export interface McuDef {
+  family: string;
+  part_number: string;
+  display_name: string;
+  pins: PinDef[];
+  peripherals: PeripheralInst[];
 }
 
 export interface ValueFloat { type: 'Float'; data: number }
