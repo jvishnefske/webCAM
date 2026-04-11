@@ -1,5 +1,7 @@
 pub mod dag_api;
 pub mod dataflow;
+#[cfg(target_arch = "wasm32")]
+mod wasm_api;
 
 use std::cell::RefCell;
 use wasm_bindgen::prelude::*;
@@ -17,7 +19,6 @@ thread_local! {
 }
 
 /// Create a new dataflow graph. Returns its id.
-#[wasm_bindgen]
 pub fn dataflow_new(dt: f64) -> u32 {
     DATAFLOW_NEXT_ID.with(|next| {
         let id = *next.borrow();
@@ -29,14 +30,12 @@ pub fn dataflow_new(dt: f64) -> u32 {
 }
 
 /// Destroy a dataflow graph.
-#[wasm_bindgen]
 pub fn dataflow_destroy(graph_id: u32) {
     DATAFLOW_GRAPHS.with(|g| g.borrow_mut().remove(&graph_id));
     DATAFLOW_SCHEDULERS.with(|s| s.borrow_mut().remove(&graph_id));
 }
 
 /// Add a block to a graph. Returns block id.
-#[wasm_bindgen]
 pub fn dataflow_add_block(
     graph_id: u32,
     block_type: &str,
@@ -55,7 +54,6 @@ pub fn dataflow_add_block(
 }
 
 /// Remove a block from a graph.
-#[wasm_bindgen]
 pub fn dataflow_remove_block(graph_id: u32, block_id: u32) -> Result<(), JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
@@ -68,7 +66,6 @@ pub fn dataflow_remove_block(graph_id: u32, block_id: u32) -> Result<(), JsValue
 }
 
 /// Update a block's config by replacing it in-place (preserving channels where ports still match).
-#[wasm_bindgen]
 pub fn dataflow_update_block(
     graph_id: u32,
     block_id: u32,
@@ -89,7 +86,6 @@ pub fn dataflow_update_block(
 }
 
 /// Connect an output port to an input port. Returns channel id.
-#[wasm_bindgen]
 pub fn dataflow_connect(
     graph_id: u32,
     from_block: u32,
@@ -115,7 +111,6 @@ pub fn dataflow_connect(
 }
 
 /// Disconnect a channel.
-#[wasm_bindgen]
 pub fn dataflow_disconnect(graph_id: u32, channel_id: u32) -> Result<(), JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
@@ -129,7 +124,6 @@ pub fn dataflow_disconnect(graph_id: u32, channel_id: u32) -> Result<(), JsValue
 
 /// Advance the graph by wall-clock elapsed seconds (realtime mode).
 /// Returns snapshot as a typed JS object.
-#[wasm_bindgen]
 pub fn dataflow_advance(graph_id: u32, elapsed: f64) -> Result<JsValue, JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         DATAFLOW_SCHEDULERS.with(|s| {
@@ -152,7 +146,6 @@ pub fn dataflow_advance(graph_id: u32, elapsed: f64) -> Result<JsValue, JsValue>
 
 /// Run a fixed number of ticks (non-realtime batch mode).
 /// Returns snapshot as a typed JS object.
-#[wasm_bindgen]
 pub fn dataflow_run(graph_id: u32, steps: u32, dt: f64) -> Result<JsValue, JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
@@ -167,7 +160,6 @@ pub fn dataflow_run(graph_id: u32, steps: u32, dt: f64) -> Result<JsValue, JsVal
 }
 
 /// Set the simulation speed multiplier.
-#[wasm_bindgen]
 pub fn dataflow_set_speed(graph_id: u32, speed: f64) -> Result<(), JsValue> {
     DATAFLOW_SCHEDULERS.with(|s| {
         let mut schedulers = s.borrow_mut();
@@ -180,7 +172,6 @@ pub fn dataflow_set_speed(graph_id: u32, speed: f64) -> Result<(), JsValue> {
 }
 
 /// Get a snapshot of the graph without ticking.
-#[wasm_bindgen]
 pub fn dataflow_snapshot(graph_id: u32) -> Result<JsValue, JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         let graphs = g.borrow();
@@ -194,7 +185,6 @@ pub fn dataflow_snapshot(graph_id: u32) -> Result<JsValue, JsValue> {
 }
 
 /// List available block types as a typed JS array.
-#[wasm_bindgen]
 pub fn dataflow_block_types() -> JsValue {
     let types = dataflow::blocks::available_block_types();
     serde_wasm_bindgen::to_value(&types).unwrap_or(JsValue::NULL)
@@ -212,7 +202,6 @@ pub fn function_defs_list() -> Vec<module_traits::FunctionDef> {
 /// This is the single source of truth for all block types — the frontend
 /// uses this to build its palette, config panels, and validation instead
 /// of maintaining its own type mirrors.
-#[wasm_bindgen]
 pub fn dataflow_function_defs() -> Result<JsValue, JsValue> {
     let defs = function_defs_list();
     serde_wasm_bindgen::to_value(&defs).map_err(|e| JsValue::from_str(&e.to_string()))
@@ -246,7 +235,6 @@ pub fn get_mcu_peripherals(
 }
 
 /// List all supported MCU target families.
-#[wasm_bindgen]
 pub fn mcu_families() -> JsValue {
     let families = mcu_families_list();
     serde_wasm_bindgen::to_value(&families).unwrap_or(JsValue::NULL)
@@ -256,7 +244,6 @@ pub fn mcu_families() -> JsValue {
 ///
 /// Includes all pins, peripherals, alternate functions, and clock config.
 /// The frontend uses this to build BSP configuration panels.
-#[wasm_bindgen]
 pub fn mcu_definition(family: &str) -> Result<JsValue, JsValue> {
     let mcu = get_mcu_definition(family).map_err(|e| JsValue::from_str(&e))?;
     serde_wasm_bindgen::to_value(&mcu).map_err(|e| JsValue::from_str(&e.to_string()))
@@ -266,7 +253,6 @@ pub fn mcu_definition(family: &str) -> Result<JsValue, JsValue> {
 ///
 /// Each pin includes its name, port, alternate functions, and ADC channel.
 /// The frontend uses this to populate channel binding dropdowns.
-#[wasm_bindgen]
 pub fn mcu_pins(family: &str) -> Result<JsValue, JsValue> {
     let pins = get_mcu_pins(family).map_err(|e| JsValue::from_str(&e))?;
     serde_wasm_bindgen::to_value(&pins).map_err(|e| JsValue::from_str(&e.to_string()))
@@ -275,7 +261,6 @@ pub fn mcu_pins(family: &str) -> Result<JsValue, JsValue> {
 /// Return peripheral instances for a target family.
 ///
 /// Each peripheral includes its signals and available pin mappings.
-#[wasm_bindgen]
 pub fn mcu_peripherals(family: &str) -> Result<JsValue, JsValue> {
     let periphs = get_mcu_peripherals(family).map_err(|e| JsValue::from_str(&e))?;
     serde_wasm_bindgen::to_value(&periphs)
@@ -284,7 +269,6 @@ pub fn mcu_peripherals(family: &str) -> Result<JsValue, JsValue> {
 
 /// Generate a standalone Rust crate from a dataflow graph.
 /// Returns JSON: `{ "files": [["path", "content"], ...] }` or error.
-#[wasm_bindgen]
 pub fn dataflow_codegen(graph_id: u32, dt: f64) -> Result<String, JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         let graphs = g.borrow();
@@ -303,7 +287,6 @@ pub fn dataflow_codegen(graph_id: u32, dt: f64) -> Result<String, JsValue> {
 ///
 /// `targets_json` is a JSON array of `{ "target": "host"|"rp2040"|"stm32f4"|"esp32c3", "binding": {...} }`.
 /// Returns JSON: `[["path", "content"], ...]` or error.
-#[wasm_bindgen]
 pub fn dataflow_codegen_multi(
     graph_id: u32,
     dt: f64,
@@ -326,7 +309,6 @@ pub fn dataflow_codegen_multi(
 
 /// Enable or disable simulation mode for a graph.
 /// When enabled, peripheral blocks use SimModel dispatch with simulated peripherals.
-#[wasm_bindgen]
 pub fn dataflow_set_simulation_mode(graph_id: u32, enabled: bool) -> Result<(), JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
@@ -342,7 +324,6 @@ pub fn dataflow_set_simulation_mode(graph_id: u32, enabled: bool) -> Result<(), 
 }
 
 /// Set a simulated ADC channel voltage.
-#[wasm_bindgen]
 pub fn dataflow_set_sim_adc(graph_id: u32, channel: u8, voltage: f64) -> Result<(), JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
@@ -357,7 +338,6 @@ pub fn dataflow_set_sim_adc(graph_id: u32, channel: u8, voltage: f64) -> Result<
 }
 
 /// Read the last PWM duty written by a simulated PWM block.
-#[wasm_bindgen]
 pub fn dataflow_get_sim_pwm(graph_id: u32, channel: u8) -> Result<f64, JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         let graphs = g.borrow();
@@ -371,7 +351,6 @@ pub fn dataflow_get_sim_pwm(graph_id: u32, channel: u8) -> Result<f64, JsValue> 
 // ── I2C simulation WASM API ─────────────────────────────────────────
 
 /// Add a simulated I2C device on the given bus at the given 7-bit address.
-#[wasm_bindgen]
 pub fn dataflow_add_i2c_device(
     graph_id: u32,
     bus: u8,
@@ -392,7 +371,6 @@ pub fn dataflow_add_i2c_device(
 }
 
 /// Remove a simulated I2C device.
-#[wasm_bindgen]
 pub fn dataflow_remove_i2c_device(graph_id: u32, bus: u8, addr: u8) -> Result<(), JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
@@ -410,7 +388,6 @@ pub fn dataflow_remove_i2c_device(graph_id: u32, bus: u8, addr: u8) -> Result<()
 // ── Serial simulation WASM API ──────────────────────────────────────
 
 /// Configure a simulated serial port. Parity: 0=None, 1=Odd, 2=Even.
-#[wasm_bindgen]
 pub fn dataflow_configure_serial(
     graph_id: u32,
     port: u8,
@@ -437,7 +414,6 @@ pub fn dataflow_configure_serial(
 // ── TCP socket simulation WASM API ──────────────────────────────────
 
 /// Inject data into a simulated TCP receive buffer.
-#[wasm_bindgen]
 pub fn dataflow_tcp_inject(graph_id: u32, socket_id: u8, data: &[u8]) -> Result<(), JsValue> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
@@ -465,7 +441,6 @@ thread_local! {
 }
 
 /// Create a new empty panel. Returns its id.
-#[wasm_bindgen]
 pub fn panel_new(name: &str) -> u32 {
     PANEL_NEXT_ID.with(|next| {
         let id = *next.borrow();
@@ -483,7 +458,6 @@ pub fn panel_new(name: &str) -> u32 {
 }
 
 /// Destroy a panel, removing it from storage.
-#[wasm_bindgen]
 pub fn panel_destroy(panel_id: u32) {
     PANELS.with(|p| {
         p.borrow_mut().remove(&panel_id);
@@ -494,7 +468,6 @@ pub fn panel_destroy(panel_id: u32) {
 }
 
 /// Deserialize a PanelModel from JSON, store it, and return its id.
-#[wasm_bindgen]
 pub fn panel_load(json: &str) -> Result<u32, JsValue> {
     let panel: dataflow::panel::PanelModel =
         serde_json::from_str(json).map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -511,7 +484,6 @@ pub fn panel_load(json: &str) -> Result<u32, JsValue> {
 }
 
 /// Serialize a panel to JSON.
-#[wasm_bindgen]
 pub fn panel_save(panel_id: u32) -> Result<String, JsValue> {
     PANELS.with(|p| {
         let panels = p.borrow();
@@ -523,7 +495,6 @@ pub fn panel_save(panel_id: u32) -> Result<String, JsValue> {
 }
 
 /// Add a widget to a panel from JSON config.
-#[wasm_bindgen]
 pub fn panel_add_widget(panel_id: u32, config_json: &str) -> Result<u32, JsValue> {
     let widget: dataflow::panel::Widget =
         serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -537,7 +508,6 @@ pub fn panel_add_widget(panel_id: u32, config_json: &str) -> Result<u32, JsValue
 }
 
 /// Remove a widget from a panel.
-#[wasm_bindgen]
 pub fn panel_remove_widget(panel_id: u32, widget_id: u32) -> Result<bool, JsValue> {
     PANELS.with(|p| {
         let mut panels = p.borrow_mut();
@@ -549,7 +519,6 @@ pub fn panel_remove_widget(panel_id: u32, widget_id: u32) -> Result<bool, JsValu
 }
 
 /// Update a widget's config. The original widget id is preserved.
-#[wasm_bindgen]
 pub fn panel_update_widget(
     panel_id: u32,
     widget_id: u32,
@@ -573,13 +542,11 @@ pub fn panel_update_widget(
 }
 
 /// JSON snapshot of the full panel.
-#[wasm_bindgen]
 pub fn panel_snapshot(panel_id: u32) -> Result<String, JsValue> {
     panel_save(panel_id)
 }
 
 /// Set a topic value from widget interaction.
-#[wasm_bindgen]
 pub fn panel_set_topic(panel_id: u32, topic: &str, value: f64) -> Result<(), JsValue> {
     PANEL_RUNTIMES.with(|r| {
         let mut runtimes = r.borrow_mut();
@@ -592,7 +559,6 @@ pub fn panel_set_topic(panel_id: u32, topic: &str, value: f64) -> Result<(), JsV
 }
 
 /// Get all current topic values as JSON.
-#[wasm_bindgen]
 pub fn panel_get_values(panel_id: u32) -> Result<String, JsValue> {
     PANEL_RUNTIMES.with(|r| {
         let runtimes = r.borrow();
@@ -604,7 +570,6 @@ pub fn panel_get_values(panel_id: u32) -> Result<String, JsValue> {
 }
 
 /// Merge external values into input topics.
-#[wasm_bindgen]
 pub fn panel_merge_values(panel_id: u32, values_json: &str) -> Result<(), JsValue> {
     let external: std::collections::HashMap<String, f64> =
         serde_json::from_str(values_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -625,7 +590,6 @@ pub fn panel_merge_values(panel_id: u32, values_json: &str) -> Result<(), JsValu
 }
 
 /// Collect output topic values.
-#[wasm_bindgen]
 pub fn panel_collect_outputs(panel_id: u32) -> Result<String, JsValue> {
     PANELS.with(|p| {
         let panels = p.borrow();
