@@ -4,7 +4,6 @@ pub mod dataflow;
 mod wasm_api;
 
 use std::cell::RefCell;
-use wasm_bindgen::prelude::*;
 
 // ── Dataflow Simulator WASM API ─────────────────────────────────────
 
@@ -52,16 +51,6 @@ pub fn add_block_impl(
     })
 }
 
-/// Add a block to a graph. Returns block id.
-pub fn dataflow_add_block(
-    graph_id: u32,
-    block_type: &str,
-    config_json: &str,
-) -> Result<u32, JsValue> {
-    add_block_impl(graph_id, block_type, config_json)
-        .map_err(|e| JsValue::from_str(&e))
-}
-
 /// Remove a block from a graph (testable helper).
 pub fn remove_block_impl(graph_id: u32, block_id: u32) -> Result<(), String> {
     DATAFLOW_GRAPHS.with(|g| {
@@ -72,12 +61,6 @@ pub fn remove_block_impl(graph_id: u32, block_id: u32) -> Result<(), String> {
         graph.remove_block(dataflow::BlockId(block_id));
         Ok(())
     })
-}
-
-/// Remove a block from a graph.
-pub fn dataflow_remove_block(graph_id: u32, block_id: u32) -> Result<(), JsValue> {
-    remove_block_impl(graph_id, block_id)
-        .map_err(|e| JsValue::from_str(&e))
 }
 
 /// Update a block's config (testable helper).
@@ -95,17 +78,6 @@ pub fn update_block_impl(
             .ok_or_else(|| "graph not found".to_string())?;
         graph.replace_block(dataflow::BlockId(block_id), block)
     })
-}
-
-/// Update a block's config by replacing it in-place (preserving channels where ports still match).
-pub fn dataflow_update_block(
-    graph_id: u32,
-    block_id: u32,
-    block_type: &str,
-    config_json: &str,
-) -> Result<(), JsValue> {
-    update_block_impl(graph_id, block_id, block_type, config_json)
-        .map_err(|e| JsValue::from_str(&e))
 }
 
 /// Connect an output port to an input port (testable helper). Returns channel id.
@@ -131,18 +103,6 @@ pub fn connect_impl(
     })
 }
 
-/// Connect an output port to an input port. Returns channel id.
-pub fn dataflow_connect(
-    graph_id: u32,
-    from_block: u32,
-    from_port: u32,
-    to_block: u32,
-    to_port: u32,
-) -> Result<u32, JsValue> {
-    connect_impl(graph_id, from_block, from_port, to_block, to_port)
-        .map_err(|e| JsValue::from_str(&e))
-}
-
 /// Disconnect a channel (testable helper).
 pub fn disconnect_impl(graph_id: u32, channel_id: u32) -> Result<(), String> {
     DATAFLOW_GRAPHS.with(|g| {
@@ -153,12 +113,6 @@ pub fn disconnect_impl(graph_id: u32, channel_id: u32) -> Result<(), String> {
         graph.disconnect(dataflow::ChannelId(channel_id));
         Ok(())
     })
-}
-
-/// Disconnect a channel.
-pub fn dataflow_disconnect(graph_id: u32, channel_id: u32) -> Result<(), JsValue> {
-    disconnect_impl(graph_id, channel_id)
-        .map_err(|e| JsValue::from_str(&e))
 }
 
 /// Advance the graph by wall-clock elapsed seconds (testable helper).
@@ -183,28 +137,6 @@ pub fn advance_impl(graph_id: u32, elapsed: f64) -> Result<serde_json::Value, St
     })
 }
 
-/// Advance the graph by wall-clock elapsed seconds (realtime mode).
-/// Returns snapshot as a typed JS object.
-pub fn dataflow_advance(graph_id: u32, elapsed: f64) -> Result<JsValue, JsValue> {
-    DATAFLOW_GRAPHS.with(|g| {
-        DATAFLOW_SCHEDULERS.with(|s| {
-            let mut graphs = g.borrow_mut();
-            let mut schedulers = s.borrow_mut();
-            let graph = graphs
-                .get_mut(&graph_id)
-                .ok_or_else(|| JsValue::from_str("graph not found"))?;
-            let sched = schedulers
-                .get_mut(&graph_id)
-                .ok_or_else(|| JsValue::from_str("scheduler not found"))?;
-            let ticks = sched.advance(elapsed);
-            graph.run(ticks, sched.dt);
-            let snap = graph.snapshot();
-            serde_wasm_bindgen::to_value(&snap)
-                .map_err(|e| JsValue::from_str(&e.to_string()))
-        })
-    })
-}
-
 /// Run a fixed number of ticks (testable helper).
 /// Returns snapshot as JSON.
 pub fn run_impl(graph_id: u32, steps: u32, dt: f64) -> Result<serde_json::Value, String> {
@@ -220,21 +152,6 @@ pub fn run_impl(graph_id: u32, steps: u32, dt: f64) -> Result<serde_json::Value,
     })
 }
 
-/// Run a fixed number of ticks (non-realtime batch mode).
-/// Returns snapshot as a typed JS object.
-pub fn dataflow_run(graph_id: u32, steps: u32, dt: f64) -> Result<JsValue, JsValue> {
-    DATAFLOW_GRAPHS.with(|g| {
-        let mut graphs = g.borrow_mut();
-        let graph = graphs
-            .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        graph.run(steps as u64, dt);
-        let snap = graph.snapshot();
-        serde_wasm_bindgen::to_value(&snap)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
-    })
-}
-
 /// Set the simulation speed multiplier (testable helper).
 pub fn set_speed_impl(graph_id: u32, speed: f64) -> Result<(), String> {
     DATAFLOW_SCHEDULERS.with(|s| {
@@ -245,12 +162,6 @@ pub fn set_speed_impl(graph_id: u32, speed: f64) -> Result<(), String> {
         sched.speed = speed;
         Ok(())
     })
-}
-
-/// Set the simulation speed multiplier.
-pub fn dataflow_set_speed(graph_id: u32, speed: f64) -> Result<(), JsValue> {
-    set_speed_impl(graph_id, speed)
-        .map_err(|e| JsValue::from_str(&e))
 }
 
 /// Get a snapshot of the graph without ticking (testable helper).
@@ -266,28 +177,9 @@ pub fn snapshot_impl(graph_id: u32) -> Result<serde_json::Value, String> {
     })
 }
 
-/// Get a snapshot of the graph without ticking.
-pub fn dataflow_snapshot(graph_id: u32) -> Result<JsValue, JsValue> {
-    DATAFLOW_GRAPHS.with(|g| {
-        let graphs = g.borrow();
-        let graph = graphs
-            .get(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let snap = graph.snapshot();
-        serde_wasm_bindgen::to_value(&snap)
-            .map_err(|e| JsValue::from_str(&e.to_string()))
-    })
-}
-
 /// List available block types (testable helper).
 pub fn block_types_impl() -> Vec<dataflow::blocks::BlockTypeInfo> {
     dataflow::blocks::available_block_types()
-}
-
-/// List available block types as a typed JS array.
-pub fn dataflow_block_types() -> JsValue {
-    let types = block_types_impl();
-    serde_wasm_bindgen::to_value(&types).unwrap_or(JsValue::NULL)
 }
 
 // ── Function Def Schema API ──────────────────────────────────────────
@@ -295,16 +187,6 @@ pub fn dataflow_block_types() -> JsValue {
 /// Return the list of builtin function definitions (non-WASM helper).
 pub fn function_defs_list() -> Vec<module_traits::FunctionDef> {
     module_traits::builtin_function_defs()
-}
-
-/// Return the full function definition registry as JSON.
-///
-/// This is the single source of truth for all block types — the frontend
-/// uses this to build its palette, config panels, and validation instead
-/// of maintaining its own type mirrors.
-pub fn dataflow_function_defs() -> Result<JsValue, JsValue> {
-    let defs = function_defs_list();
-    serde_wasm_bindgen::to_value(&defs).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 // ── MCU Pin Schema API ──────────────────────────────────────────────
@@ -334,39 +216,6 @@ pub fn get_mcu_peripherals(
     Ok(mcu.peripherals)
 }
 
-/// List all supported MCU target families.
-pub fn mcu_families() -> JsValue {
-    let families = mcu_families_list();
-    serde_wasm_bindgen::to_value(&families).unwrap_or(JsValue::NULL)
-}
-
-/// Return the full MCU definition for a target family as JSON.
-///
-/// Includes all pins, peripherals, alternate functions, and clock config.
-/// The frontend uses this to build BSP configuration panels.
-pub fn mcu_definition(family: &str) -> Result<JsValue, JsValue> {
-    let mcu = get_mcu_definition(family).map_err(|e| JsValue::from_str(&e))?;
-    serde_wasm_bindgen::to_value(&mcu).map_err(|e| JsValue::from_str(&e.to_string()))
-}
-
-/// Return just the pin definitions for a target family.
-///
-/// Each pin includes its name, port, alternate functions, and ADC channel.
-/// The frontend uses this to populate channel binding dropdowns.
-pub fn mcu_pins(family: &str) -> Result<JsValue, JsValue> {
-    let pins = get_mcu_pins(family).map_err(|e| JsValue::from_str(&e))?;
-    serde_wasm_bindgen::to_value(&pins).map_err(|e| JsValue::from_str(&e.to_string()))
-}
-
-/// Return peripheral instances for a target family.
-///
-/// Each peripheral includes its signals and available pin mappings.
-pub fn mcu_peripherals(family: &str) -> Result<JsValue, JsValue> {
-    let periphs = get_mcu_peripherals(family).map_err(|e| JsValue::from_str(&e))?;
-    serde_wasm_bindgen::to_value(&periphs)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
-}
-
 /// Generate a standalone Rust crate from a dataflow graph (testable helper).
 pub fn codegen_impl(graph_id: u32, dt: f64) -> Result<String, String> {
     DATAFLOW_GRAPHS.with(|g| {
@@ -379,12 +228,6 @@ pub fn codegen_impl(graph_id: u32, dt: f64) -> Result<String, String> {
         let files_json: Vec<(String, String)> = generated.files;
         serde_json::to_string(&files_json).map_err(|e| e.to_string())
     })
-}
-
-/// Generate a standalone Rust crate from a dataflow graph.
-/// Returns JSON: `{ "files": [["path", "content"], ...] }` or error.
-pub fn dataflow_codegen(graph_id: u32, dt: f64) -> Result<String, JsValue> {
-    codegen_impl(graph_id, dt).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Generate a multi-target workspace from a dataflow graph (testable helper).
@@ -403,18 +246,6 @@ pub fn codegen_multi_impl(graph_id: u32, dt: f64, targets_json: &str) -> Result<
     })
 }
 
-/// Generate a multi-target workspace from a dataflow graph.
-///
-/// `targets_json` is a JSON array of `{ "target": "host"|"rp2040"|"stm32f4"|"esp32c3", "binding": {...} }`.
-/// Returns JSON: `[["path", "content"], ...]` or error.
-pub fn dataflow_codegen_multi(
-    graph_id: u32,
-    dt: f64,
-    targets_json: &str,
-) -> Result<String, JsValue> {
-    codegen_multi_impl(graph_id, dt, targets_json).map_err(|e| JsValue::from_str(&e))
-}
-
 /// Enable or disable simulation mode (testable helper).
 pub fn set_simulation_mode_impl(graph_id: u32, enabled: bool) -> Result<(), String> {
     DATAFLOW_GRAPHS.with(|g| {
@@ -428,12 +259,6 @@ pub fn set_simulation_mode_impl(graph_id: u32, enabled: bool) -> Result<(), Stri
         }
         Ok(())
     })
-}
-
-/// Enable or disable simulation mode for a graph.
-/// When enabled, peripheral blocks use SimModel dispatch with simulated peripherals.
-pub fn dataflow_set_simulation_mode(graph_id: u32, enabled: bool) -> Result<(), JsValue> {
-    set_simulation_mode_impl(graph_id, enabled).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Set a simulated ADC channel voltage (testable helper).
@@ -450,11 +275,6 @@ pub fn set_sim_adc_impl(graph_id: u32, channel: u8, voltage: f64) -> Result<(), 
     })
 }
 
-/// Set a simulated ADC channel voltage.
-pub fn dataflow_set_sim_adc(graph_id: u32, channel: u8, voltage: f64) -> Result<(), JsValue> {
-    set_sim_adc_impl(graph_id, channel, voltage).map_err(|e| JsValue::from_str(&e))
-}
-
 /// Read the last PWM duty written by a simulated PWM block (testable helper).
 pub fn get_sim_pwm_impl(graph_id: u32, channel: u8) -> Result<f64, String> {
     DATAFLOW_GRAPHS.with(|g| {
@@ -464,11 +284,6 @@ pub fn get_sim_pwm_impl(graph_id: u32, channel: u8) -> Result<f64, String> {
             .ok_or_else(|| "graph not found".to_string())?;
         Ok(graph.get_sim_pwm(channel))
     })
-}
-
-/// Read the last PWM duty written by a simulated PWM block.
-pub fn dataflow_get_sim_pwm(graph_id: u32, channel: u8) -> Result<f64, JsValue> {
-    get_sim_pwm_impl(graph_id, channel).map_err(|e| JsValue::from_str(&e))
 }
 
 // ── I2C simulation WASM API ─────────────────────────────────────────
@@ -486,16 +301,6 @@ pub fn add_i2c_device_impl(graph_id: u32, bus: u8, addr: u8, name: &str) -> Resu
     })
 }
 
-/// Add a simulated I2C device on the given bus at the given 7-bit address.
-pub fn dataflow_add_i2c_device(
-    graph_id: u32,
-    bus: u8,
-    addr: u8,
-    name: &str,
-) -> Result<(), JsValue> {
-    add_i2c_device_impl(graph_id, bus, addr, name).map_err(|e| JsValue::from_str(&e))
-}
-
 /// Remove a simulated I2C device (testable helper).
 pub fn remove_i2c_device_impl(graph_id: u32, bus: u8, addr: u8) -> Result<(), String> {
     DATAFLOW_GRAPHS.with(|g| {
@@ -507,11 +312,6 @@ pub fn remove_i2c_device_impl(graph_id: u32, bus: u8, addr: u8) -> Result<(), St
         sim.remove_i2c_device(bus, addr);
         Ok(())
     })
-}
-
-/// Remove a simulated I2C device.
-pub fn dataflow_remove_i2c_device(graph_id: u32, bus: u8, addr: u8) -> Result<(), JsValue> {
-    remove_i2c_device_impl(graph_id, bus, addr).map_err(|e| JsValue::from_str(&e))
 }
 
 // ── Serial simulation WASM API ──────────────────────────────────────
@@ -537,19 +337,6 @@ pub fn configure_serial_impl(
     })
 }
 
-/// Configure a simulated serial port. Parity: 0=None, 1=Odd, 2=Even.
-pub fn dataflow_configure_serial(
-    graph_id: u32,
-    port: u8,
-    baud: u32,
-    data_bits: u8,
-    parity: u8,
-    stop_bits: u8,
-) -> Result<(), JsValue> {
-    configure_serial_impl(graph_id, port, baud, data_bits, parity, stop_bits)
-        .map_err(|e| JsValue::from_str(&e))
-}
-
 // ── TCP socket simulation WASM API ──────────────────────────────────
 
 /// Inject data into a simulated TCP receive buffer (testable helper).
@@ -563,11 +350,6 @@ pub fn tcp_inject_impl(graph_id: u32, socket_id: u8, data: &[u8]) -> Result<(), 
         sim.inject_tcp_data(socket_id, data);
         Ok(())
     })
-}
-
-/// Inject data into a simulated TCP receive buffer.
-pub fn dataflow_tcp_inject(graph_id: u32, socket_id: u8, data: &[u8]) -> Result<(), JsValue> {
-    tcp_inject_impl(graph_id, socket_id, data).map_err(|e| JsValue::from_str(&e))
 }
 
 // ── Control Panel WASM API ─────────────────────────────────────
@@ -625,11 +407,6 @@ pub fn panel_load_impl(json: &str) -> Result<u32, String> {
     })
 }
 
-/// Deserialize a PanelModel from JSON, store it, and return its id.
-pub fn panel_load(json: &str) -> Result<u32, JsValue> {
-    panel_load_impl(json).map_err(|e| JsValue::from_str(&e))
-}
-
 /// Serialize a panel to JSON (testable helper).
 pub fn panel_save_impl(panel_id: u32) -> Result<String, String> {
     PANELS.with(|p| {
@@ -639,11 +416,6 @@ pub fn panel_save_impl(panel_id: u32) -> Result<String, String> {
             .ok_or_else(|| "panel not found".to_string())?;
         serde_json::to_string(panel).map_err(|e| e.to_string())
     })
-}
-
-/// Serialize a panel to JSON.
-pub fn panel_save(panel_id: u32) -> Result<String, JsValue> {
-    panel_save_impl(panel_id).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Add a widget to a panel (testable helper).
@@ -659,11 +431,6 @@ pub fn panel_add_widget_impl(panel_id: u32, config_json: &str) -> Result<u32, St
     })
 }
 
-/// Add a widget to a panel from JSON config.
-pub fn panel_add_widget(panel_id: u32, config_json: &str) -> Result<u32, JsValue> {
-    panel_add_widget_impl(panel_id, config_json).map_err(|e| JsValue::from_str(&e))
-}
-
 /// Remove a widget from a panel (testable helper).
 pub fn panel_remove_widget_impl(panel_id: u32, widget_id: u32) -> Result<bool, String> {
     PANELS.with(|p| {
@@ -673,11 +440,6 @@ pub fn panel_remove_widget_impl(panel_id: u32, widget_id: u32) -> Result<bool, S
             .ok_or_else(|| "panel not found".to_string())?;
         Ok(panel.remove_widget(widget_id))
     })
-}
-
-/// Remove a widget from a panel.
-pub fn panel_remove_widget(panel_id: u32, widget_id: u32) -> Result<bool, JsValue> {
-    panel_remove_widget_impl(panel_id, widget_id).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Update a widget's config (testable helper).
@@ -703,24 +465,9 @@ pub fn panel_update_widget_impl(
     })
 }
 
-/// Update a widget's config. The original widget id is preserved.
-pub fn panel_update_widget(
-    panel_id: u32,
-    widget_id: u32,
-    config_json: &str,
-) -> Result<(), JsValue> {
-    panel_update_widget_impl(panel_id, widget_id, config_json)
-        .map_err(|e| JsValue::from_str(&e))
-}
-
 /// JSON snapshot of the full panel (testable helper).
 pub fn panel_snapshot_impl(panel_id: u32) -> Result<String, String> {
     panel_save_impl(panel_id)
-}
-
-/// JSON snapshot of the full panel.
-pub fn panel_snapshot(panel_id: u32) -> Result<String, JsValue> {
-    panel_save(panel_id)
 }
 
 /// Set a topic value (testable helper).
@@ -735,11 +482,6 @@ pub fn panel_set_topic_impl(panel_id: u32, topic: &str, value: f64) -> Result<()
     })
 }
 
-/// Set a topic value from widget interaction.
-pub fn panel_set_topic(panel_id: u32, topic: &str, value: f64) -> Result<(), JsValue> {
-    panel_set_topic_impl(panel_id, topic, value).map_err(|e| JsValue::from_str(&e))
-}
-
 /// Get all current topic values as JSON (testable helper).
 pub fn panel_get_values_impl(panel_id: u32) -> Result<String, String> {
     PANEL_RUNTIMES.with(|r| {
@@ -749,11 +491,6 @@ pub fn panel_get_values_impl(panel_id: u32) -> Result<String, String> {
             .ok_or_else(|| "panel runtime not found".to_string())?;
         serde_json::to_string(rt.values()).map_err(|e| e.to_string())
     })
-}
-
-/// Get all current topic values as JSON.
-pub fn panel_get_values(panel_id: u32) -> Result<String, JsValue> {
-    panel_get_values_impl(panel_id).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Merge external values into input topics (testable helper).
@@ -776,11 +513,6 @@ pub fn panel_merge_values_impl(panel_id: u32, values_json: &str) -> Result<(), S
     })
 }
 
-/// Merge external values into input topics.
-pub fn panel_merge_values(panel_id: u32, values_json: &str) -> Result<(), JsValue> {
-    panel_merge_values_impl(panel_id, values_json).map_err(|e| JsValue::from_str(&e))
-}
-
 /// Collect output topic values (testable helper).
 pub fn panel_collect_outputs_impl(panel_id: u32) -> Result<String, String> {
     PANELS.with(|p| {
@@ -797,11 +529,6 @@ pub fn panel_collect_outputs_impl(panel_id: u32) -> Result<String, String> {
             serde_json::to_string(&outputs).map_err(|e| e.to_string())
         })
     })
-}
-
-/// Collect output topic values.
-pub fn panel_collect_outputs(panel_id: u32) -> Result<String, JsValue> {
-    panel_collect_outputs_impl(panel_id).map_err(|e| JsValue::from_str(&e))
 }
 
 #[cfg(test)]
@@ -829,23 +556,23 @@ mod tests {
     #[test]
     fn test_dataflow_add_and_remove_block() {
         let gid = dataflow_new(0.01);
-        let bid = dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let bid = add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
         assert!(bid > 0);
-        dataflow_remove_block(gid, bid).unwrap();
+        remove_block_impl(gid, bid).unwrap();
         dataflow_destroy(gid);
     }
 
     #[test]
     fn test_dataflow_update_block() {
         let gid = dataflow_new(0.01);
-        let bid = dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
-        dataflow_update_block(gid, bid, "constant", r#"{"value":2.0}"#).unwrap();
+        let bid = add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        update_block_impl(gid, bid, "constant", r#"{"value":2.0}"#).unwrap();
         dataflow_destroy(gid);
     }
 
     #[test]
     fn test_dataflow_connect_and_disconnect() {
-        // Use entirely internal APIs to avoid JsValue::from_str panics on non-wasm
+        // Use entirely internal APIs
         let gid = dataflow_new(0.01);
         DATAFLOW_GRAPHS.with(|g| {
             let mut graphs = g.borrow_mut();
@@ -863,7 +590,7 @@ mod tests {
     #[test]
     fn test_dataflow_snapshot() {
         let gid = dataflow_new(0.01);
-        dataflow_add_block(gid, "constant", r#"{"value":5.0}"#).unwrap();
+        add_block_impl(gid, "constant", r#"{"value":5.0}"#).unwrap();
         // Verify via internal API (serde_wasm_bindgen round-trip needs a JS host)
         DATAFLOW_GRAPHS.with(|g| {
             let graphs = g.borrow();
@@ -877,7 +604,7 @@ mod tests {
     #[test]
     fn test_dataflow_run() {
         let gid = dataflow_new(0.01);
-        dataflow_add_block(gid, "constant", r#"{"value":3.0}"#).unwrap();
+        add_block_impl(gid, "constant", r#"{"value":3.0}"#).unwrap();
         // Run and verify via internal API (serde_wasm_bindgen needs a JS host)
         DATAFLOW_GRAPHS.with(|g| {
             let mut graphs = g.borrow_mut();
@@ -892,7 +619,7 @@ mod tests {
     #[test]
     fn test_dataflow_advance() {
         let gid = dataflow_new(0.01);
-        dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
         // Advance and verify via internal API (serde_wasm_bindgen needs a JS host)
         DATAFLOW_SCHEDULERS.with(|s| {
             DATAFLOW_GRAPHS.with(|g| {
@@ -912,15 +639,15 @@ mod tests {
     #[test]
     fn test_dataflow_set_speed() {
         let gid = dataflow_new(0.01);
-        dataflow_set_speed(gid, 2.0).unwrap();
+        set_speed_impl(gid, 2.0).unwrap();
         dataflow_destroy(gid);
     }
 
     #[test]
     fn test_dataflow_codegen() {
         let gid = dataflow_new(0.01);
-        dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
-        let result = dataflow_codegen(gid, 0.01).unwrap();
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let result = codegen_impl(gid, 0.01).unwrap();
         assert!(result.contains("main.rs") || result.contains("Cargo.toml"));
         dataflow_destroy(gid);
     }
@@ -928,9 +655,9 @@ mod tests {
     #[test]
     fn test_dataflow_codegen_multi() {
         let gid = dataflow_new(0.01);
-        dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
         let targets = r#"[{"target":"Host","binding":{"target":"Host","pins":[]}}]"#;
-        let result = dataflow_codegen_multi(gid, 0.01, targets).unwrap();
+        let result = codegen_multi_impl(gid, 0.01, targets).unwrap();
         assert!(!result.is_empty());
         dataflow_destroy(gid);
     }
@@ -938,9 +665,9 @@ mod tests {
     #[test]
     fn test_dataflow_simulation_mode() {
         let gid = dataflow_new(0.01);
-        dataflow_set_simulation_mode(gid, true).unwrap();
-        dataflow_set_sim_adc(gid, 0, 3.3).unwrap();
-        let duty = dataflow_get_sim_pwm(gid, 0).unwrap();
+        set_simulation_mode_impl(gid, true).unwrap();
+        set_sim_adc_impl(gid, 0, 3.3).unwrap();
+        let duty = get_sim_pwm_impl(gid, 0).unwrap();
         assert!((duty - 0.0).abs() < f64::EPSILON);
         dataflow_destroy(gid);
     }
@@ -948,13 +675,13 @@ mod tests {
     // ── I2C device tests ────────────────────────────────────────────
     //
     // We test the underlying graph/sim_peripherals APIs directly because
-    // `JsValue::from_str` is a wasm-only intrinsic.
+    // Test the underlying graph/sim_peripherals APIs directly.
 
     #[test]
     fn test_i2c_device_lifecycle() {
         let gid = dataflow_new(0.01);
-        dataflow_set_simulation_mode(gid, true).unwrap();
-        dataflow_add_i2c_device(gid, 0, 0x48, "TMP1075").unwrap();
+        set_simulation_mode_impl(gid, true).unwrap();
+        add_i2c_device_impl(gid, 0, 0x48, "TMP1075").unwrap();
         // Verify registers exist via the internal API
         DATAFLOW_GRAPHS.with(|g| {
             let graphs = g.borrow();
@@ -963,7 +690,7 @@ mod tests {
             let regs = sim.i2c_device_registers(0, 0x48);
             assert!(regs.is_some());
         });
-        dataflow_remove_i2c_device(gid, 0, 0x48).unwrap();
+        remove_i2c_device_impl(gid, 0, 0x48).unwrap();
         // After removal, registers should be gone
         DATAFLOW_GRAPHS.with(|g| {
             let graphs = g.borrow();
@@ -989,9 +716,9 @@ mod tests {
     #[test]
     fn test_i2c_device_multiple_buses() {
         let gid = dataflow_new(0.01);
-        dataflow_set_simulation_mode(gid, true).unwrap();
-        dataflow_add_i2c_device(gid, 0, 0x48, "bus0-dev").unwrap();
-        dataflow_add_i2c_device(gid, 1, 0x48, "bus1-dev").unwrap();
+        set_simulation_mode_impl(gid, true).unwrap();
+        add_i2c_device_impl(gid, 0, 0x48, "bus0-dev").unwrap();
+        add_i2c_device_impl(gid, 1, 0x48, "bus1-dev").unwrap();
         // Both should be independently accessible
         DATAFLOW_GRAPHS.with(|g| {
             let graphs = g.borrow();
@@ -1001,7 +728,7 @@ mod tests {
             assert!(sim.i2c_device_registers(1, 0x48).is_some());
         });
         // Remove from bus 0 only
-        dataflow_remove_i2c_device(gid, 0, 0x48).unwrap();
+        remove_i2c_device_impl(gid, 0, 0x48).unwrap();
         DATAFLOW_GRAPHS.with(|g| {
             let graphs = g.borrow();
             let graph = graphs.get(&gid).unwrap();
@@ -1020,9 +747,9 @@ mod tests {
     #[test]
     fn test_serial_configuration() {
         let gid = dataflow_new(0.01);
-        dataflow_set_simulation_mode(gid, true).unwrap();
-        dataflow_configure_serial(gid, 0, 9600, 8, 0, 1).unwrap(); // parity=0 (None)
-        // Verify via internal API since serial_ports returns JsValue
+        set_simulation_mode_impl(gid, true).unwrap();
+        configure_serial_impl(gid, 0, 9600, 8, 0, 1).unwrap(); // parity=0 (None)
+        // Verify via internal API
         DATAFLOW_GRAPHS.with(|g| {
             let graphs = g.borrow();
             let graph = graphs.get(&gid).unwrap();
@@ -1062,9 +789,9 @@ mod tests {
     #[test]
     fn test_serial_multiple_ports() {
         let gid = dataflow_new(0.01);
-        dataflow_set_simulation_mode(gid, true).unwrap();
-        dataflow_configure_serial(gid, 0, 9600, 8, 0, 1).unwrap();
-        dataflow_configure_serial(gid, 1, 115_200, 8, 1, 1).unwrap(); // parity=1 (Odd)
+        set_simulation_mode_impl(gid, true).unwrap();
+        configure_serial_impl(gid, 0, 9600, 8, 0, 1).unwrap();
+        configure_serial_impl(gid, 1, 115_200, 8, 1, 1).unwrap(); // parity=1 (Odd)
         DATAFLOW_GRAPHS.with(|g| {
             let graphs = g.borrow();
             let graph = graphs.get(&gid).unwrap();
@@ -1084,7 +811,7 @@ mod tests {
     #[test]
     fn test_tcp_inject_drain() {
         let gid = dataflow_new(0.01);
-        dataflow_set_simulation_mode(gid, true).unwrap();
+        set_simulation_mode_impl(gid, true).unwrap();
         // Create a TCP socket, inject data, then verify via internal API
         DATAFLOW_GRAPHS.with(|g| {
             let mut graphs = g.borrow_mut();
@@ -1092,7 +819,7 @@ mod tests {
             let sim = graph.sim_peripherals_mut().unwrap();
             sim.tcp_connect(0, "127.0.0.1", 8080).unwrap();
         });
-        dataflow_tcp_inject(gid, 0, &[1, 2, 3]).unwrap();
+        tcp_inject_impl(gid, 0, &[1, 2, 3]).unwrap();
         // Verify the injected data landed in the recv buffer
         DATAFLOW_GRAPHS.with(|g| {
             let mut graphs = g.borrow_mut();
@@ -1109,7 +836,7 @@ mod tests {
     #[test]
     fn test_tcp_drain_empty_socket() {
         let gid = dataflow_new(0.01);
-        dataflow_set_simulation_mode(gid, true).unwrap();
+        set_simulation_mode_impl(gid, true).unwrap();
         // Drain on a nonexistent socket returns empty vec
         DATAFLOW_GRAPHS.with(|g| {
             let mut graphs = g.borrow_mut();
@@ -1124,7 +851,7 @@ mod tests {
     #[test]
     fn test_tcp_send_and_drain() {
         let gid = dataflow_new(0.01);
-        dataflow_set_simulation_mode(gid, true).unwrap();
+        set_simulation_mode_impl(gid, true).unwrap();
         DATAFLOW_GRAPHS.with(|g| {
             let mut graphs = g.borrow_mut();
             let graph = graphs.get_mut(&gid).unwrap();
@@ -1169,13 +896,13 @@ mod tests {
     #[test]
     fn test_panel_load_save() {
         let id = panel_new("My Panel");
-        let json = panel_save(id).unwrap();
+        let json = panel_save_impl(id).unwrap();
         assert!(json.contains("My Panel"));
-        let snap = panel_snapshot(id).unwrap();
+        let snap = panel_snapshot_impl(id).unwrap();
         assert_eq!(json, snap);
         // Load from JSON
-        let id2 = panel_load(&json).unwrap();
-        let json2 = panel_save(id2).unwrap();
+        let id2 = panel_load_impl(&json).unwrap();
+        let json2 = panel_save_impl(id2).unwrap();
         assert!(json2.contains("My Panel"));
         panel_destroy(id);
         panel_destroy(id2);
@@ -1208,7 +935,7 @@ mod tests {
             "size": {"width": 200.0, "height": 50.0},
             "channels": []
         }"#;
-        let wid = panel_add_widget(id, widget_json).unwrap();
+        let wid = panel_add_widget_impl(id, widget_json).unwrap();
         assert!(wid > 0);
         // Update widget
         let update_json = r#"{
@@ -1219,15 +946,15 @@ mod tests {
             "size": {"width": 200.0, "height": 50.0},
             "channels": []
         }"#;
-        panel_update_widget(id, wid, update_json).unwrap();
-        let snap = panel_save(id).unwrap();
+        panel_update_widget_impl(id, wid, update_json).unwrap();
+        let snap = panel_save_impl(id).unwrap();
         assert!(snap.contains("Velocity"));
         // The original "Speed" label should no longer appear
         assert!(!snap.contains("Speed"));
         // Remove widget
-        let removed = panel_remove_widget(id, wid).unwrap();
+        let removed = panel_remove_widget_impl(id, wid).unwrap();
         assert!(removed);
-        let not_found = panel_remove_widget(id, 9999).unwrap();
+        let not_found = panel_remove_widget_impl(id, 9999).unwrap();
         assert!(!not_found);
         panel_destroy(id);
     }
@@ -1291,10 +1018,10 @@ mod tests {
                 r#"{{"id":0,"kind":{},"label":"W","position":{{"x":0.0,"y":0.0}},"size":{{"width":50.0,"height":50.0}},"channels":[]}}"#,
                 kind
             );
-            let wid = panel_add_widget(id, &json).unwrap();
+            let wid = panel_add_widget_impl(id, &json).unwrap();
             assert!(wid > 0);
         }
-        let snap = panel_save(id).unwrap();
+        let snap = panel_save_impl(id).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&snap).unwrap();
         assert_eq!(parsed["widgets"].as_array().unwrap().len(), 6);
         panel_destroy(id);
@@ -1305,8 +1032,8 @@ mod tests {
     #[test]
     fn test_panel_set_topic() {
         let id = panel_new("Runtime Test");
-        panel_set_topic(id, "motor/speed", 42.0).unwrap();
-        let vals = panel_get_values(id).unwrap();
+        panel_set_topic_impl(id, "motor/speed", 42.0).unwrap();
+        let vals = panel_get_values_impl(id).unwrap();
         assert!(vals.contains("42"));
         assert!(vals.contains("motor/speed"));
         panel_destroy(id);
@@ -1342,9 +1069,9 @@ mod tests {
                 {"topic": "sensor/temp", "direction": "Input", "port_kind": "Float"}
             ]
         }"#;
-        panel_add_widget(id, widget_json).unwrap();
-        panel_merge_values(id, r#"{"sensor/temp": 25.5}"#).unwrap();
-        let vals = panel_get_values(id).unwrap();
+        panel_add_widget_impl(id, widget_json).unwrap();
+        panel_merge_values_impl(id, r#"{"sensor/temp": 25.5}"#).unwrap();
+        let vals = panel_get_values_impl(id).unwrap();
         assert!(vals.contains("25.5"));
         panel_destroy(id);
     }
@@ -1382,10 +1109,10 @@ mod tests {
                 {"topic": "motor/throttle", "direction": "Output", "port_kind": "Float"}
             ]
         }"#;
-        panel_add_widget(id, widget_json).unwrap();
+        panel_add_widget_impl(id, widget_json).unwrap();
         // Set the topic value that the output channel references
-        panel_set_topic(id, "motor/throttle", 75.0).unwrap();
-        let outputs = panel_collect_outputs(id).unwrap();
+        panel_set_topic_impl(id, "motor/throttle", 75.0).unwrap();
+        let outputs = panel_collect_outputs_impl(id).unwrap();
         assert!(outputs.contains("motor/throttle"));
         assert!(outputs.contains("75"));
         panel_destroy(id);
@@ -1395,7 +1122,7 @@ mod tests {
     fn test_panel_collect_outputs_empty() {
         let id = panel_new("Empty Output");
         // Empty panel has no output channels
-        let outputs = panel_collect_outputs(id).unwrap();
+        let outputs = panel_collect_outputs_impl(id).unwrap();
         assert!(outputs.contains('{'));
         panel_destroy(id);
     }
@@ -1550,7 +1277,7 @@ mod tests {
     #[test]
     fn test_codegen_with_graph() {
         let gid = dataflow_new(0.01);
-        dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
         // Test the codegen internal API
         DATAFLOW_GRAPHS.with(|g| {
             let graphs = g.borrow();
@@ -1565,7 +1292,7 @@ mod tests {
     #[test]
     fn test_codegen_multi_invalid_targets() {
         let gid = dataflow_new(0.01);
-        dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
         // Invalid targets JSON should fail deserialization
         let result: Result<Vec<dataflow::codegen::binding::TargetWithBinding>, _> =
             serde_json::from_str("not valid json");
