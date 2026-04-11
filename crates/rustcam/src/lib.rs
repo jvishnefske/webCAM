@@ -30,6 +30,8 @@ pub mod svg;
 pub mod tool;
 pub mod toolpath;
 pub mod units;
+#[cfg(target_arch = "wasm32")]
+mod wasm_api;
 
 use gcode::{emit_gcode, emit_gcode_with_profile, GcodeParams, LaserParams};
 use geometry::Toolpath;
@@ -217,14 +219,12 @@ fn strategy_from_config(config: &CamConfig) -> Box<dyn ToolpathStrategy> {
 // ── New WASM API ─────────────────────────────────────────────────────
 
 /// Return JSON list of available machine profiles.
-#[wasm_bindgen]
 pub fn available_profiles() -> String {
     let profiles = vec![MachineProfile::cnc_mill(), MachineProfile::laser_cutter()];
     serde_json::to_string(&profiles).unwrap_or_else(|_| "[]".into())
 }
 
 /// Return a default config JSON for the given machine type.
-#[wasm_bindgen]
 pub fn default_config(machine_type: &str) -> String {
     let config = if machine_type == "laser_cutter" {
         CamConfig {
@@ -246,7 +246,6 @@ pub fn default_config(machine_type: &str) -> String {
 // ── WASM entry points ────────────────────────────────────────────────
 
 /// Process an STL file (binary bytes) and return G-code.
-#[wasm_bindgen]
 pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
     let config: CamConfig =
         serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -353,7 +352,6 @@ pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
 }
 
 /// Process an SVG string and return G-code.
-#[wasm_bindgen]
 pub fn process_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue> {
     let config: CamConfig =
         serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -431,7 +429,6 @@ fn report_progress(cb: &Function, completed: u32, total: u32) {
 
 /// Process an STL file with progress reporting.
 /// The callback receives (completed_layers, total_layers) after each layer.
-#[wasm_bindgen]
 pub fn process_stl_progress(
     data: &[u8],
     config_json: &str,
@@ -504,7 +501,6 @@ pub fn process_stl_progress(
 
 /// Process an SVG string with progress reporting.
 /// The callback receives (completed_layers, total_layers) after each layer.
-#[wasm_bindgen]
 pub fn process_svg_progress(
     svg_text: &str,
     config_json: &str,
@@ -582,7 +578,6 @@ pub fn process_svg_progress(
 
 /// Return toolpath data as JSON (for the 2-D preview canvas).
 /// Returns toolpath moves with Z coordinates for 3D visualization.
-#[wasm_bindgen]
 pub fn preview_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
     let config: CamConfig =
         serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -606,7 +601,6 @@ pub fn preview_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
 }
 
 /// Return toolpath data from SVG as JSON (for the 2-D preview canvas).
-#[wasm_bindgen]
 pub fn preview_svg(svg_text: &str) -> Result<String, JsValue> {
     let polylines = svg::parse_svg(svg_text).map_err(|e| JsValue::from_str(&e))?;
     let preview_paths: Vec<Vec<[f64; 2]>> = polylines
@@ -620,7 +614,6 @@ pub fn preview_svg(svg_text: &str) -> Result<String, JsValue> {
 
 /// Return flat move list as JSON for the tool simulation.
 /// Each move: `{ x, y, z, rapid }`.
-#[wasm_bindgen]
 pub fn sim_moves_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
     let config: CamConfig =
         serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -628,8 +621,6 @@ pub fn sim_moves_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> 
     let toolpaths = build_toolpaths_stl(&mesh, &config);
     flatten_moves(&toolpaths)
 }
-
-#[wasm_bindgen]
 pub fn sim_moves_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue> {
     let config: CamConfig =
         serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
@@ -731,13 +722,11 @@ thread_local! {
 }
 
 /// Reset the sketch actor to a blank state.
-#[wasm_bindgen]
 pub fn sketch_reset() {
     SKETCH.with(|s| *s.borrow_mut() = sketch_actor::SketchActor::new());
 }
 
 /// Add a free point. Returns JSON `{"id": <u32>}`.
-#[wasm_bindgen]
 pub fn sketch_add_point(x: f64, y: f64) -> String {
     SKETCH.with(|s| {
         let id = s.borrow_mut().add_point(x, y);
@@ -746,7 +735,6 @@ pub fn sketch_add_point(x: f64, y: f64) -> String {
 }
 
 /// Add a fixed point. Returns JSON `{"id": <u32>}`.
-#[wasm_bindgen]
 pub fn sketch_add_fixed_point(x: f64, y: f64) -> String {
     SKETCH.with(|s| {
         let id = s.borrow_mut().add_point_fixed(x, y);
@@ -755,19 +743,16 @@ pub fn sketch_add_fixed_point(x: f64, y: f64) -> String {
 }
 
 /// Move a point to new coordinates.
-#[wasm_bindgen]
 pub fn sketch_move_point(id: u32, x: f64, y: f64) {
     SKETCH.with(|s| s.borrow_mut().move_point(id, x, y));
 }
 
 /// Remove a point and all its constraints.
-#[wasm_bindgen]
 pub fn sketch_remove_point(id: u32) {
     SKETCH.with(|s| s.borrow_mut().remove_point(id));
 }
 
 /// Set a point's fixed flag.
-#[wasm_bindgen]
 pub fn sketch_set_fixed(id: u32, fixed: bool) {
     SKETCH.with(|s| {
         if let Some(p) = s.borrow_mut().points.get_mut(&id) {
@@ -785,7 +770,6 @@ pub fn sketch_set_fixed(id: u32, fixed: bool) {
 /// For "fixed", pass `value` as x and `value2` as y.
 ///
 /// Returns JSON `{"id": <u32>}`.
-#[wasm_bindgen]
 pub fn sketch_add_constraint(
     kind: &str,
     ids_json: &str,
@@ -832,7 +816,6 @@ pub fn sketch_add_constraint(
 }
 
 /// Remove a constraint by id.
-#[wasm_bindgen]
 pub fn sketch_remove_constraint(id: u32) {
     SKETCH.with(|s| {
         s.borrow_mut().constraints.remove(&id);
@@ -842,7 +825,6 @@ pub fn sketch_remove_constraint(id: u32) {
 /// Run the constraint solver and return a full snapshot as JSON.
 /// The snapshot includes points, constraints, DOF, solve status,
 /// and per-point coloring status.
-#[wasm_bindgen]
 pub fn sketch_solve() -> Result<String, JsValue> {
     SKETCH.with(|s| {
         let mut actor = s.borrow_mut();
@@ -853,7 +835,6 @@ pub fn sketch_solve() -> Result<String, JsValue> {
 }
 
 /// Process queued messages and return snapshot JSON.
-#[wasm_bindgen]
 pub fn sketch_pump() -> Result<String, JsValue> {
     SKETCH.with(|s| {
         let mut actor = s.borrow_mut();
@@ -863,7 +844,6 @@ pub fn sketch_pump() -> Result<String, JsValue> {
 }
 
 /// Get current snapshot without solving (read-only query).
-#[wasm_bindgen]
 pub fn sketch_snapshot() -> Result<String, JsValue> {
     SKETCH.with(|s| {
         let snap = s.borrow().snapshot();
