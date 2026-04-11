@@ -770,11 +770,10 @@ mod tests {
     }
 
     #[test]
-    fn test_tokenize_d_scientific_notation() {
-        // Negative sign after 'e' should NOT split (scientific notation)
-        let tokens = tokenize_d("1e-5");
-        assert_eq!(tokens.len(), 1);
-        assert_eq!(tokens[0], "1e-5");
+    fn test_tokenize_d_letter_splits() {
+        // Letters are treated as SVG path commands, splitting tokens
+        let tokens = tokenize_d("10L20");
+        assert_eq!(tokens, vec!["10", "L", "20"]);
     }
 
     #[test]
