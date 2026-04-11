@@ -33,9 +33,8 @@ pub mod units;
 #[cfg(target_arch = "wasm32")]
 mod wasm_api;
 
-use gcode::{emit_gcode, emit_gcode_with_profile, GcodeParams, LaserParams};
+use gcode::{emit_gcode_with_profile, GcodeParams, LaserParams};
 use geometry::Toolpath;
-use js_sys::Function;
 use machine::{MachineProfile, MachineType};
 use serde::{Deserialize, Serialize};
 use tool::Tool;
@@ -43,7 +42,6 @@ use toolpath::{
     ContourStrategy, CutParams, LaserCutStrategy, LaserEngraveStrategy, PerimeterStrategy,
     PocketStrategy, ScanDirection, SurfaceParams, ToolpathStrategy, ZigzagSurfaceStrategy,
 };
-use wasm_bindgen::prelude::*;
 
 // ── Public parameter struct (JSON from JS) ───────────────────────────
 
@@ -156,7 +154,7 @@ impl Default for CamConfig {
 }
 
 /// Parse scan direction from config string.
-fn scan_direction_from_config(config: &CamConfig) -> ScanDirection {
+pub(crate) fn scan_direction_from_config(config: &CamConfig) -> ScanDirection {
     match config.scan_direction.as_str() {
         "y" | "Y" => ScanDirection::Y,
         _ => ScanDirection::X,
@@ -164,7 +162,7 @@ fn scan_direction_from_config(config: &CamConfig) -> ScanDirection {
 }
 
 /// Create a Tool from CamConfig fields.
-fn tool_from_config(config: &CamConfig) -> Tool {
+pub(crate) fn tool_from_config(config: &CamConfig) -> Tool {
     match config.tool_type.as_str() {
         "ball_end" => Tool::ball_end(config.tool_diameter, 10.0),
         "face_mill" => Tool::face_mill(
@@ -343,11 +341,6 @@ pub fn process_stl_impl(data: &[u8], config_json: &str) -> Result<String, String
     ))
 }
 
-/// Process an STL file (binary bytes) and return G-code.
-pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
-    process_stl_impl(data, config_json).map_err(|e| JsValue::from_str(&e))
-}
-
 /// Process an SVG string (testable helper).
 pub fn process_svg_impl(svg_text: &str, config_json: &str) -> Result<String, String> {
     let config: CamConfig =
@@ -411,169 +404,6 @@ pub fn process_svg_impl(svg_text: &str, config_json: &str) -> Result<String, Str
     ))
 }
 
-/// Process an SVG string and return G-code.
-pub fn process_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue> {
-    process_svg_impl(svg_text, config_json).map_err(|e| JsValue::from_str(&e))
-}
-
-/// Helper: call a JS progress callback with (completed, total).
-fn report_progress(cb: &Function, completed: u32, total: u32) {
-    let _ = cb.call2(
-        &JsValue::NULL,
-        &JsValue::from(completed),
-        &JsValue::from(total),
-    );
-}
-
-/// Process an STL file with progress reporting.
-/// The callback receives (completed_layers, total_layers) after each layer.
-pub fn process_stl_progress(
-    data: &[u8],
-    config_json: &str,
-    on_progress: &Function,
-) -> Result<String, JsValue> {
-    let config: CamConfig =
-        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-    let mesh = stl::parse_stl(data).map_err(|e| JsValue::from_str(&e))?;
-
-    let cut_params = CutParams {
-        tool: tool_from_config(&config),
-        tool_diameter: config.tool_diameter,
-        step_over: config.step_over,
-        step_down: config.step_down,
-        feed_rate: config.feed_rate,
-        plunge_rate: config.plunge_rate,
-        safe_z: config.safe_z,
-        cut_z: config.cut_depth,
-        climb_cut: config.climb_cut,
-        perimeter_passes: config.perimeter_passes,
-    };
-
-    let gcode_params = GcodeParams {
-        feed_rate: config.feed_rate,
-        plunge_rate: config.plunge_rate,
-        spindle_speed: config.spindle_speed,
-        safe_z: config.safe_z,
-        unit_mm: true,
-    };
-
-    let toolpaths: Vec<Toolpath> = match config.strategy.as_str() {
-        "zigzag" => {
-            report_progress(on_progress, 0, 1);
-            let strategy = ZigzagSurfaceStrategy;
-            let surface_params =
-                SurfaceParams::new(&mesh, cut_params, scan_direction_from_config(&config));
-            let result = strategy.generate_surface(&surface_params);
-            report_progress(on_progress, 1, 1);
-            result
-        }
-        other => {
-            let layers = slicer::slice_mesh(&mesh, config.step_down);
-            let total = layers.len() as u32;
-            report_progress(on_progress, 0, total);
-            let strategy: Box<dyn ToolpathStrategy> = match other {
-                "pocket" => Box::new(PocketStrategy),
-                "perimeter" => Box::new(PerimeterStrategy),
-                "slice" => Box::new(ContourStrategy),
-                _ => Box::new(ContourStrategy),
-            };
-            let mut all = Vec::new();
-            for (i, (z, contours)) in layers.iter().enumerate() {
-                let mut p = cut_params.clone();
-                p.cut_z = *z;
-                all.extend(strategy.generate(contours, &p));
-                report_progress(on_progress, (i + 1) as u32, total);
-            }
-            if all.is_empty() && other != "pocket" && other != "perimeter" {
-                let contours =
-                    slicer::slice_at_z(&mesh, mesh.bounds.as_ref().map_or(0.0, |b| b.min.z + 0.01));
-                all.extend(strategy.generate(&contours, &cut_params));
-            }
-            all
-        }
-    };
-
-    Ok(emit_gcode(&toolpaths, &gcode_params))
-}
-
-/// Process an SVG string with progress reporting.
-/// The callback receives (completed_layers, total_layers) after each layer.
-pub fn process_svg_progress(
-    svg_text: &str,
-    config_json: &str,
-    on_progress: &Function,
-) -> Result<String, JsValue> {
-    let config: CamConfig =
-        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-    let polylines = svg::parse_svg(svg_text).map_err(|e| JsValue::from_str(&e))?;
-
-    let cut_params = CutParams {
-        tool: tool_from_config(&config),
-        tool_diameter: config.tool_diameter,
-        step_over: config.step_over,
-        step_down: config.step_down,
-        feed_rate: config.feed_rate,
-        plunge_rate: config.plunge_rate,
-        safe_z: config.safe_z,
-        cut_z: config.cut_depth,
-        climb_cut: config.climb_cut,
-        perimeter_passes: config.perimeter_passes,
-    };
-
-    let gcode_params = GcodeParams {
-        feed_rate: config.feed_rate,
-        plunge_rate: config.plunge_rate,
-        spindle_speed: config.spindle_speed,
-        safe_z: config.safe_z,
-        unit_mm: true,
-    };
-
-    let strategy: Box<dyn ToolpathStrategy> = match config.strategy.as_str() {
-        "pocket" => Box::new(PocketStrategy),
-        "perimeter" => Box::new(PerimeterStrategy),
-        _ => Box::new(ContourStrategy),
-    };
-
-    // Count total layers
-    let mut total_layers = 0u32;
-    {
-        let mut z = 0.0;
-        while z > config.cut_depth - 0.001 {
-            z -= config.step_down;
-            if z < config.cut_depth {
-                z = config.cut_depth;
-            }
-            total_layers += 1;
-            if (z - config.cut_depth).abs() < 0.001 {
-                break;
-            }
-        }
-    }
-    report_progress(on_progress, 0, total_layers);
-
-    let mut all_toolpaths = Vec::new();
-    let mut z = 0.0;
-    let mut layer_num = 0u32;
-    while z > config.cut_depth - 0.001 {
-        z -= config.step_down;
-        if z < config.cut_depth {
-            z = config.cut_depth;
-        }
-        let mut p = cut_params.clone();
-        p.cut_z = z;
-        all_toolpaths.extend(strategy.generate(&polylines, &p));
-        layer_num += 1;
-        report_progress(on_progress, layer_num, total_layers);
-        if (z - config.cut_depth).abs() < 0.001 {
-            break;
-        }
-    }
-
-    Ok(emit_gcode(&all_toolpaths, &gcode_params))
-}
-
 /// STL preview (testable helper).
 pub fn preview_stl_impl(data: &[u8], config_json: &str) -> Result<String, String> {
     let config: CamConfig =
@@ -596,12 +426,6 @@ pub fn preview_stl_impl(data: &[u8], config_json: &str) -> Result<String, String
     serde_json::to_string(&preview_paths).map_err(|e| e.to_string())
 }
 
-/// Return toolpath data as JSON (for the 2-D preview canvas).
-/// Returns toolpath moves with Z coordinates for 3D visualization.
-pub fn preview_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
-    preview_stl_impl(data, config_json).map_err(|e| JsValue::from_str(&e))
-}
-
 /// SVG preview (testable helper).
 pub fn preview_svg_impl(svg_text: &str) -> Result<String, String> {
     let polylines = svg::parse_svg(svg_text)?;
@@ -610,11 +434,6 @@ pub fn preview_svg_impl(svg_text: &str) -> Result<String, String> {
         .map(|pl| pl.points.iter().map(|p| [p.x, p.y]).collect())
         .collect();
     serde_json::to_string(&preview_paths).map_err(|e| e.to_string())
-}
-
-/// Return toolpath data from SVG as JSON (for the 2-D preview canvas).
-pub fn preview_svg(svg_text: &str) -> Result<String, JsValue> {
-    preview_svg_impl(svg_text).map_err(|e| JsValue::from_str(&e))
 }
 
 // ── Simulation data ──────────────────────────────────────────────────
@@ -628,12 +447,6 @@ pub fn sim_moves_stl_impl(data: &[u8], config_json: &str) -> Result<String, Stri
     flatten_moves_impl(&toolpaths)
 }
 
-/// Return flat move list as JSON for the tool simulation.
-/// Each move: `{ x, y, z, rapid }`.
-pub fn sim_moves_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
-    sim_moves_stl_impl(data, config_json).map_err(|e| JsValue::from_str(&e))
-}
-
 /// SVG sim moves (testable helper).
 pub fn sim_moves_svg_impl(svg_text: &str, config_json: &str) -> Result<String, String> {
     let config: CamConfig =
@@ -641,10 +454,6 @@ pub fn sim_moves_svg_impl(svg_text: &str, config_json: &str) -> Result<String, S
     let polylines = svg::parse_svg(svg_text)?;
     let toolpaths = build_toolpaths_svg(&polylines, &config);
     flatten_moves_impl(&toolpaths)
-}
-
-pub fn sim_moves_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue> {
-    sim_moves_svg_impl(svg_text, config_json).map_err(|e| JsValue::from_str(&e))
 }
 
 fn build_toolpaths_stl(mesh: &geometry::Mesh, config: &CamConfig) -> Vec<Toolpath> {
@@ -731,11 +540,6 @@ fn flatten_moves_impl(toolpaths: &[Toolpath]) -> Result<String, String> {
     let moves: Vec<&geometry::ToolpathMove> =
         toolpaths.iter().flat_map(|tp| tp.moves.iter()).collect();
     serde_json::to_string(&moves).map_err(|e| e.to_string())
-}
-
-#[allow(dead_code)]
-fn flatten_moves(toolpaths: &[Toolpath]) -> Result<String, JsValue> {
-    flatten_moves_impl(toolpaths).map_err(|e| JsValue::from_str(&e))
 }
 
 // ── Sketch Actor WASM API ────────────────────────────────────────────
@@ -831,17 +635,6 @@ pub fn sketch_add_constraint_impl(
     })
 }
 
-/// Add a constraint.
-pub fn sketch_add_constraint(
-    kind: &str,
-    ids_json: &str,
-    value: f64,
-    value2: f64,
-) -> Result<String, JsValue> {
-    sketch_add_constraint_impl(kind, ids_json, value, value2)
-        .map_err(|e| JsValue::from_str(&e))
-}
-
 /// Remove a constraint by id.
 pub fn sketch_remove_constraint(id: u32) {
     SKETCH.with(|s| {
@@ -859,11 +652,6 @@ pub fn sketch_solve_impl() -> Result<String, String> {
     })
 }
 
-/// Run the constraint solver and return a full snapshot as JSON.
-pub fn sketch_solve() -> Result<String, JsValue> {
-    sketch_solve_impl().map_err(|e| JsValue::from_str(&e))
-}
-
 /// Pump (testable helper).
 pub fn sketch_pump_impl() -> Result<String, String> {
     SKETCH.with(|s| {
@@ -873,22 +661,12 @@ pub fn sketch_pump_impl() -> Result<String, String> {
     })
 }
 
-/// Process queued messages and return snapshot JSON.
-pub fn sketch_pump() -> Result<String, JsValue> {
-    sketch_pump_impl().map_err(|e| JsValue::from_str(&e))
-}
-
 /// Snapshot (testable helper).
 pub fn sketch_snapshot_impl() -> Result<String, String> {
     SKETCH.with(|s| {
         let snap = s.borrow().snapshot();
         serde_json::to_string(&snap).map_err(|e| e.to_string())
     })
-}
-
-/// Get current snapshot without solving (read-only query).
-pub fn sketch_snapshot() -> Result<String, JsValue> {
-    sketch_snapshot_impl().map_err(|e| JsValue::from_str(&e))
 }
 
 #[cfg(test)]
@@ -1026,7 +804,7 @@ mod tests {
         </svg>"#;
         let config_json =
             r#"{"machine_type": "laser_cutter", "strategy": "laser_cut", "laser_power": 80}"#;
-        let result = process_svg(svg, config_json);
+        let result = process_svg_impl(svg, config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
         assert!(gcode.contains("M4 S0"), "Should have laser dynamic mode");
@@ -1040,7 +818,7 @@ mod tests {
             <rect x="10" y="10" width="80" height="80"/>
         </svg>"#;
         let config_json = r#"{"machine_type": "laser_cutter", "strategy": "laser_engrave", "laser_power": 60, "step_over": 2.0}"#;
-        let result = process_svg(svg, config_json);
+        let result = process_svg_impl(svg, config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
         assert!(gcode.contains("S60"), "Should have engrave power");
@@ -1052,7 +830,7 @@ mod tests {
             <rect x="10" y="10" width="80" height="80"/>
         </svg>"#;
         let config_json = r#"{"strategy": "contour"}"#;
-        let result = process_svg(svg, config_json);
+        let result = process_svg_impl(svg, config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
         assert!(gcode.contains("M3 S12000"), "Should have spindle on");
@@ -1090,7 +868,7 @@ mod tests {
     #[test]
     fn test_sketch_reset_and_snapshot() {
         sketch_reset();
-        let snap = sketch_snapshot().unwrap();
+        let snap = sketch_snapshot_impl().unwrap();
         assert!(snap.contains("points"));
     }
 
@@ -1134,7 +912,7 @@ mod tests {
         let id1 = p1["id"].as_u64().unwrap() as u32;
         let id2 = p2["id"].as_u64().unwrap() as u32;
         let ids_json = format!("[{id1},{id2}]");
-        let cr = sketch_add_constraint("distance", &ids_json, 10.0, 0.0).unwrap();
+        let cr = sketch_add_constraint_impl("distance", &ids_json, 10.0, 0.0).unwrap();
         assert!(cr.contains("\"id\""));
         let cv: serde_json::Value = serde_json::from_str(&cr).unwrap();
         let cid = cv["id"].as_u64().unwrap() as u32;
@@ -1146,7 +924,7 @@ mod tests {
         sketch_reset();
         sketch_add_point(0.0, 0.0);
         sketch_add_point(10.0, 0.0);
-        let snap = sketch_solve().unwrap();
+        let snap = sketch_solve_impl().unwrap();
         assert!(snap.contains("points"));
     }
 
@@ -1154,7 +932,7 @@ mod tests {
     fn test_sketch_pump() {
         sketch_reset();
         sketch_add_point(1.0, 2.0);
-        let snap = sketch_pump().unwrap();
+        let snap = sketch_pump_impl().unwrap();
         assert!(snap.contains("points"));
     }
 
@@ -1180,13 +958,13 @@ endsolid test"
 
     #[test]
     fn test_process_stl_default() {
-        let result = process_stl(minimal_ascii_stl(), "{}");
+        let result = process_stl_impl(minimal_ascii_stl(), "{}");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_preview_svg() {
-        let result = preview_svg(simple_svg());
+        let result = preview_svg_impl(simple_svg());
         assert!(result.is_ok());
         let json = result.unwrap();
         let paths: Vec<Vec<[f64; 2]>> = serde_json::from_str(&json).unwrap();
@@ -1195,25 +973,25 @@ endsolid test"
 
     #[test]
     fn test_preview_stl() {
-        let result = preview_stl(minimal_ascii_stl(), "{}");
+        let result = preview_stl_impl(minimal_ascii_stl(), "{}");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_sim_moves_svg() {
-        let result = sim_moves_svg(simple_svg(), r#"{"strategy":"contour"}"#);
+        let result = sim_moves_svg_impl(simple_svg(), r#"{"strategy":"contour"}"#);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_sim_moves_stl() {
-        let result = sim_moves_stl(minimal_ascii_stl(), "{}");
+        let result = sim_moves_stl_impl(minimal_ascii_stl(), "{}");
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_flatten_moves_empty() {
-        let result = flatten_moves(&[]);
+        let result = flatten_moves_impl(&[]);
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "[]");
     }
@@ -1431,7 +1209,7 @@ endsolid test"
     #[test]
     fn test_process_stl_binary_stl_default_strategy() {
         let stl_data = minimal_binary_stl();
-        let result = process_stl(&stl_data, "{}");
+        let result = process_stl_impl(&stl_data, "{}");
         assert!(result.is_ok(), "binary STL with default config should succeed");
         let gcode = result.unwrap();
         assert!(gcode.contains("G21"), "should contain metric unit mode");
@@ -1444,7 +1222,7 @@ endsolid test"
     #[test]
     fn test_process_stl_contour_strategy() {
         let config_json = r#"{"strategy": "contour"}"#;
-        let result = process_stl(minimal_ascii_stl(), config_json);
+        let result = process_stl_impl(minimal_ascii_stl(), config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
         assert!(gcode.contains("G0") || gcode.contains("G1"), "should have motion commands");
@@ -1453,34 +1231,33 @@ endsolid test"
     #[test]
     fn test_process_stl_pocket_strategy() {
         let config_json = r#"{"strategy": "pocket"}"#;
-        let result = process_stl(minimal_ascii_stl(), config_json);
+        let result = process_stl_impl(minimal_ascii_stl(), config_json);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_process_stl_slice_strategy() {
         let config_json = r#"{"strategy": "slice"}"#;
-        let result = process_stl(minimal_ascii_stl(), config_json);
+        let result = process_stl_impl(minimal_ascii_stl(), config_json);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_process_stl_perimeter_strategy() {
         let config_json = r#"{"strategy": "perimeter"}"#;
-        let result = process_stl(minimal_ascii_stl(), config_json);
+        let result = process_stl_impl(minimal_ascii_stl(), config_json);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_process_stl_zigzag_strategy() {
         let config_json = r#"{"strategy": "zigzag"}"#;
-        let result = process_stl(minimal_ascii_stl(), config_json);
+        let result = process_stl_impl(minimal_ascii_stl(), config_json);
         assert!(result.is_ok());
     }
 
-    // Note: error-path tests for the JsValue wrappers cannot run in native mode
-    // because JsValue::from_str is only available on wasm32 targets. However,
-    // the _impl helpers (returning Result<T, String>) are fully testable here.
+    // Error-path tests use the _impl helpers (returning Result<T, String>)
+    // which are fully testable in native mode.
 
     #[test]
     fn test_process_stl_custom_params_in_gcode() {
@@ -1490,7 +1267,7 @@ endsolid test"
             "safe_z": 10.0,
             "strategy": "contour"
         }"#;
-        let result = process_stl(minimal_ascii_stl(), config_json);
+        let result = process_stl_impl(minimal_ascii_stl(), config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
         assert!(gcode.contains("M3 S8000"), "should use custom spindle speed");
@@ -1502,7 +1279,7 @@ endsolid test"
     #[test]
     fn test_process_svg_with_path_element() {
         let config_json = r#"{"strategy": "contour"}"#;
-        let result = process_svg(svg_with_path(), config_json);
+        let result = process_svg_impl(svg_with_path(), config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
         assert!(gcode.contains("G1"), "contour should produce G1 cutting moves");
@@ -1512,14 +1289,14 @@ endsolid test"
     #[test]
     fn test_process_svg_pocket_strategy() {
         let config_json = r#"{"strategy": "pocket"}"#;
-        let result = process_svg(simple_svg(), config_json);
+        let result = process_svg_impl(simple_svg(), config_json);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_process_svg_perimeter_strategy() {
         let config_json = r#"{"strategy": "perimeter"}"#;
-        let result = process_svg(simple_svg(), config_json);
+        let result = process_svg_impl(simple_svg(), config_json);
         assert!(result.is_ok());
     }
 
@@ -1530,7 +1307,7 @@ endsolid test"
             "strategy": "laser_cut",
             "laser_power": 75
         }"#;
-        let result = process_svg(svg_with_path(), config_json);
+        let result = process_svg_impl(svg_with_path(), config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
         assert!(gcode.contains("M4 S0"), "should have dynamic laser mode preamble");
@@ -1541,9 +1318,6 @@ endsolid test"
         assert!(!gcode.contains("M3 S12000"), "laser should not use M3 spindle on");
     }
 
-    // Note: error-path tests for process_svg (invalid JSON, empty SVG, rejected
-    // strategies) cannot run in native mode because JsValue::from_str is not
-    // implemented on non-wasm32 targets.
 
     #[test]
     fn test_process_svg_step_down_produces_multiple_layers() {
@@ -1553,7 +1327,7 @@ endsolid test"
             "cut_depth": -3.0,
             "step_down": 1.0
         }"#;
-        let result = process_svg(svg_with_path(), config_json);
+        let result = process_svg_impl(svg_with_path(), config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
         // Multiple toolpath sections => multiple "(Toolpath N)" comments
@@ -1569,7 +1343,7 @@ endsolid test"
 
     #[test]
     fn test_preview_stl_returns_valid_json_array() {
-        let result = preview_stl(minimal_ascii_stl(), "{}");
+        let result = preview_stl_impl(minimal_ascii_stl(), "{}");
         assert!(result.is_ok());
         let json = result.unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -1579,7 +1353,7 @@ endsolid test"
     #[test]
     fn test_preview_stl_binary_format() {
         let stl_data = minimal_binary_stl();
-        let result = preview_stl(&stl_data, "{}");
+        let result = preview_stl_impl(&stl_data, "{}");
         assert!(result.is_ok());
         let json = result.unwrap();
         let paths: Vec<Vec<[f64; 3]>> = serde_json::from_str(&json).unwrap();
@@ -1591,15 +1365,12 @@ endsolid test"
         }
     }
 
-    // Note: error-path tests for preview_stl (invalid JSON, invalid STL) cannot
-    // run in native mode because JsValue::from_str is not implemented on
-    // non-wasm32 targets.
 
     // ── preview_svg: JSON structure validation ──────────────────────
 
     #[test]
     fn test_preview_svg_returns_2d_coordinates() {
-        let result = preview_svg(svg_with_path());
+        let result = preview_svg_impl(svg_with_path());
         assert!(result.is_ok());
         let json = result.unwrap();
         let paths: Vec<Vec<[f64; 2]>> = serde_json::from_str(&json).unwrap();
@@ -1612,12 +1383,10 @@ endsolid test"
         }
     }
 
-    // Note: error-path test for preview_svg (empty SVG) cannot run in native
-    // mode because JsValue::from_str is not implemented on non-wasm32 targets.
 
     #[test]
     fn test_preview_svg_rect_coordinates_in_range() {
-        let result = preview_svg(simple_svg());
+        let result = preview_svg_impl(simple_svg());
         assert!(result.is_ok());
         let json = result.unwrap();
         let paths: Vec<Vec<[f64; 2]>> = serde_json::from_str(&json).unwrap();
@@ -1709,7 +1478,7 @@ endsolid test"
 
     #[test]
     fn test_sim_moves_stl_returns_move_objects() {
-        let result = sim_moves_stl(minimal_ascii_stl(), "{}");
+        let result = sim_moves_stl_impl(minimal_ascii_stl(), "{}");
         assert!(result.is_ok());
         let json = result.unwrap();
         let moves: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
@@ -1724,7 +1493,7 @@ endsolid test"
 
     #[test]
     fn test_sim_moves_svg_returns_move_objects() {
-        let result = sim_moves_svg(svg_with_path(), r#"{"strategy":"contour"}"#);
+        let result = sim_moves_svg_impl(svg_with_path(), r#"{"strategy":"contour"}"#);
         assert!(result.is_ok());
         let json = result.unwrap();
         let moves: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
@@ -1737,9 +1506,6 @@ endsolid test"
         }
     }
 
-    // Note: error-path tests for sim_moves (invalid STL, empty SVG, invalid JSON)
-    // cannot run in native mode because JsValue::from_str is not implemented on
-    // non-wasm32 targets.
 
     // ── End-to-end pipeline: STL -> G-code content checks ───────────
 
@@ -1747,7 +1513,7 @@ endsolid test"
     fn test_process_stl_binary_gcode_has_motion() {
         let stl_data = minimal_binary_stl();
         let config_json = r#"{"strategy": "contour", "step_down": 1.0, "cut_depth": -1.0}"#;
-        let result = process_stl(&stl_data, config_json);
+        let result = process_stl_impl(&stl_data, config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
         // Should have rapid moves (G0) and cutting moves (G1)
@@ -1764,7 +1530,7 @@ endsolid test"
     #[test]
     fn test_process_svg_gcode_well_formed() {
         let config_json = r#"{"strategy": "contour"}"#;
-        let result = process_svg(svg_with_path(), config_json);
+        let result = process_svg_impl(svg_with_path(), config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
 
@@ -1795,7 +1561,7 @@ endsolid test"
             "laser_power": 40,
             "step_over": 0.5
         }"#;
-        let result = process_svg(simple_svg(), config_json);
+        let result = process_svg_impl(simple_svg(), config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
         assert!(gcode.contains("S40"), "should use power 40");
@@ -1807,34 +1573,31 @@ endsolid test"
     #[test]
     fn test_process_stl_binary_pocket() {
         let stl_data = minimal_binary_stl();
-        let result = process_stl(&stl_data, r#"{"strategy": "pocket"}"#);
+        let result = process_stl_impl(&stl_data, r#"{"strategy": "pocket"}"#);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_process_stl_binary_zigzag() {
         let stl_data = minimal_binary_stl();
-        let result = process_stl(&stl_data, r#"{"strategy": "zigzag"}"#);
+        let result = process_stl_impl(&stl_data, r#"{"strategy": "zigzag"}"#);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_process_stl_binary_slice() {
         let stl_data = minimal_binary_stl();
-        let result = process_stl(&stl_data, r#"{"strategy": "slice"}"#);
+        let result = process_stl_impl(&stl_data, r#"{"strategy": "slice"}"#);
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_process_stl_binary_perimeter() {
         let stl_data = minimal_binary_stl();
-        let result = process_stl(&stl_data, r#"{"strategy": "perimeter"}"#);
+        let result = process_stl_impl(&stl_data, r#"{"strategy": "perimeter"}"#);
         assert!(result.is_ok());
     }
 
-    // Note: truncated binary STL error test cannot run in native mode because
-    // JsValue::from_str is not implemented on non-wasm32 targets.
-    // The STL parsing error handling is tested in stl::tests.
 
     // ── CamConfig edge cases ────────────────────────────────────────
 
@@ -1872,34 +1635,28 @@ endsolid test"
 
     // ── Error-path coverage: sketch_add_constraint ──────────────────
 
-    // Note: sketch_add_constraint error-path tests that return Err(JsValue) cannot
-    // run in native mode because JsValue::from_str panics on non-wasm32 targets.
-    // The constraint matching logic is tested via test_sketch_add_constraint_all_kinds.
-    #[cfg(target_arch = "wasm32")]
     #[test]
     fn test_sketch_add_constraint_unknown_kind() {
         sketch_reset();
         sketch_add_point(0.0, 0.0);
-        let result = sketch_add_constraint("nonexistent", "[0]", 0.0, 0.0);
+        let result = sketch_add_constraint_impl("nonexistent", "[0]", 0.0, 0.0);
         assert!(result.is_err());
     }
 
-    #[cfg(target_arch = "wasm32")]
     #[test]
     fn test_sketch_add_constraint_too_few_ids() {
         sketch_reset();
         let p1: serde_json::Value = serde_json::from_str(&sketch_add_point(0.0, 0.0)).unwrap();
         let id1 = p1["id"].as_u64().unwrap() as u32;
         // "distance" needs 2 ids, pass only 1
-        let result = sketch_add_constraint("distance", &format!("[{id1}]"), 10.0, 0.0);
+        let result = sketch_add_constraint_impl("distance", &format!("[{id1}]"), 10.0, 0.0);
         assert!(result.is_err());
     }
 
-    #[cfg(target_arch = "wasm32")]
     #[test]
     fn test_sketch_add_constraint_invalid_json() {
         sketch_reset();
-        let result = sketch_add_constraint("distance", "not valid json", 10.0, 0.0);
+        let result = sketch_add_constraint_impl("distance", "not valid json", 10.0, 0.0);
         assert!(result.is_err());
     }
 
@@ -1917,26 +1674,26 @@ endsolid test"
 
         // 2-point constraint kinds
         let two_ids = format!("[{id1},{id2}]");
-        assert!(sketch_add_constraint("coincident", &two_ids, 0.0, 0.0).is_ok());
-        assert!(sketch_add_constraint("horizontal", &two_ids, 0.0, 0.0).is_ok());
-        assert!(sketch_add_constraint("vertical", &two_ids, 0.0, 0.0).is_ok());
-        assert!(sketch_add_constraint("angle", &two_ids, 45.0, 0.0).is_ok());
-        assert!(sketch_add_constraint("radius", &two_ids, 5.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("coincident", &two_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("horizontal", &two_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("vertical", &two_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("angle", &two_ids, 45.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("radius", &two_ids, 5.0, 0.0).is_ok());
 
         // 1-point constraint kind
         let one_id = format!("[{id1}]");
-        assert!(sketch_add_constraint("fixed", &one_id, 1.0, 2.0).is_ok());
+        assert!(sketch_add_constraint_impl("fixed", &one_id, 1.0, 2.0).is_ok());
 
         // 3-point constraint kind
         let three_ids = format!("[{id1},{id2},{id3}]");
-        assert!(sketch_add_constraint("midpoint", &three_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("midpoint", &three_ids, 0.0, 0.0).is_ok());
 
         // 4-point constraint kinds
         let four_ids = format!("[{id1},{id2},{id3},{id4}]");
-        assert!(sketch_add_constraint("perpendicular", &four_ids, 0.0, 0.0).is_ok());
-        assert!(sketch_add_constraint("parallel", &four_ids, 0.0, 0.0).is_ok());
-        assert!(sketch_add_constraint("equal_length", &four_ids, 0.0, 0.0).is_ok());
-        assert!(sketch_add_constraint("symmetric", &four_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("perpendicular", &four_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("parallel", &four_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("equal_length", &four_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("symmetric", &four_ids, 0.0, 0.0).is_ok());
     }
 
     #[test]
@@ -2095,7 +1852,7 @@ endsolid test"
         let polylines = svg::parse_svg(simple_svg()).unwrap();
         let config = CamConfig::default();
         let toolpaths = build_toolpaths_svg(&polylines, &config);
-        let result = flatten_moves(&toolpaths);
+        let result = flatten_moves_impl(&toolpaths);
         assert!(result.is_ok());
         let json = result.unwrap();
         let moves: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
