@@ -68,7 +68,6 @@ panic = "warn"
 undocumented_unsafe_blocks = "deny"
 missing_panics_doc = "deny"
 unnecessary_safety_doc = "warn"
-result_unit_err = "allow"
 drop_non_drop = "allow"
 needless_question_mark = "warn"
 
