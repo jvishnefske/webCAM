@@ -6,11 +6,9 @@ pub mod rp2040;
 pub mod stm32f4;
 pub mod stm32g0b1;
 
-
-
-use crate::dataflow::codegen::binding::Binding;
-use crate::dataflow::codegen::target::TargetFamily;
-use crate::dataflow::graph::GraphSnapshot;
+use crate::binding::Binding;
+use crate::target::TargetFamily;
+use graph_model::GraphSnapshot;
 
 /// Trait for target-specific firmware generators.
 ///
@@ -35,5 +33,3 @@ pub fn generator_for(family: TargetFamily) -> Box<dyn TargetGenerator> {
         TargetFamily::Stm32g0b1 => Box::new(stm32g0b1::Stm32g0b1Generator),
     }
 }
-
-// C-FFI codegen removed — pure Rust runtime (DagRuntime) is the only execution path.

@@ -30,6 +30,7 @@ members = [
     "mlir-codegen",
     "block-registry",
     "configurable-blocks",
+    "target-registry",
 ]
 default-members = [
     "crates/rustcam",
@@ -44,6 +45,7 @@ default-members = [
     "mlir-codegen",
     "block-registry",
     "configurable-blocks",
+    "target-registry",
     "hil/native-server",
 ]
 

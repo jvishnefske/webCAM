@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::target::TargetFamily;
+use crate::target::TargetFamily;
 
 // Re-export the canonical types from module-traits for frontend/runtime use.
 pub use module_traits::hardware::{

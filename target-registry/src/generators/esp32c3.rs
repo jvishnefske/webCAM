@@ -3,8 +3,8 @@
 use std::fmt::Write;
 
 use super::TargetGenerator;
-use crate::dataflow::codegen::binding::Binding;
-use crate::dataflow::graph::GraphSnapshot;
+use crate::binding::Binding;
+use graph_model::GraphSnapshot;
 
 pub struct Esp32c3Generator;
 
