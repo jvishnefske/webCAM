@@ -1367,4 +1367,487 @@ endsolid test"
         let paths = build_toolpaths_svg(&polylines, &config);
         let _ = paths;
     }
+
+    // ── CAM pipeline integration tests ─────────────────────────────
+
+    /// Helper: construct a minimal binary STL with one triangle.
+    fn minimal_binary_stl() -> Vec<u8> {
+        let mut data = Vec::new();
+        // 80-byte header
+        data.extend_from_slice(&[0u8; 80]);
+        // Triangle count: 1 (little-endian u32)
+        data.extend_from_slice(&1u32.to_le_bytes());
+        // Normal: (0, 0, 1)
+        data.extend_from_slice(&0.0f32.to_le_bytes());
+        data.extend_from_slice(&0.0f32.to_le_bytes());
+        data.extend_from_slice(&1.0f32.to_le_bytes());
+        // Vertex 0: (0, 0, 0)
+        data.extend_from_slice(&0.0f32.to_le_bytes());
+        data.extend_from_slice(&0.0f32.to_le_bytes());
+        data.extend_from_slice(&0.0f32.to_le_bytes());
+        // Vertex 1: (10, 0, 0)
+        data.extend_from_slice(&10.0f32.to_le_bytes());
+        data.extend_from_slice(&0.0f32.to_le_bytes());
+        data.extend_from_slice(&0.0f32.to_le_bytes());
+        // Vertex 2: (0, 10, 0)
+        data.extend_from_slice(&0.0f32.to_le_bytes());
+        data.extend_from_slice(&10.0f32.to_le_bytes());
+        data.extend_from_slice(&0.0f32.to_le_bytes());
+        // Attribute byte count
+        data.extend_from_slice(&0u16.to_le_bytes());
+        assert_eq!(data.len(), 134);
+        data
+    }
+
+    /// Helper: SVG with a <path> element instead of <rect>.
+    fn svg_with_path() -> &'static str {
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+            <path d="M 0 0 L 10 0 L 10 10 L 0 10 Z"/>
+        </svg>"#
+    }
+
+    // ── process_stl: strategy coverage and G-code validation ────────
+
+    #[test]
+    fn test_process_stl_binary_stl_default_strategy() {
+        let stl_data = minimal_binary_stl();
+        let result = process_stl(&stl_data, "{}");
+        assert!(result.is_ok(), "binary STL with default config should succeed");
+        let gcode = result.unwrap();
+        assert!(gcode.contains("G21"), "should contain metric unit mode");
+        assert!(gcode.contains("G90"), "should contain absolute positioning");
+        assert!(gcode.contains("M3 S12000"), "should turn spindle on");
+        assert!(gcode.contains("M5"), "should turn spindle off at end");
+        assert!(gcode.contains("M2"), "should have program end");
+    }
+
+    #[test]
+    fn test_process_stl_contour_strategy() {
+        let config_json = r#"{"strategy": "contour"}"#;
+        let result = process_stl(minimal_ascii_stl(), config_json);
+        assert!(result.is_ok());
+        let gcode = result.unwrap();
+        assert!(gcode.contains("G0") || gcode.contains("G1"), "should have motion commands");
+    }
+
+    #[test]
+    fn test_process_stl_pocket_strategy() {
+        let config_json = r#"{"strategy": "pocket"}"#;
+        let result = process_stl(minimal_ascii_stl(), config_json);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_stl_slice_strategy() {
+        let config_json = r#"{"strategy": "slice"}"#;
+        let result = process_stl(minimal_ascii_stl(), config_json);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_stl_perimeter_strategy() {
+        let config_json = r#"{"strategy": "perimeter"}"#;
+        let result = process_stl(minimal_ascii_stl(), config_json);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_stl_zigzag_strategy() {
+        let config_json = r#"{"strategy": "zigzag"}"#;
+        let result = process_stl(minimal_ascii_stl(), config_json);
+        assert!(result.is_ok());
+    }
+
+    // Note: error-path tests for process_stl (invalid JSON, invalid STL, rejected
+    // strategies) cannot run in native mode because JsValue::from_str is not
+    // implemented on non-wasm32 targets. The underlying parsing and validation
+    // logic is tested in stl::tests, svg::tests, and machine::tests.
+
+    #[test]
+    fn test_process_stl_custom_params_in_gcode() {
+        let config_json = r#"{
+            "feed_rate": 500,
+            "spindle_speed": 8000,
+            "safe_z": 10.0,
+            "strategy": "contour"
+        }"#;
+        let result = process_stl(minimal_ascii_stl(), config_json);
+        assert!(result.is_ok());
+        let gcode = result.unwrap();
+        assert!(gcode.contains("M3 S8000"), "should use custom spindle speed");
+        assert!(gcode.contains("Z10.000"), "should use custom safe Z");
+    }
+
+    // ── process_svg: strategy coverage and G-code validation ────────
+
+    #[test]
+    fn test_process_svg_with_path_element() {
+        let config_json = r#"{"strategy": "contour"}"#;
+        let result = process_svg(svg_with_path(), config_json);
+        assert!(result.is_ok());
+        let gcode = result.unwrap();
+        assert!(gcode.contains("G1"), "contour should produce G1 cutting moves");
+        assert!(gcode.contains("M3 S12000"), "CNC mill should turn spindle on");
+    }
+
+    #[test]
+    fn test_process_svg_pocket_strategy() {
+        let config_json = r#"{"strategy": "pocket"}"#;
+        let result = process_svg(simple_svg(), config_json);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_svg_perimeter_strategy() {
+        let config_json = r#"{"strategy": "perimeter"}"#;
+        let result = process_svg(simple_svg(), config_json);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_svg_laser_cut_gcode_structure() {
+        let config_json = r#"{
+            "machine_type": "laser_cutter",
+            "strategy": "laser_cut",
+            "laser_power": 75
+        }"#;
+        let result = process_svg(svg_with_path(), config_json);
+        assert!(result.is_ok());
+        let gcode = result.unwrap();
+        assert!(gcode.contains("M4 S0"), "should have dynamic laser mode preamble");
+        assert!(gcode.contains("S75"), "should set laser power to 75");
+        assert!(gcode.contains("M5"), "should turn laser off");
+        assert!(gcode.contains("M2"), "should end program");
+        // Laser cutter should NOT have spindle commands
+        assert!(!gcode.contains("M3 S12000"), "laser should not use M3 spindle on");
+    }
+
+    // Note: error-path tests for process_svg (invalid JSON, empty SVG, rejected
+    // strategies) cannot run in native mode because JsValue::from_str is not
+    // implemented on non-wasm32 targets.
+
+    #[test]
+    fn test_process_svg_step_down_produces_multiple_layers() {
+        // With cut_depth=-3 and step_down=1, should produce 3 layers of toolpaths
+        let config_json = r#"{
+            "strategy": "contour",
+            "cut_depth": -3.0,
+            "step_down": 1.0
+        }"#;
+        let result = process_svg(svg_with_path(), config_json);
+        assert!(result.is_ok());
+        let gcode = result.unwrap();
+        // Multiple toolpath sections => multiple "(Toolpath N)" comments
+        let toolpath_count = gcode.matches("(Toolpath").count();
+        assert!(
+            toolpath_count >= 3,
+            "3mm depth at 1mm step should produce at least 3 toolpath groups, got {}",
+            toolpath_count
+        );
+    }
+
+    // ── preview_stl: JSON structure validation ──────────────────────
+
+    #[test]
+    fn test_preview_stl_returns_valid_json_array() {
+        let result = preview_stl(minimal_ascii_stl(), "{}");
+        assert!(result.is_ok());
+        let json = result.unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_array(), "preview_stl should return a JSON array");
+    }
+
+    #[test]
+    fn test_preview_stl_binary_format() {
+        let stl_data = minimal_binary_stl();
+        let result = preview_stl(&stl_data, "{}");
+        assert!(result.is_ok());
+        let json = result.unwrap();
+        let paths: Vec<Vec<[f64; 3]>> = serde_json::from_str(&json).unwrap();
+        // Each inner array element has 3 coordinates (x, y, z)
+        for path in &paths {
+            for point in path {
+                assert_eq!(point.len(), 3, "each point should have 3 coordinates");
+            }
+        }
+    }
+
+    // Note: error-path tests for preview_stl (invalid JSON, invalid STL) cannot
+    // run in native mode because JsValue::from_str is not implemented on
+    // non-wasm32 targets.
+
+    // ── preview_svg: JSON structure validation ──────────────────────
+
+    #[test]
+    fn test_preview_svg_returns_2d_coordinates() {
+        let result = preview_svg(svg_with_path());
+        assert!(result.is_ok());
+        let json = result.unwrap();
+        let paths: Vec<Vec<[f64; 2]>> = serde_json::from_str(&json).unwrap();
+        assert!(!paths.is_empty(), "should produce at least one path");
+        for path in &paths {
+            assert!(!path.is_empty(), "each path should have points");
+            for point in path {
+                assert_eq!(point.len(), 2, "each point should have 2 coordinates");
+            }
+        }
+    }
+
+    // Note: error-path test for preview_svg (empty SVG) cannot run in native
+    // mode because JsValue::from_str is not implemented on non-wasm32 targets.
+
+    #[test]
+    fn test_preview_svg_rect_coordinates_in_range() {
+        let result = preview_svg(simple_svg());
+        assert!(result.is_ok());
+        let json = result.unwrap();
+        let paths: Vec<Vec<[f64; 2]>> = serde_json::from_str(&json).unwrap();
+        // The rect is at x=10,y=10 width=80 height=80, so coords should be in [10, 90]
+        for path in &paths {
+            for [x, y] in path {
+                assert!(
+                    *x >= 9.0 && *x <= 91.0,
+                    "x={} should be within rect bounds",
+                    x
+                );
+                assert!(
+                    *y >= 9.0 && *y <= 91.0,
+                    "y={} should be within rect bounds",
+                    y
+                );
+            }
+        }
+    }
+
+    // ── available_profiles: content validation ──────────────────────
+
+    #[test]
+    fn test_available_profiles_contains_expected_names() {
+        let json = available_profiles();
+        let profiles: Vec<MachineProfile> = serde_json::from_str(&json).unwrap();
+        let names: Vec<&str> = profiles.iter().map(|p| p.name.as_str()).collect();
+        assert!(names.contains(&"CNC Mill"), "should contain CNC Mill");
+        assert!(names.contains(&"Laser Cutter"), "should contain Laser Cutter");
+    }
+
+    #[test]
+    fn test_available_profiles_cnc_has_spindle() {
+        let json = available_profiles();
+        let profiles: Vec<MachineProfile> = serde_json::from_str(&json).unwrap();
+        let cnc = profiles
+            .iter()
+            .find(|p| p.machine_type == MachineType::CncMill)
+            .expect("should have CNC mill profile");
+        assert!(cnc.capabilities.has_spindle);
+        assert!(cnc.capabilities.has_z_axis);
+        assert!(!cnc.capabilities.has_laser_power);
+    }
+
+    #[test]
+    fn test_available_profiles_laser_has_laser_power() {
+        let json = available_profiles();
+        let profiles: Vec<MachineProfile> = serde_json::from_str(&json).unwrap();
+        let laser = profiles
+            .iter()
+            .find(|p| p.machine_type == MachineType::LaserCutter)
+            .expect("should have Laser Cutter profile");
+        assert!(laser.capabilities.has_laser_power);
+        assert!(!laser.capabilities.has_spindle);
+        assert!(!laser.capabilities.has_z_axis);
+    }
+
+    // ── default_config: content validation ──────────────────────────
+
+    #[test]
+    fn test_default_config_cnc_mill_3axis() {
+        let json = default_config("cnc_mill_3axis");
+        let config: CamConfig = serde_json::from_str(&json).unwrap();
+        // Unknown profile falls through to cnc_mill defaults
+        assert_eq!(config.machine_type, "cnc_mill_3axis");
+        assert_eq!(config.strategy, "contour");
+        assert!(config.laser_power.is_none());
+    }
+
+    #[test]
+    fn test_default_config_laser_has_laser_fields() {
+        let json = default_config("laser_cutter");
+        let config: CamConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(config.laser_power, Some(100.0));
+        assert_eq!(config.passes, Some(1));
+        assert_eq!(config.strategy, "laser_cut");
+    }
+
+    #[test]
+    fn test_default_config_unknown_profile_returns_cnc_defaults() {
+        let json = default_config("unknown_machine");
+        let config: CamConfig = serde_json::from_str(&json).unwrap();
+        // Unknown profile gets CNC mill defaults
+        assert_eq!(config.strategy, "contour");
+        assert!(config.laser_power.is_none());
+    }
+
+    // ── sim_moves: JSON structure validation ────────────────────────
+
+    #[test]
+    fn test_sim_moves_stl_returns_move_objects() {
+        let result = sim_moves_stl(minimal_ascii_stl(), "{}");
+        assert!(result.is_ok());
+        let json = result.unwrap();
+        let moves: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        // Check that moves have the expected fields
+        for mv in &moves {
+            assert!(mv.get("x").is_some(), "move should have x field");
+            assert!(mv.get("y").is_some(), "move should have y field");
+            assert!(mv.get("z").is_some(), "move should have z field");
+            assert!(mv.get("rapid").is_some(), "move should have rapid field");
+        }
+    }
+
+    #[test]
+    fn test_sim_moves_svg_returns_move_objects() {
+        let result = sim_moves_svg(svg_with_path(), r#"{"strategy":"contour"}"#);
+        assert!(result.is_ok());
+        let json = result.unwrap();
+        let moves: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        assert!(!moves.is_empty(), "SVG sim should produce moves");
+        for mv in &moves {
+            assert!(mv["x"].is_number());
+            assert!(mv["y"].is_number());
+            assert!(mv["z"].is_number());
+            assert!(mv["rapid"].is_boolean());
+        }
+    }
+
+    // Note: error-path tests for sim_moves (invalid STL, empty SVG, invalid JSON)
+    // cannot run in native mode because JsValue::from_str is not implemented on
+    // non-wasm32 targets.
+
+    // ── End-to-end pipeline: STL -> G-code content checks ───────────
+
+    #[test]
+    fn test_process_stl_binary_gcode_has_motion() {
+        let stl_data = minimal_binary_stl();
+        let config_json = r#"{"strategy": "contour", "step_down": 1.0, "cut_depth": -1.0}"#;
+        let result = process_stl(&stl_data, config_json);
+        assert!(result.is_ok());
+        let gcode = result.unwrap();
+        // Should have rapid moves (G0) and cutting moves (G1)
+        assert!(gcode.contains("G0"), "should have rapid moves");
+        // G-code structure: preamble, toolpaths, postamble
+        assert!(
+            gcode.starts_with("(RustCAM"),
+            "should start with RustCAM header"
+        );
+    }
+
+    // ── End-to-end pipeline: SVG -> G-code content checks ───────────
+
+    #[test]
+    fn test_process_svg_gcode_well_formed() {
+        let config_json = r#"{"strategy": "contour"}"#;
+        let result = process_svg(svg_with_path(), config_json);
+        assert!(result.is_ok());
+        let gcode = result.unwrap();
+
+        // Check G-code is well-formed: starts with header, ends with footer
+        let lines: Vec<&str> = gcode.lines().collect();
+        assert!(
+            lines[0].contains("RustCAM"),
+            "first line should be RustCAM header"
+        );
+        assert!(
+            lines.last().unwrap().contains("M2"),
+            "last line should be program end"
+        );
+
+        // Verify ordering: preamble before motion, motion before postamble
+        let m3_pos = gcode.find("M3").expect("should have spindle on");
+        let g1_pos = gcode.find("G1").expect("should have cutting moves");
+        let m5_pos = gcode.find("M5").expect("should have spindle off");
+        assert!(m3_pos < g1_pos, "spindle on should be before cutting");
+        assert!(g1_pos < m5_pos, "cutting should be before spindle off");
+    }
+
+    #[test]
+    fn test_process_svg_laser_engrave_with_custom_step_over() {
+        let config_json = r#"{
+            "machine_type": "laser_cutter",
+            "strategy": "laser_engrave",
+            "laser_power": 40,
+            "step_over": 0.5
+        }"#;
+        let result = process_svg(simple_svg(), config_json);
+        assert!(result.is_ok());
+        let gcode = result.unwrap();
+        assert!(gcode.contains("S40"), "should use power 40");
+        assert!(gcode.contains("M4 S0"), "should start in dynamic mode");
+    }
+
+    // ── process_stl with binary STL and all strategies ──────────────
+
+    #[test]
+    fn test_process_stl_binary_pocket() {
+        let stl_data = minimal_binary_stl();
+        let result = process_stl(&stl_data, r#"{"strategy": "pocket"}"#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_stl_binary_zigzag() {
+        let stl_data = minimal_binary_stl();
+        let result = process_stl(&stl_data, r#"{"strategy": "zigzag"}"#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_stl_binary_slice() {
+        let stl_data = minimal_binary_stl();
+        let result = process_stl(&stl_data, r#"{"strategy": "slice"}"#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_stl_binary_perimeter() {
+        let stl_data = minimal_binary_stl();
+        let result = process_stl(&stl_data, r#"{"strategy": "perimeter"}"#);
+        assert!(result.is_ok());
+    }
+
+    // Note: truncated binary STL error test cannot run in native mode because
+    // JsValue::from_str is not implemented on non-wasm32 targets.
+    // The STL parsing error handling is tested in stl::tests.
+
+    // ── CamConfig edge cases ────────────────────────────────────────
+
+    #[test]
+    fn test_camconfig_all_fields_from_json() {
+        let json = r#"{
+            "tool_diameter": 6.0,
+            "tool_type": "ball_end",
+            "corner_radius": 1.0,
+            "effective_diameter": 5.5,
+            "step_over": 2.0,
+            "step_down": 0.5,
+            "feed_rate": 1200,
+            "plunge_rate": 400,
+            "spindle_speed": 24000,
+            "safe_z": 15.0,
+            "cut_depth": -5.0,
+            "strategy": "pocket",
+            "climb_cut": true,
+            "perimeter_passes": 3,
+            "scan_direction": "y",
+            "machine_type": "cnc_mill",
+            "laser_power": null,
+            "passes": null,
+            "air_assist": null
+        }"#;
+        let config: CamConfig = serde_json::from_str(json).unwrap();
+        assert!((config.tool_diameter - 6.0).abs() < f64::EPSILON);
+        assert_eq!(config.tool_type, "ball_end");
+        assert_eq!(config.strategy, "pocket");
+        assert!(config.climb_cut);
+        assert_eq!(config.perimeter_passes, 3);
+        assert_eq!(config.scan_direction, "y");
+    }
 }
