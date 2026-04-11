@@ -21,7 +21,8 @@ struct Args {
     no_open: bool,
 }
 
-#[tokio::main]
+#[cfg_attr(not(test), tokio::main)]
+#[cfg(not(tarpaulin_include))]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
@@ -49,6 +50,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[cfg(not(tarpaulin_include))]
 fn open_browser(url: &str) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]
     {

@@ -350,6 +350,14 @@ fn write_at_last_page_wraps_within_last_page() {
 // --- Multiple devices on bus ---
 
 #[test]
+fn eeprom_address_accessor() {
+    use i2c_hil_sim::I2cDevice;
+
+    let eeprom = Eeprom256k::new(addr());
+    assert_eq!(eeprom.address(), addr());
+}
+
+#[test]
 fn eeprom_coexists_with_other_devices() {
     use i2c_hil_sim::devices::RegisterDevice;
 

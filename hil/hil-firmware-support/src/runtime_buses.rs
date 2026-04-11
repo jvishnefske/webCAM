@@ -235,6 +235,12 @@ mod tests {
     }
 
     #[test]
+    fn runtime_bus_set_default_trait() {
+        let buses = RuntimeBusSet::<4, 8>::default();
+        assert_eq!(buses.bus_count(), 0);
+    }
+
+    #[test]
     fn runtime_bus_set_handle_request_list_buses() {
         let mut buses = RuntimeBusSet::<4, 8>::new();
         buses.set_bus_count(2).unwrap();

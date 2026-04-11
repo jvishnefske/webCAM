@@ -870,4 +870,11 @@ mod tests {
         let n = encode_bus_list_dynamic(&buses, &mut buf).unwrap();
         assert_eq!(decode_tag(&buf[..n]), 3);
     }
+
+    #[test]
+    fn test_default_device_registers_returns_none() {
+        let buses = MockBusSet { fail_reads: false };
+        // MockBusSet uses the default device_registers impl which returns None
+        assert!(buses.device_registers(0, 0x48).is_none());
+    }
 }
