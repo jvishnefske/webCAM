@@ -253,18 +253,29 @@ impl DataflowGraph {
         use crate::dataflow::codegen::topo::topological_sort;
 
         // Build set of delay blocks (z⁻¹ elements) for back-edge exclusion.
-        let delay_blocks: HashSet<BlockId> = self.blocks.iter()
+        let delay_blocks: HashSet<graph_model::BlockId> = self.blocks.iter()
             .filter(|(_, block)| block.is_delay())
-            .map(|(&id, _)| id)
+            .map(|(&id, _)| graph_model::BlockId(id.0))
             .collect();
 
-        // Topological sort for correct evaluation order.
-        let all_ids: Vec<BlockId> = self.blocks.keys().copied().collect();
-        let block_ids = match topological_sort(&all_ids, &self.channels, &delay_blocks) {
-            Ok(sorted) => sorted,
+        // Convert to graph_model types for topological sort.
+        let all_ids: Vec<graph_model::BlockId> = self.blocks.keys()
+            .map(|id| graph_model::BlockId(id.0))
+            .collect();
+        let gm_channels: Vec<graph_model::Channel> = self.channels.iter()
+            .map(|c| graph_model::Channel {
+                id: graph_model::ChannelId(c.id.0),
+                from_block: graph_model::BlockId(c.from_block.0),
+                from_port: c.from_port,
+                to_block: graph_model::BlockId(c.to_block.0),
+                to_port: c.to_port,
+            })
+            .collect();
+        let block_ids: Vec<BlockId> = match topological_sort(&all_ids, &gm_channels, &delay_blocks) {
+            Ok(sorted) => sorted.into_iter().map(|id| BlockId(id.0)).collect(),
             Err(_) => {
                 // Fallback to ID order if cycle detected (shouldn't happen with delay exclusion)
-                let mut ids = all_ids;
+                let mut ids: Vec<BlockId> = self.blocks.keys().copied().collect();
                 ids.sort_by_key(|id| id.0);
                 ids
             }
@@ -367,6 +378,43 @@ impl DataflowGraph {
         GraphSnapshot {
             blocks,
             channels: self.channels.clone(),
+            tick_count: self.tick_count,
+            time: self.time,
+        }
+    }
+}
+
+impl GraphSnapshot {
+    /// Convert to codegen-emit's snapshot type for code generation.
+    pub fn to_codegen_snapshot(&self) -> codegen_emit::CodegenGraphSnapshot {
+        codegen_emit::CodegenGraphSnapshot {
+            blocks: self
+                .blocks
+                .iter()
+                .map(|b| codegen_emit::CodegenBlockSnapshot {
+                    id: b.id,
+                    block_type: b.block_type.clone(),
+                    name: b.name.clone(),
+                    inputs: b.inputs.clone(),
+                    outputs: b.outputs.clone(),
+                    config: b.config.clone(),
+                    output_values: b.output_values.clone(),
+                    target: b.target,
+                    custom_codegen: b.custom_codegen.clone(),
+                    is_delay: b.is_delay,
+                })
+                .collect(),
+            channels: self
+                .channels
+                .iter()
+                .map(|c| graph_model::Channel {
+                    id: graph_model::ChannelId(c.id.0),
+                    from_block: graph_model::BlockId(c.from_block.0),
+                    from_port: c.from_port,
+                    to_block: graph_model::BlockId(c.to_block.0),
+                    to_port: c.to_port,
+                })
+                .collect(),
             tick_count: self.tick_count,
             time: self.time,
         }

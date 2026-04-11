@@ -368,7 +368,7 @@ pub fn dataflow_codegen(graph_id: u32, dt: f64) -> Result<String, JsValue> {
         let graph = graphs
             .get(&graph_id)
             .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let snap = graph.snapshot();
+        let snap = graph.snapshot().to_codegen_snapshot();
         let generated =
             dataflow::codegen::generate_rust(&snap, dt).map_err(|e| JsValue::from_str(&e))?;
         let files_json: Vec<(String, String)> = generated.files;
@@ -391,7 +391,7 @@ pub fn dataflow_codegen_multi(
         let graph = graphs
             .get(&graph_id)
             .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let snap = graph.snapshot();
+        let snap = graph.snapshot().to_codegen_snapshot();
         let targets: Vec<dataflow::codegen::binding::TargetWithBinding> =
             serde_json::from_str(targets_json)
                 .map_err(|e| JsValue::from_str(&format!("invalid targets JSON: {e}")))?;

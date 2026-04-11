@@ -3,16 +3,16 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use crate::dataflow::block::BlockId;
-use crate::dataflow::codegen::concurrency::find_parallel_groups;
-use crate::dataflow::codegen::topo::topological_sort;
-use crate::dataflow::graph::{BlockSnapshot, GraphSnapshot};
+use graph_model::BlockId;
+use crate::concurrency::find_parallel_groups;
+use crate::topo::topological_sort;
+use crate::snapshot::{CodegenBlockSnapshot as BlockSnapshot, CodegenGraphSnapshot as GraphSnapshot};
 use target_registry::binding::TargetWithBinding;
 use target_registry::generators::generator_for;
 use target_registry::target::TargetFamily;
 
-/// Convert the rustsim-local [`GraphSnapshot`] to `graph_model::GraphSnapshot`
-/// so it can be passed to target generators in `target-registry`.
+/// Convert a [`GraphSnapshot`] (codegen-emit's snapshot with extra fields)
+/// to a pure `graph_model::GraphSnapshot` for target generators.
 fn to_graph_model_snapshot(snap: &GraphSnapshot) -> graph_model::GraphSnapshot {
     graph_model::GraphSnapshot {
         blocks: snap
@@ -28,22 +28,12 @@ fn to_graph_model_snapshot(snap: &GraphSnapshot) -> graph_model::GraphSnapshot {
                 is_delay: b.is_delay,
             })
             .collect(),
-        channels: snap
-            .channels
-            .iter()
-            .map(|c| graph_model::Channel {
-                id: graph_model::ChannelId(c.id.0),
-                from_block: graph_model::BlockId(c.from_block.0),
-                from_port: c.from_port,
-                to_block: graph_model::BlockId(c.to_block.0),
-                to_port: c.to_port,
-            })
-            .collect(),
+        channels: snap.channels.clone(),
     }
 }
 
 /// Convert a `graph_model::GraphSnapshot` (e.g. a partition sub-graph) back
-/// to a rustsim-local [`GraphSnapshot`], using the original snapshot's blocks
+/// to a codegen-emit [`GraphSnapshot`], using the original snapshot's blocks
 /// to fill in `output_values`, `target`, and `custom_codegen`.
 ///
 /// Bridge blocks (pubsub_sink/pubsub_source) that don't exist in the original
@@ -75,7 +65,7 @@ fn from_graph_model_sub_snapshot(
                         is_delay: b.is_delay,
                     }
                 } else {
-                    // Bridge block — not in original snapshot
+                    // Bridge block -- not in original snapshot
                     BlockSnapshot {
                         id: b.id.0,
                         block_type: b.block_type.clone(),
@@ -95,17 +85,7 @@ fn from_graph_model_sub_snapshot(
                 }
             })
             .collect(),
-        channels: gm_snap
-            .channels
-            .iter()
-            .map(|c| crate::dataflow::channel::Channel {
-                id: crate::dataflow::channel::ChannelId(c.id.0),
-                from_block: crate::dataflow::block::BlockId(c.from_block.0),
-                from_port: c.from_port,
-                to_block: crate::dataflow::block::BlockId(c.to_block.0),
-                to_port: c.to_port,
-            })
-            .collect(),
+        channels: gm_snap.channels.clone(),
         tick_count: original.tick_count,
         time: original.time,
     }
@@ -433,7 +413,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
             let _ = initial; // used in Default impl below
         }
         for (port_idx, port) in block.outputs.iter().enumerate() {
-            let ty = crate::dataflow::codegen::types::rust_type_no_std(&port.kind);
+            let ty = crate::types::rust_type_no_std(&port.kind);
             writeln!(out, "    pub out_{id}_p{port_idx}: {ty},").unwrap();
         }
     }
@@ -442,7 +422,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
         let block = block_map[&id];
         if is_peripheral_source(&block.block_type) {
             for (port_idx, port) in block.outputs.iter().enumerate() {
-                let ty = crate::dataflow::codegen::types::rust_type_no_std(&port.kind);
+                let ty = crate::types::rust_type_no_std(&port.kind);
                 writeln!(out, "    pub out_{id}_p{port_idx}: {ty},").unwrap();
             }
         }
@@ -459,7 +439,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
         if is_skipped(&block.block_type) || is_peripheral(&block.block_type) {
             if is_peripheral_source(&block.block_type) {
                 for (port_idx, port) in block.outputs.iter().enumerate() {
-                    let default = crate::dataflow::codegen::types::rust_default_no_std(&port.kind);
+                    let default = crate::types::rust_default_no_std(&port.kind);
                     writeln!(out, "            out_{id}_p{port_idx}: {default},").unwrap();
                 }
             }
@@ -470,7 +450,7 @@ fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
             writeln!(out, "            reg_{id}: {initial}_f64,").unwrap();
         }
         for (port_idx, port) in block.outputs.iter().enumerate() {
-            let default = crate::dataflow::codegen::types::rust_default_no_std(&port.kind);
+            let default = crate::types::rust_default_no_std(&port.kind);
             writeln!(out, "            out_{id}_p{port_idx}: {default},").unwrap();
         }
     }
@@ -1156,8 +1136,8 @@ fn generate_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, String> {
             continue;
         }
         for (port_idx, port) in block.outputs.iter().enumerate() {
-            let default = crate::dataflow::codegen::types::rust_default(&port.kind);
-            let ty = crate::dataflow::codegen::types::rust_type(&port.kind);
+            let default = crate::types::rust_default(&port.kind);
+            let ty = crate::types::rust_type(&port.kind);
             writeln!(out, "    let mut out_{id}_p{port_idx}: {ty} = {default};").unwrap();
         }
     }
@@ -1257,8 +1237,8 @@ fn generate_parallel_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, St
             continue;
         }
         for (port_idx, port) in block.outputs.iter().enumerate() {
-            let default = crate::dataflow::codegen::types::rust_default(&port.kind);
-            let ty = crate::dataflow::codegen::types::rust_type(&port.kind);
+            let default = crate::types::rust_default(&port.kind);
+            let ty = crate::types::rust_type(&port.kind);
             writeln!(out, "    let mut out_{id}_p{port_idx}: {ty} = {default};").unwrap();
         }
     }
@@ -1357,7 +1337,7 @@ fn emit_block_call(
 fn build_call_args(
     block_id: u32,
     block: &BlockSnapshot,
-    channels: &[crate::dataflow::channel::Channel],
+    channels: &[graph_model::Channel],
 ) -> Vec<String> {
     let n_inputs = block.inputs.len();
     let mut args: Vec<Option<String>> = vec![None; n_inputs];
@@ -1372,7 +1352,7 @@ fn build_call_args(
         .enumerate()
         .map(|(i, arg)| {
             arg.unwrap_or_else(|| {
-                crate::dataflow::codegen::types::rust_default(&block.inputs[i].kind).to_string()
+                crate::types::rust_default(&block.inputs[i].kind).to_string()
             })
         })
         .collect()
@@ -1515,11 +1495,11 @@ pub fn generate_distributed_workspace(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataflow::block::{PortDef, PortKind, Value};
-    use crate::dataflow::channel::{Channel, ChannelId};
-    use crate::dataflow::codegen::binding::{Binding, TargetWithBinding};
-    use crate::dataflow::codegen::target::TargetFamily;
-    use crate::dataflow::graph::{BlockSnapshot, GraphSnapshot};
+    use graph_model::{PortDef, PortKind, Channel, ChannelId};
+    use module_traits::value::Value;
+    use target_registry::binding::{Binding, TargetWithBinding};
+    use target_registry::target::TargetFamily;
+    use crate::snapshot::{CodegenBlockSnapshot as BlockSnapshot, CodegenGraphSnapshot as GraphSnapshot};
 
     fn make_constant_snapshot(id: u32, value: f64) -> BlockSnapshot {
         BlockSnapshot {
