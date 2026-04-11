@@ -1,11 +1,9 @@
 //! Target definitions for multi-target code generation.
 
 use serde::{Deserialize, Serialize};
-use tsify_next::Tsify;
 
 /// Target MCU family.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum TargetFamily {
     Host,
     Rp2040,

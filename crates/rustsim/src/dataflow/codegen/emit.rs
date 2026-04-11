@@ -4,13 +4,44 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use crate::dataflow::block::BlockId;
-use crate::dataflow::codegen::binding::TargetWithBinding;
 use crate::dataflow::codegen::concurrency::find_parallel_groups;
 use crate::dataflow::codegen::partition;
-use crate::dataflow::codegen::target::TargetFamily;
-use crate::dataflow::codegen::targets::generator_for;
 use crate::dataflow::codegen::topo::topological_sort;
 use crate::dataflow::graph::{BlockSnapshot, GraphSnapshot};
+use target_registry::binding::TargetWithBinding;
+use target_registry::generators::generator_for;
+use target_registry::target::TargetFamily;
+
+/// Convert the rustsim-local [`GraphSnapshot`] to `graph_model::GraphSnapshot`
+/// so it can be passed to target generators in `target-registry`.
+fn to_graph_model_snapshot(snap: &GraphSnapshot) -> graph_model::GraphSnapshot {
+    graph_model::GraphSnapshot {
+        blocks: snap
+            .blocks
+            .iter()
+            .map(|b| graph_model::BlockSnapshot {
+                id: graph_model::BlockId(b.id),
+                block_type: b.block_type.clone(),
+                name: b.name.clone(),
+                inputs: b.inputs.clone(),
+                outputs: b.outputs.clone(),
+                config: b.config.clone(),
+                is_delay: b.is_delay,
+            })
+            .collect(),
+        channels: snap
+            .channels
+            .iter()
+            .map(|c| graph_model::Channel {
+                id: graph_model::ChannelId(c.id.0),
+                from_block: graph_model::BlockId(c.from_block.0),
+                from_port: c.from_port,
+                to_block: graph_model::BlockId(c.to_block.0),
+                to_port: c.to_port,
+            })
+            .collect(),
+    }
+}
 
 /// A generated Rust crate represented as a collection of files (legacy).
 #[derive(Debug, Clone)]
@@ -145,9 +176,10 @@ pub fn generate_workspace(
     files.push(("dataflow-rt/src/lib.rs".to_string(), generate_rt_lib_rs()));
 
     // Generate target crates
+    let gm_snap = to_graph_model_snapshot(snap);
     for twb in targets {
         let gen = generator_for(twb.target);
-        let target_files = gen.generate(snap, &twb.binding, dt)?;
+        let target_files = gen.generate(&gm_snap, &twb.binding, dt)?;
         files.extend(target_files);
     }
 
@@ -201,9 +233,10 @@ pub fn generate_workspace_mlir(
     files.push(("dataflow-rt/src/lib.rs".to_string(), generate_rt_lib_rs()));
 
     // Generate target crates (with C-FFI hw_* functions)
+    let gm_snap = to_graph_model_snapshot(snap);
     for twb in targets {
         let gen = generator_for(twb.target);
-        let target_files = gen.generate(snap, &twb.binding, dt)?;
+        let target_files = gen.generate(&gm_snap, &twb.binding, dt)?;
         files.extend(target_files);
     }
 

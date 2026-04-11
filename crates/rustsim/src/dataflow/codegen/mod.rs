@@ -4,14 +4,16 @@
 //! the same dataflow logic as the browser-based simulator, suitable for
 //! deployment on embedded or server targets.
 
-pub mod binding;
 pub mod concurrency;
 pub mod emit;
 pub mod partition;
-pub mod target;
-pub mod targets;
 pub mod topo;
 pub mod types;
+
+// Re-export target-registry types for backward compatibility within rustsim.
+pub use target_registry::binding;
+pub use target_registry::generators as targets;
+pub use target_registry::target;
 
 #[cfg(feature = "mlir")]
 pub use emit::generate_workspace_mlir;

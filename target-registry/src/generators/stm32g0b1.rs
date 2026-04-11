@@ -3,8 +3,8 @@
 use std::fmt::Write;
 
 use super::TargetGenerator;
-use crate::dataflow::codegen::binding::Binding;
-use crate::dataflow::graph::GraphSnapshot;
+use crate::binding::Binding;
+use graph_model::GraphSnapshot;
 
 pub struct Stm32g0b1Generator;
 
@@ -184,16 +184,14 @@ fn generate_main_rs(dt: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataflow::codegen::binding::Binding;
-    use crate::dataflow::codegen::target::TargetFamily;
-    use crate::dataflow::codegen::targets::TargetGenerator;
+    use crate::binding::Binding;
+    use crate::generators::TargetGenerator;
+    use crate::target::TargetFamily;
 
     fn empty_snap() -> GraphSnapshot {
         GraphSnapshot {
             blocks: vec![],
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         }
     }
 

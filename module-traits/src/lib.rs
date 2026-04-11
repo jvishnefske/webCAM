@@ -34,5 +34,5 @@ pub use function_def::{
 pub use module::Module;
 pub use sim::{SimModel, SimPeripherals};
 pub use tick::Tick;
-pub use registry::{BlockRegistry, BlockTypeInfo};
+pub use registry::{BlockRegistry, BlockTypeInfo, TargetInfo, TargetRegistry};
 pub use value::{FieldType, MessageData, MessageField, MessageSchema, PortDef, PortKind, Value};

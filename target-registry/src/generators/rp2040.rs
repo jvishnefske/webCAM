@@ -3,8 +3,8 @@
 use std::fmt::Write;
 
 use super::TargetGenerator;
-use crate::dataflow::codegen::binding::{Binding, PinBinding};
-use crate::dataflow::graph::GraphSnapshot;
+use crate::binding::{Binding, PinBinding};
+use graph_model::GraphSnapshot;
 
 pub struct Rp2040Generator;
 
