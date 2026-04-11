@@ -201,7 +201,7 @@ fn collect_state_fields(snap: &GraphSnapshot) -> Vec<(String, &'static str)> {
             continue;
         }
         for (port_idx, _port) in block.outputs.iter().enumerate() {
-            fields.push((format!("out_{}_p{}", block.id, port_idx), "f64"));
+            fields.push((format!("out_{}_p{}", block.id.0, port_idx), "f64"));
         }
     }
     fields
@@ -323,13 +323,12 @@ name = "logic"
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lower::{BlockSnapshot, PortDef};
-    use module_traits::value::PortKind;
+    use crate::lower::{BlockId, BlockSnapshot, PortDef, PortKind};
 
     fn simple_graph() -> GraphSnapshot {
         GraphSnapshot {
             blocks: vec![BlockSnapshot {
-                id: 1,
+                id: BlockId(1),
                 block_type: "constant".to_string(),
                 name: "const_42".to_string(),
                 inputs: vec![],
@@ -338,13 +337,9 @@ mod tests {
                     kind: PortKind::Float,
                 }],
                 config: serde_json::json!({"value": 42.0}),
-                output_values: vec![],
-                custom_codegen: None,
                 is_delay: false,
             }],
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         }
     }
 

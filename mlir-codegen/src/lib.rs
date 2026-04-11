@@ -152,22 +152,18 @@ mod tests {
     fn compile_to_c_produces_output() {
         let snap = GraphSnapshot {
             blocks: vec![lower::BlockSnapshot {
-                id: 1,
+                id: lower::BlockId(1),
                 block_type: "constant".to_string(),
                 name: "c".to_string(),
                 inputs: vec![],
                 outputs: vec![lower::PortDef {
                     name: "out".to_string(),
-                    kind: module_traits::value::PortKind::Float,
+                    kind: lower::PortKind::Float,
                 }],
                 config: serde_json::json!({"value": 1.0}),
-                output_values: vec![],
-                custom_codegen: None,
                 is_delay: false,
             }],
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let output = compile_to_c(&snap).unwrap();
         assert!(output.mlir_text.contains("arith.constant"));
@@ -252,22 +248,18 @@ mod tests {
     fn test_generate_logic_files_has_expected_paths() {
         let snap = GraphSnapshot {
             blocks: vec![lower::BlockSnapshot {
-                id: 1,
+                id: lower::BlockId(1),
                 block_type: "constant".to_string(),
                 name: "c".to_string(),
                 inputs: vec![],
                 outputs: vec![lower::PortDef {
                     name: "out".to_string(),
-                    kind: module_traits::value::PortKind::Float,
+                    kind: lower::PortKind::Float,
                 }],
                 config: serde_json::json!({"value": 1.0}),
-                output_values: vec![],
-                custom_codegen: None,
                 is_delay: false,
             }],
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let files = generate_logic_files(&snap).unwrap();
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
@@ -300,8 +292,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks: vec![],
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = graph_to_mlir(&snap).unwrap();
         assert!(
@@ -324,34 +314,30 @@ mod tests {
         let snap = GraphSnapshot {
             blocks: vec![
                 lower::BlockSnapshot {
-                    id: 1,
+                    id: lower::BlockId(1),
                     block_type: "constant".to_string(),
                     name: "src".to_string(),
                     inputs: vec![],
                     outputs: vec![lower::PortDef {
                         name: "out".to_string(),
-                        kind: module_traits::value::PortKind::Float,
+                        kind: lower::PortKind::Float,
                     }],
                     config: serde_json::json!({"value": 5.0}),
-                    output_values: vec![],
-                    custom_codegen: None,
                     is_delay: false,
                 },
                 lower::BlockSnapshot {
-                    id: 2,
+                    id: lower::BlockId(2),
                     block_type: "gain".to_string(),
                     name: "amp".to_string(),
                     inputs: vec![lower::PortDef {
                         name: "in".to_string(),
-                        kind: module_traits::value::PortKind::Float,
+                        kind: lower::PortKind::Float,
                     }],
                     outputs: vec![lower::PortDef {
                         name: "out".to_string(),
-                        kind: module_traits::value::PortKind::Float,
+                        kind: lower::PortKind::Float,
                     }],
                     config: serde_json::json!({"param1": 2.0}),
-                    output_values: vec![],
-                    custom_codegen: None,
                     is_delay: false,
                 },
             ],
@@ -362,8 +348,6 @@ mod tests {
                 to_block: lower::BlockId(2),
                 to_port: 0,
             }],
-            tick_count: 0,
-            time: 0.0,
         };
         let output = compile_to_c(&snap).unwrap();
         assert!(

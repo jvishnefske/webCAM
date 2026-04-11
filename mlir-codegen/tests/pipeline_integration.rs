@@ -1,8 +1,7 @@
 //! Integration tests for the MLIR pipeline entry points.
 
-use mlir_codegen::lower::{BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef};
+use mlir_codegen::lower::{BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef, PortKind};
 use mlir_codegen::pipeline::{PipelineConfig, PipelineOutput};
-use module_traits::value::PortKind;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -10,7 +9,7 @@ use module_traits::value::PortKind;
 
 fn make_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSnapshot {
     BlockSnapshot {
-        id,
+        id: BlockId(id),
         block_type: block_type.to_string(),
         name: format!("test_{block_type}_{id}"),
         inputs: vec![],
@@ -19,8 +18,6 @@ fn make_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSnap
             kind: PortKind::Float,
         }],
         config,
-        output_values: vec![],
-        custom_codegen: None,
         is_delay: false,
     }
 }
@@ -39,8 +36,6 @@ fn make_snap(blocks: Vec<BlockSnapshot>, channels: Vec<Channel>) -> GraphSnapsho
     GraphSnapshot {
         blocks,
         channels,
-        tick_count: 0,
-        time: 0.0,
     }
 }
 
