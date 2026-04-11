@@ -198,7 +198,6 @@ impl<const MAX_DEVICES: usize> RuntimeBus<MAX_DEVICES> {
     ///
     /// Returns `Err(())` if all slots are occupied or a device with the
     /// same address is already active on this bus.
-    #[allow(clippy::result_unit_err)]
     pub fn add_device(&mut self, addr: Address, name: &[u8], registers: &[u8]) -> Result<(), ()> {
         let mut i = 0;
         while i < MAX_DEVICES {
@@ -223,7 +222,6 @@ impl<const MAX_DEVICES: usize> RuntimeBus<MAX_DEVICES> {
     /// # Errors
     ///
     /// Returns `Err(())` if no active device has that address.
-    #[allow(clippy::result_unit_err)]
     pub fn remove_device(&mut self, addr: Address) -> Result<(), ()> {
         let mut i = 0;
         while i < MAX_DEVICES {
@@ -241,7 +239,6 @@ impl<const MAX_DEVICES: usize> RuntimeBus<MAX_DEVICES> {
     /// # Errors
     ///
     /// Returns `Err(())` if no active device has that address.
-    #[allow(clippy::result_unit_err)]
     pub fn set_registers(&mut self, addr: Address, offset: u8, data: &[u8]) -> Result<(), ()> {
         let mut i = 0;
         while i < MAX_DEVICES {

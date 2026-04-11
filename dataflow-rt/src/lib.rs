@@ -40,44 +40,36 @@ pub trait Peripherals {
         0
     }
     /// Connect a virtual TCP socket.
-    #[allow(clippy::result_unit_err)]
     fn tcp_connect(&mut self, _id: u8, _addr: &str, _port: u16) -> Result<(), ()> {
         Err(())
     }
     /// Send data on a connected TCP socket.
-    #[allow(clippy::result_unit_err)]
     fn tcp_send(&mut self, _id: u8, _data: &[u8]) -> Result<usize, ()> {
         Err(())
     }
     /// Receive data from a connected TCP socket.
-    #[allow(clippy::result_unit_err)]
     fn tcp_recv(&mut self, _id: u8, _buf: &mut [u8]) -> Result<usize, ()> {
         Err(())
     }
     /// Close a TCP socket.
     fn tcp_close(&mut self, _id: u8) {}
     /// Send a UDP datagram.
-    #[allow(clippy::result_unit_err)]
     fn udp_send(&mut self, _id: u8, _addr: &str, _port: u16, _data: &[u8]) -> Result<usize, ()> {
         Err(())
     }
     /// Receive a UDP datagram.
-    #[allow(clippy::result_unit_err)]
     fn udp_recv(&mut self, _id: u8, _buf: &mut [u8]) -> Result<usize, ()> {
         Err(())
     }
     /// Write bytes to an I2C device on the given bus.
-    #[allow(clippy::result_unit_err)]
     fn i2c_write(&mut self, _bus: u8, _addr: u8, _data: &[u8]) -> Result<(), ()> {
         Err(())
     }
     /// Read bytes from an I2C device on the given bus.
-    #[allow(clippy::result_unit_err)]
     fn i2c_read(&mut self, _bus: u8, _addr: u8, _buf: &mut [u8]) -> Result<(), ()> {
         Err(())
     }
     /// Write then read (combined transaction) on an I2C bus.
-    #[allow(clippy::result_unit_err)]
     fn i2c_write_read(
         &mut self,
         _bus: u8,
