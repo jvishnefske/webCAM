@@ -597,4 +597,107 @@ mod tests {
         let result = parse_svg(svg);
         assert!(result.is_err());
     }
+
+    // ── Coverage gap tests ──────────────────────────────────────────
+
+    #[test]
+    fn test_h_and_h_path_commands() {
+        // Absolute H and relative h
+        let svg = r#"<svg><path d="M 0 0 H 10 h 5"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        // M 0,0 -> H 10 -> cursor at (10,0) -> h 5 -> cursor at (15,0)
+        assert_eq!(paths[0].points.len(), 3);
+        assert_eq!(paths[0].points[0], Vec2::new(0.0, 0.0));
+        assert_eq!(paths[0].points[1], Vec2::new(10.0, 0.0));
+        assert_eq!(paths[0].points[2], Vec2::new(15.0, 0.0));
+    }
+
+    #[test]
+    fn test_v_and_v_path_commands() {
+        // Absolute V and relative v
+        let svg = r#"<svg><path d="M 0 0 V 10 v 5"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        // M 0,0 -> V 10 -> cursor at (0,10) -> v 5 -> cursor at (0,15)
+        assert_eq!(paths[0].points.len(), 3);
+        assert_eq!(paths[0].points[0], Vec2::new(0.0, 0.0));
+        assert_eq!(paths[0].points[1], Vec2::new(0.0, 10.0));
+        assert_eq!(paths[0].points[2], Vec2::new(0.0, 15.0));
+    }
+
+    #[test]
+    fn test_single_quote_attributes() {
+        let svg = r#"<svg><rect x='5' y='10' width='20' height='30'/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0].closed);
+        assert_eq!(paths[0].points.len(), 4);
+        assert_eq!(paths[0].points[0], Vec2::new(5.0, 10.0));
+        assert_eq!(paths[0].points[1], Vec2::new(25.0, 10.0));
+    }
+
+    #[test]
+    fn test_odd_coordinate_count_in_points_attr() {
+        let result = parse_points_attr("10,20 30");
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Odd number"),
+            "Error should mention odd coordinates, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_cubic_bezier_path_commands() {
+        // Absolute C
+        let svg = r#"<svg><path d="M 0 0 C 10 20 30 20 40 0"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        // M produces 1 point, C subdivides into 16 points
+        assert_eq!(paths[0].points.len(), 17);
+        // Last point should be approximately (40, 0)
+        let last = paths[0].points.last().unwrap();
+        assert!((last.x - 40.0).abs() < 1e-10);
+        assert!((last.y - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_relative_cubic_bezier_path_commands() {
+        // Relative c from starting point (10, 10)
+        let svg = r#"<svg><path d="M 10 10 c 10 20 30 20 40 0"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].points.len(), 17);
+        // Last point should be approximately (10+40, 10+0) = (50, 10)
+        let last = paths[0].points.last().unwrap();
+        assert!((last.x - 50.0).abs() < 1e-10);
+        assert!((last.y - 10.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_quadratic_bezier_path_commands() {
+        // Absolute Q
+        let svg = r#"<svg><path d="M 0 0 Q 20 40 40 0"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        // M produces 1 point, Q subdivides into 16 points
+        assert_eq!(paths[0].points.len(), 17);
+        let last = paths[0].points.last().unwrap();
+        assert!((last.x - 40.0).abs() < 1e-10);
+        assert!((last.y - 0.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_relative_quadratic_bezier_path_commands() {
+        // Relative q from starting point (5, 5)
+        let svg = r#"<svg><path d="M 5 5 q 20 40 40 0"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].points.len(), 17);
+        // Last point should be approximately (5+40, 5+0) = (45, 5)
+        let last = paths[0].points.last().unwrap();
+        assert!((last.x - 45.0).abs() < 1e-10);
+        assert!((last.y - 5.0).abs() < 1e-10);
+    }
 }

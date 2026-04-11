@@ -189,4 +189,50 @@ endsolid cube";
         assert_eq!(v.y, 2.5);
         assert_eq!(v.z, 3.5);
     }
+
+    // ── Error-path coverage tests ───────────────────────────────────
+
+    #[test]
+    fn test_truncated_binary_stl() {
+        // Build a binary STL header that claims 2 triangles but only has data for 1
+        let mut data = vec![0u8; 84 + 50]; // enough for 1 triangle
+        // triangle count = 2 (but file only has 134 bytes, needs 184)
+        data[80] = 2;
+        data[81] = 0;
+        data[82] = 0;
+        data[83] = 0;
+        let result = parse_binary_stl(&data);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("truncated"),
+            "Error should mention truncation, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_invalid_utf8_ascii_stl() {
+        // Invalid UTF-8 byte sequence
+        let data: &[u8] = &[0x80, 0x81, 0x82, 0xFF, 0xFE];
+        let result = parse_ascii_stl(data);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Invalid UTF-8"),
+            "Error should mention UTF-8, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_no_triangles_ascii_stl() {
+        // Valid ASCII STL with header but no facets
+        let data = b"solid empty\nendsolid empty";
+        let result = parse_ascii_stl(data);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("No triangles found"),
+            "Error should mention no triangles, got: {err}"
+        );
+    }
 }
