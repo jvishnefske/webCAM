@@ -432,4 +432,102 @@ mod tests {
         let d = DagHandle::default();
         assert!(d.is_empty());
     }
+
+    // ── Error path tests for underlying Dag API ────────────────────────
+
+    #[test]
+    fn test_dag_invalid_ref_all_binary_ops() {
+        use dag_core::op::Dag;
+
+        let mut dag = Dag::new();
+        let a = dag.constant(1.0).unwrap();
+
+        // mul with invalid ref
+        let result = dag.mul(a, 99);
+        assert!(result.is_err());
+
+        // sub with invalid ref
+        let result = dag.sub(a, 99);
+        assert!(result.is_err());
+
+        // div with invalid ref
+        let result = dag.div(a, 99);
+        assert!(result.is_err());
+
+        // pow with invalid ref
+        let result = dag.pow(a, 99);
+        assert!(result.is_err());
+
+        // relu with invalid ref
+        let result = dag.relu(99);
+        assert!(result.is_err());
+
+        // subscribe and publish with invalid ref
+        let result = dag.publish("topic", 99);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dag_from_cbor_invalid() {
+        // Invalid CBOR data should return an error
+        let result = dag_core::cbor::decode_dag(&[0xFF, 0xFF, 0xFF]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dag_from_cbor_empty() {
+        // Empty bytes should fail
+        let result = dag_core::cbor::decode_dag(&[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_dag_to_json_all_op_types() {
+        let mut h = DagHandle::new();
+        let a = h.constant(1.0).unwrap();
+        let b = h.constant(2.0).unwrap();
+        let inp = h.input("x").unwrap();
+        let _ = h.output("y", a).unwrap();
+        let _ = h.add(a, b).unwrap();
+        let _ = h.mul(a, b).unwrap();
+        let _ = h.sub(a, b).unwrap();
+        let _ = h.div(a, b).unwrap();
+        let _ = h.pow(a, b).unwrap();
+        let _ = h.neg(a).unwrap();
+        let _ = h.relu(inp).unwrap();
+        let _sub = h.subscribe("topic_a").unwrap();
+        let _ = h.publish("topic_b", a).unwrap();
+
+        let json = h.to_json().unwrap();
+        assert!(json.contains(r#""op":"const""#));
+        assert!(json.contains(r#""op":"input""#));
+        assert!(json.contains(r#""op":"output""#));
+        assert!(json.contains(r#""op":"add""#));
+        assert!(json.contains(r#""op":"mul""#));
+        assert!(json.contains(r#""op":"sub""#));
+        assert!(json.contains(r#""op":"div""#));
+        assert!(json.contains(r#""op":"pow""#));
+        assert!(json.contains(r#""op":"neg""#));
+        assert!(json.contains(r#""op":"relu""#));
+        assert!(json.contains(r#""op":"subscribe""#));
+        assert!(json.contains(r#""op":"publish""#));
+        // Verify it's valid JSON
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(parsed.is_array());
+        assert_eq!(parsed.as_array().unwrap().len(), h.len());
+    }
+
+    #[test]
+    fn test_dag_evaluate_all_values() {
+        let mut h = DagHandle::new();
+        let a = h.constant(3.0).unwrap();
+        let b = h.constant(4.0).unwrap();
+        let _ = h.add(a, b).unwrap();
+
+        let values = h.evaluate();
+        assert_eq!(values.len(), 3);
+        assert_eq!(values[0], 3.0);
+        assert_eq!(values[1], 4.0);
+        assert_eq!(values[2], 7.0);
+    }
 }
