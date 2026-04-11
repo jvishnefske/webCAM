@@ -1,11 +1,11 @@
 //! Constant block: emits a fixed value every tick.
 
-use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
+use module_traits::{Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
-use tsify_next::Tsify;
 
-#[derive(Debug, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct ConstantConfig {
     pub value: f64,
 }
@@ -57,8 +57,8 @@ impl Tick for ConstantBlock {
 }
 
 #[allow(dead_code)]
-pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
-    reg.push(super::registry::BlockRegistration {
+pub(crate) fn register(reg: &mut Vec<crate::registry::BlockRegistration>) {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "constant",
         display_name: "Constant",
         category: "Sources",

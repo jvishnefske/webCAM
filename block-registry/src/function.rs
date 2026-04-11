@@ -1,11 +1,11 @@
 //! Function blocks: math operations on float inputs.
 
-use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
+use module_traits::{Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
-use tsify_next::Tsify;
 
-#[derive(Debug, Clone, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub enum FunctionOp {
     Gain,
     Add,
@@ -13,8 +13,9 @@ pub enum FunctionOp {
     Clamp,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct FunctionConfig {
     pub op: FunctionOp,
     #[serde(default)]
@@ -158,8 +159,8 @@ impl Tick for FunctionBlock {
 }
 
 #[allow(dead_code)]
-pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
-    reg.push(super::registry::BlockRegistration {
+pub(crate) fn register(reg: &mut Vec<crate::registry::BlockRegistration>) {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "gain",
         display_name: "Gain",
         category: "Math",
@@ -168,19 +169,19 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
             Ok(Box::new(FunctionBlock::from_config(cfg)))
         },
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "add",
         display_name: "Add",
         category: "Math",
         create_from_json: |_json| Ok(Box::new(FunctionBlock::add())),
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "multiply",
         display_name: "Multiply",
         category: "Math",
         create_from_json: |_json| Ok(Box::new(FunctionBlock::multiply())),
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "clamp",
         display_name: "Clamp",
         category: "Math",

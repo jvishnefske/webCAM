@@ -8,16 +8,16 @@
 //! { "initial_value": 0.0 }
 //! ```
 
-use crate::dataflow::block::{Codegen, Module, PortDef, PortKind, Tick, Value};
+use module_traits::{Codegen, Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
-use tsify_next::Tsify;
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 #[serde(default)]
 pub struct RegisterConfig {
     pub initial_value: f64,
@@ -110,8 +110,8 @@ impl Codegen for RegisterBlock {
 // Registration
 // ---------------------------------------------------------------------------
 
-pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
-    reg.push(super::registry::BlockRegistration {
+pub(crate) fn register(reg: &mut Vec<crate::registry::BlockRegistration>) {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "register",
         display_name: "Register",
         category: "Control",
@@ -217,7 +217,7 @@ mod tests {
     #[test]
     fn create_block_register() {
         let block =
-            super::super::create_block("register", r#"{"initial_value": 3.14}"#).unwrap();
+            crate::create_block("register", r#"{"initial_value": 3.14}"#).unwrap();
         assert_eq!(block.block_type(), "register");
         assert_eq!(block.name(), "Register");
     }

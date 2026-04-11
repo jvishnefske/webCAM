@@ -33,18 +33,18 @@
 //! Input ports: `state_in` (Float), then guard ports (`guard_0`, `guard_1`, ..., Float), then one per input_topic (Message).
 //! Output ports: `next_state` (Float), `active_<name>` per state (Float), then one per output_topic (Message).
 
-use crate::dataflow::block::{
+use module_traits::{
     Codegen, MessageData, MessageSchema, Module, PortDef, PortKind, Tick, Value,
 };
 use serde::{Deserialize, Serialize};
-use tsify_next::Tsify;
 
 // ---------------------------------------------------------------------------
 // Config types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 #[serde(default)]
 pub struct StateMachineConfig {
     pub states: Vec<String>,
@@ -69,8 +69,9 @@ impl Default for StateMachineConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct TransitionConfig {
     pub from: String,
     pub to: String,
@@ -79,8 +80,9 @@ pub struct TransitionConfig {
     pub actions: Vec<TransitionAction>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 #[serde(tag = "type")]
 pub enum TransitionGuard {
     Topic {
@@ -94,16 +96,18 @@ pub enum TransitionGuard {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct FieldCondition {
     pub field: String,
     pub op: CompareOp,
     pub value: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub enum CompareOp {
     Eq,
     Ne,
@@ -126,18 +130,20 @@ impl CompareOp {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct TransitionAction {
     pub topic: String,
     pub message: Vec<(String, f64)>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct TopicBinding {
     pub topic: String,
-    #[tsify(type = "{ name: string; fields: Array<{ name: string; field_type: string }> }")]
+    #[cfg_attr(feature = "tsify", tsify(type = "{ name: string; fields: Array<{ name: string; field_type: string }> }"))]
     pub schema: MessageSchema,
 }
 
@@ -462,8 +468,8 @@ impl Codegen for StateMachineBlock {
     }
 }
 
-pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
-    reg.push(super::registry::BlockRegistration {
+pub(crate) fn register(reg: &mut Vec<crate::registry::BlockRegistration>) {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "state_machine",
         display_name: "State Machine",
         category: "Logic",
@@ -480,9 +486,10 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-    use crate::dataflow::block::{FieldType, MessageField};
+    use module_traits::{FieldType, MessageField};
 
     /// Legacy-style state machine with GuardPort and Unconditional guards.
     fn make_legacy_sm() -> StateMachineBlock {

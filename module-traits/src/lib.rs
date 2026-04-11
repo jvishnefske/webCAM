@@ -21,6 +21,7 @@ pub mod function_def;
 pub mod hardware;
 pub mod inventory;
 pub mod module;
+pub mod registry;
 pub mod sim;
 pub mod tick;
 pub mod value;
@@ -33,4 +34,5 @@ pub use function_def::{
 pub use module::Module;
 pub use sim::{SimModel, SimPeripherals};
 pub use tick::Tick;
+pub use registry::{BlockRegistry, BlockTypeInfo};
 pub use value::{FieldType, MessageData, MessageField, MessageSchema, PortDef, PortKind, Value};

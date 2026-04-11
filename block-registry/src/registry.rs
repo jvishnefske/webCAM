@@ -5,7 +5,7 @@
 //! collected once in `all_registrations()` and drive both
 //! `create_block()` and `available_block_types()`.
 
-use crate::dataflow::block::Module;
+use module_traits::Module;
 
 /// A single block type registration — enough to create an instance
 /// from JSON config and to advertise the type in the palette.
