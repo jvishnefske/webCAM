@@ -683,4 +683,60 @@ mod tests {
         );
         assert!(!composite.recv(&mut frame).unwrap());
     }
+
+    #[test]
+    fn composite_send_second_fails() {
+        /// A transport that always fails to send.
+        struct FailSend;
+
+        impl Transport for FailSend {
+            fn send(&mut self, _frame: &Frame) -> Result<(), TransportError> {
+                Err(TransportError::SendFailed)
+            }
+            fn recv(&mut self, _buf: &mut Frame) -> Result<bool, TransportError> {
+                Ok(false)
+            }
+            fn mtu(&self) -> usize {
+                64
+            }
+        }
+
+        // Transport A succeeds, transport B fails.
+        let mut composite = CompositeTransport::new(MockTransport::new(), FailSend);
+        let frame = make_incoming_frame(
+            NodeAddr::new(1, 0, 0),
+            NodeAddr::BROADCAST,
+            TopicId::from_raw(1),
+            &[],
+        );
+
+        assert_eq!(composite.send(&frame), Err(TransportError::SendFailed));
+        // Transport A should have received the frame before B failed.
+        assert_eq!(composite.a.sent_count(), 1);
+    }
+
+    #[test]
+    fn composite_recv_only_from_b() {
+        let a = MockTransport::new();
+        let mut b = MockTransport::new();
+        let topic = TopicId::from_name("from_b_only");
+        b.enqueue(make_incoming_frame(
+            NodeAddr::new(5, 0, 0),
+            NodeAddr::BROADCAST,
+            topic,
+            &[0xBB],
+        ));
+
+        let mut composite = CompositeTransport::new(a, b);
+        let mut frame = Frame::new(
+            NodeAddr::new(0, 0, 0),
+            NodeAddr::new(0, 0, 0),
+            TopicId::from_raw(0),
+        );
+
+        // A is empty, so recv should fall through to B.
+        assert!(composite.recv(&mut frame).unwrap());
+        assert_eq!(frame.topic, topic);
+        assert_eq!(frame.payload_slice(), &[0xBB]);
+    }
 }
