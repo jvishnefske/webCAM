@@ -309,6 +309,93 @@ mod tests {
     }
 
     #[test]
+    fn test_graph_json_to_ir_valid() {
+        let json = r#"{
+            "blocks": [{
+                "id": 1,
+                "block_type": "constant",
+                "name": "const_1",
+                "inputs": [],
+                "outputs": [{"name": "out", "kind": "Float"}],
+                "config": {"value": 7.0},
+                "output_values": []
+            }],
+            "channels": [],
+            "tick_count": 0,
+            "time": 0.0
+        }"#;
+        let module = graph_json_to_ir(json).unwrap();
+        assert_eq!(module.funcs.len(), 1, "should have 1 function");
+        assert!(
+            module.funcs[0].ops.len() >= 2,
+            "expected at least 2 ops (zero + constant)"
+        );
+    }
+
+    #[test]
+    fn test_graph_json_to_ir_invalid_json() {
+        let result = graph_json_to_ir("not json");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to parse"));
+    }
+
+    #[test]
+    fn test_run_ir_pipeline_basic() {
+        let snap = GraphSnapshot {
+            blocks: vec![lower::BlockSnapshot {
+                id: lower::BlockId(1),
+                block_type: "constant".to_string(),
+                name: "c".to_string(),
+                inputs: vec![],
+                outputs: vec![lower::PortDef {
+                    name: "out".to_string(),
+                    kind: lower::PortKind::Float,
+                }],
+                config: serde_json::json!({"value": 3.14}),
+                is_delay: false,
+            }],
+            channels: vec![],
+        };
+        let output = run_ir_pipeline(&snap).unwrap();
+        assert!(
+            !output.mlir_text.is_empty(),
+            "MLIR text should not be empty"
+        );
+        assert!(
+            !output.rust_source.is_empty(),
+            "Rust source should not be empty"
+        );
+        assert!(
+            output.ir_module.funcs.len() >= 1,
+            "IR module should have at least 1 function"
+        );
+    }
+
+    #[test]
+    fn test_generate_ir_logic_files_produces_expected_paths() {
+        let snap = GraphSnapshot {
+            blocks: vec![lower::BlockSnapshot {
+                id: lower::BlockId(1),
+                block_type: "constant".to_string(),
+                name: "c".to_string(),
+                inputs: vec![],
+                outputs: vec![lower::PortDef {
+                    name: "out".to_string(),
+                    kind: lower::PortKind::Float,
+                }],
+                config: serde_json::json!({"value": 1.0}),
+                is_delay: false,
+            }],
+            channels: vec![],
+        };
+        let files = generate_ir_logic_files(&snap).unwrap();
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(paths.contains(&"logic/mlir/graph.mlir"));
+        assert!(paths.contains(&"logic/Cargo.toml"));
+        assert!(paths.contains(&"logic/src/lib.rs"));
+    }
+
+    #[test]
     fn test_compile_multi_block() {
         // constant(5.0) -> gain(2.0) chain
         let snap = GraphSnapshot {

@@ -832,4 +832,81 @@ mod tests {
         assert_eq!(graph.block_count(), 0);
         assert_eq!(graph.slot_count(), 0);
     }
+
+    // Additional: Debug impl
+    #[test]
+    fn test_compiled_graph_debug() {
+        let module = build_constant_graph(42.0);
+        let graph = compile::<TB, TS>(&module).unwrap();
+        let debug_str = format!("{:?}", graph);
+        assert!(debug_str.contains("CompiledGraph"));
+        assert!(debug_str.contains("block_count"));
+        assert!(debug_str.contains("slot_count"));
+    }
+
+    // Additional: inject out-of-bounds index returns early
+    #[test]
+    fn test_inject_out_of_bounds() {
+        let module = build_constant_graph(42.0);
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        graph.tick(1.0, &mut NullHw);
+        let slot_count = graph.slot_count();
+        // Inject at a slot beyond the allocated range -- should not panic
+        graph.inject(slot_count as u16 + 10, 999.0, &mut NullHw);
+        // Verify the graph is unchanged
+        assert_eq!(graph.read_slot(1), 42.0);
+    }
+
+    // Additional: Nop opcode execution
+    #[test]
+    fn test_nop_opcode() {
+        // Build a graph using custom_op which produces a Custom IrOpKind,
+        // which maps to OpCode::Nop in the runtime.
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let c = b.constant_f64(5.0);
+        b.custom_op("my.unknown_op", &[c], &[], 1);
+        let module = b.build();
+
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        graph.tick(1.0, &mut NullHw);
+        // The constant should still produce its value
+        assert_eq!(graph.read_slot(1), 5.0);
+        // The nop block's output slot should remain 0.0
+        assert_eq!(graph.read_slot(2), 0.0);
+    }
+
+    // Additional: ir_op_to_opcode for ChannelRead and ChannelWrite
+    #[test]
+    fn test_ir_op_to_opcode_channel_read() {
+        let mut attrs = HashMap::new();
+        attrs.insert("topic".to_string(), Attr::I64(42));
+        let opcode = ir_op_to_opcode(
+            &IrOpKind::Dataflow(DataflowOp::ChannelRead),
+            &attrs,
+        );
+        assert_eq!(opcode, OpCode::Subscribe(42));
+    }
+
+    #[test]
+    fn test_ir_op_to_opcode_channel_write() {
+        let mut attrs = HashMap::new();
+        attrs.insert("topic".to_string(), Attr::I64(7));
+        let opcode = ir_op_to_opcode(
+            &IrOpKind::Dataflow(DataflowOp::ChannelWrite),
+            &attrs,
+        );
+        assert_eq!(opcode, OpCode::Publish(7));
+    }
+
+    // Additional: ir_op_to_opcode fallback to Nop
+    #[test]
+    fn test_ir_op_to_opcode_nop_fallback() {
+        let attrs = HashMap::new();
+        let opcode = ir_op_to_opcode(
+            &IrOpKind::Custom("unknown.op".to_string()),
+            &attrs,
+        );
+        assert_eq!(opcode, OpCode::Nop);
+    }
 }

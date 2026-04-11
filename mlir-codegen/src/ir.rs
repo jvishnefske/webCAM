@@ -592,6 +592,12 @@ mod tests {
     }
 
     #[test]
+    fn test_custom_op_mlir_name() {
+        let kind = IrOpKind::Custom("my.custom_op".to_string());
+        assert_eq!(kind.mlir_name(), "my.custom_op");
+    }
+
+    #[test]
     fn test_subf() {
         let mut b = IrBuilder::new();
         b.begin_func("tick", &[], &[]);
