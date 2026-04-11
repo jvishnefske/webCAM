@@ -12,7 +12,7 @@ use embassy_rp::flash::{Blocking, Flash};
 use embassy_rp::peripherals::FLASH;
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::blocking_mutex::Mutex as BlockingMutex;
-use hil_firmware_support::fw_update::DfuFlashWriter;
+use hil_firmware_support::fw_update::{DfuError, DfuFlashWriter};
 
 /// Total flash size on the RP2040 board (2 MiB).
 pub const FLASH_SIZE: usize = 2 * 1024 * 1024;
@@ -41,41 +41,41 @@ impl PicoDfuWriter {
 }
 
 impl DfuFlashWriter for PicoDfuWriter {
-    fn erase_dfu(&mut self) -> Result<(), ()> {
+    fn erase_dfu(&mut self) -> Result<(), DfuError> {
         let mut aligned = AlignedBuffer([0u8; 4]);
         let config = FirmwareUpdaterConfig::from_linkerfile_blocking(self.flash, self.flash);
         let mut updater = BlockingFirmwareUpdater::new(config, aligned.as_mut());
-        let _ = updater.prepare_update().map_err(|_| ())?;
+        let _ = updater.prepare_update().map_err(|_| DfuError::EraseFailed)?;
         Ok(())
     }
 
-    fn write_dfu(&mut self, offset: u32, data: &[u8]) -> Result<(), ()> {
+    fn write_dfu(&mut self, offset: u32, data: &[u8]) -> Result<(), DfuError> {
         let mut aligned = AlignedBuffer([0u8; 4]);
         let config = FirmwareUpdaterConfig::from_linkerfile_blocking(self.flash, self.flash);
         let mut updater = BlockingFirmwareUpdater::new(config, aligned.as_mut());
         updater
             .write_firmware(offset as usize, data)
-            .map_err(|_| ())
+            .map_err(|_| DfuError::WriteFailed)
     }
 
-    fn read_dfu(&mut self, _offset: u32, _buf: &mut [u8]) -> Result<(), ()> {
+    fn read_dfu(&mut self, _offset: u32, _buf: &mut [u8]) -> Result<(), DfuError> {
         // Reading from DFU partition is not directly supported by
         // BlockingFirmwareUpdater. CRC verification is done during write.
-        Err(())
+        Err(DfuError::ReadFailed)
     }
 
-    fn mark_updated(&mut self) -> Result<(), ()> {
+    fn mark_updated(&mut self) -> Result<(), DfuError> {
         let mut aligned = AlignedBuffer([0u8; 4]);
         let config = FirmwareUpdaterConfig::from_linkerfile_blocking(self.flash, self.flash);
         let mut updater = BlockingFirmwareUpdater::new(config, aligned.as_mut());
-        updater.mark_updated().map_err(|_| ())
+        updater.mark_updated().map_err(|_| DfuError::MarkFailed)
     }
 
-    fn mark_booted(&mut self) -> Result<(), ()> {
+    fn mark_booted(&mut self) -> Result<(), DfuError> {
         let mut aligned = AlignedBuffer([0u8; 4]);
         let config = FirmwareUpdaterConfig::from_linkerfile_blocking(self.flash, self.flash);
         let mut updater = BlockingFirmwareUpdater::new(config, aligned.as_mut());
-        updater.mark_booted().map_err(|_| ())
+        updater.mark_booted().map_err(|_| DfuError::MarkFailed)
     }
 
     fn system_reset(&mut self) -> ! {

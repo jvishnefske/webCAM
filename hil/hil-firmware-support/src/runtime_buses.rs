@@ -11,7 +11,7 @@
 use embedded_hal::i2c::I2c;
 use i2c_hil_sim::{Address, RuntimeBus};
 
-use crate::ws_dispatch::I2cBusSet;
+use crate::ws_dispatch::{BusSetError, I2cBusSet};
 
 /// Runtime-configurable set of I2C buses for WebSocket dispatch.
 ///
@@ -52,20 +52,21 @@ impl<const MAX_BUSES: usize, const MAX_DEVICES: usize> RuntimeBusSet<MAX_BUSES, 
 impl<const MAX_BUSES: usize, const MAX_DEVICES: usize> I2cBusSet
     for RuntimeBusSet<MAX_BUSES, MAX_DEVICES>
 {
-    fn i2c_read(&mut self, bus: u8, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), ()> {
+    fn i2c_read(&mut self, bus: u8, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), BusSetError> {
         let idx = bus as usize;
         if idx >= self.bus_count as usize {
-            return Err(());
+            return Err(BusSetError::InvalidBus);
         }
-        I2c::write_read(&mut self.buses[idx], addr, &[reg], buf).map_err(|_| ())
+        I2c::write_read(&mut self.buses[idx], addr, &[reg], buf)
+            .map_err(|_| BusSetError::TransactionFailed)
     }
 
-    fn i2c_write(&mut self, bus: u8, addr: u8, data: &[u8]) -> Result<(), ()> {
+    fn i2c_write(&mut self, bus: u8, addr: u8, data: &[u8]) -> Result<(), BusSetError> {
         let idx = bus as usize;
         if idx >= self.bus_count as usize {
-            return Err(());
+            return Err(BusSetError::InvalidBus);
         }
-        I2c::write(&mut self.buses[idx], addr, data).map_err(|_| ())
+        I2c::write(&mut self.buses[idx], addr, data).map_err(|_| BusSetError::TransactionFailed)
     }
 
     fn bus_count(&self) -> u8 {
@@ -96,36 +97,54 @@ impl<const MAX_BUSES: usize, const MAX_DEVICES: usize> I2cBusSet
         self.buses[idx].device_registers(addr).map(|r| r.as_slice())
     }
 
-    fn add_device(&mut self, bus: u8, addr: u8, name: &[u8], registers: &[u8]) -> Result<(), ()> {
+    fn add_device(
+        &mut self,
+        bus: u8,
+        addr: u8,
+        name: &[u8],
+        registers: &[u8],
+    ) -> Result<(), BusSetError> {
         let idx = bus as usize;
         if idx >= self.bus_count as usize {
-            return Err(());
+            return Err(BusSetError::InvalidBus);
         }
-        let address = Address::new(addr).ok_or(())?;
-        self.buses[idx].add_device(address, name, registers)
+        let address = Address::new(addr).ok_or(BusSetError::DeviceNotFound)?;
+        self.buses[idx]
+            .add_device(address, name, registers)
+            .map_err(|_| BusSetError::TransactionFailed)
     }
 
-    fn remove_device(&mut self, bus: u8, addr: u8) -> Result<(), ()> {
+    fn remove_device(&mut self, bus: u8, addr: u8) -> Result<(), BusSetError> {
         let idx = bus as usize;
         if idx >= self.bus_count as usize {
-            return Err(());
+            return Err(BusSetError::InvalidBus);
         }
-        let address = Address::new(addr).ok_or(())?;
-        self.buses[idx].remove_device(address)
+        let address = Address::new(addr).ok_or(BusSetError::DeviceNotFound)?;
+        self.buses[idx]
+            .remove_device(address)
+            .map_err(|_| BusSetError::DeviceNotFound)
     }
 
-    fn set_registers(&mut self, bus: u8, addr: u8, offset: u8, data: &[u8]) -> Result<(), ()> {
+    fn set_registers(
+        &mut self,
+        bus: u8,
+        addr: u8,
+        offset: u8,
+        data: &[u8],
+    ) -> Result<(), BusSetError> {
         let idx = bus as usize;
         if idx >= self.bus_count as usize {
-            return Err(());
+            return Err(BusSetError::InvalidBus);
         }
-        let address = Address::new(addr).ok_or(())?;
-        self.buses[idx].set_registers(address, offset, data)
+        let address = Address::new(addr).ok_or(BusSetError::DeviceNotFound)?;
+        self.buses[idx]
+            .set_registers(address, offset, data)
+            .map_err(|_| BusSetError::DeviceNotFound)
     }
 
-    fn set_bus_count(&mut self, count: u8) -> Result<(), ()> {
+    fn set_bus_count(&mut self, count: u8) -> Result<(), BusSetError> {
         if count as usize > MAX_BUSES {
-            return Err(());
+            return Err(BusSetError::InvalidBus);
         }
         self.bus_count = count;
         Ok(())

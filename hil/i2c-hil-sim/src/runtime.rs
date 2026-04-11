@@ -14,6 +14,17 @@ use embedded_hal::i2c::{ErrorType, I2c, Operation};
 use crate::device::{Address, I2cDevice};
 use crate::error::BusError;
 
+/// Error type for runtime bus device management operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeDeviceError {
+    /// All device slots on the bus are occupied.
+    SlotsFull,
+    /// A device with the same address is already active on the bus.
+    DuplicateAddress,
+    /// No active device was found at the specified address.
+    DeviceNotFound,
+}
+
 /// Placeholder address for inactive device slots.
 const INACTIVE_ADDR: Address = match Address::new(0) {
     Some(a) => a,
@@ -196,13 +207,19 @@ impl<const MAX_DEVICES: usize> RuntimeBus<MAX_DEVICES> {
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if all slots are occupied or a device with the
-    /// same address is already active on this bus.
-    pub fn add_device(&mut self, addr: Address, name: &[u8], registers: &[u8]) -> Result<(), ()> {
+    /// Returns [`RuntimeDeviceError::DuplicateAddress`] if a device with the
+    /// same address is already active on this bus, or
+    /// [`RuntimeDeviceError::SlotsFull`] if all slots are occupied.
+    pub fn add_device(
+        &mut self,
+        addr: Address,
+        name: &[u8],
+        registers: &[u8],
+    ) -> Result<(), RuntimeDeviceError> {
         let mut i = 0;
         while i < MAX_DEVICES {
             if self.devices[i].is_active() && self.devices[i].address() == addr {
-                return Err(());
+                return Err(RuntimeDeviceError::DuplicateAddress);
             }
             i += 1;
         }
@@ -214,15 +231,16 @@ impl<const MAX_DEVICES: usize> RuntimeBus<MAX_DEVICES> {
             }
             j += 1;
         }
-        Err(())
+        Err(RuntimeDeviceError::SlotsFull)
     }
 
     /// Removes the active device at the given address.
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if no active device has that address.
-    pub fn remove_device(&mut self, addr: Address) -> Result<(), ()> {
+    /// Returns [`RuntimeDeviceError::DeviceNotFound`] if no active device
+    /// has that address.
+    pub fn remove_device(&mut self, addr: Address) -> Result<(), RuntimeDeviceError> {
         let mut i = 0;
         while i < MAX_DEVICES {
             if self.devices[i].is_active() && self.devices[i].address() == addr {
@@ -231,15 +249,21 @@ impl<const MAX_DEVICES: usize> RuntimeBus<MAX_DEVICES> {
             }
             i += 1;
         }
-        Err(())
+        Err(RuntimeDeviceError::DeviceNotFound)
     }
 
     /// Sets registers on the active device at the given address.
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if no active device has that address.
-    pub fn set_registers(&mut self, addr: Address, offset: u8, data: &[u8]) -> Result<(), ()> {
+    /// Returns [`RuntimeDeviceError::DeviceNotFound`] if no active device
+    /// has that address.
+    pub fn set_registers(
+        &mut self,
+        addr: Address,
+        offset: u8,
+        data: &[u8],
+    ) -> Result<(), RuntimeDeviceError> {
         let mut i = 0;
         while i < MAX_DEVICES {
             if self.devices[i].is_active() && self.devices[i].address() == addr {
@@ -248,7 +272,7 @@ impl<const MAX_DEVICES: usize> RuntimeBus<MAX_DEVICES> {
             }
             i += 1;
         }
-        Err(())
+        Err(RuntimeDeviceError::DeviceNotFound)
     }
 
     /// Returns the number of active devices on this bus.

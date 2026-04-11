@@ -21,6 +21,51 @@
 /// Maximum chunk size in bytes (fits in a 1500-byte WebSocket frame).
 pub const MAX_CHUNK_SIZE: u16 = 1024;
 
+/// Error type for DFU flash operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DfuError {
+    /// Flash erase operation failed.
+    EraseFailed,
+    /// Flash write operation failed.
+    WriteFailed,
+    /// Flash read operation failed.
+    ReadFailed,
+    /// Mark-updated or mark-booted operation failed.
+    MarkFailed,
+}
+
+/// Error type for CBOR encoding operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncodeError {
+    /// Output buffer is too small for the encoded data.
+    BufferTooSmall,
+}
+
+/// Error type for firmware update request handling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FwRequestError {
+    /// CBOR decoding failed or message format is invalid.
+    MalformedRequest,
+    /// Request is invalid for the current firmware update state.
+    InvalidState,
+    /// A DFU flash operation failed.
+    Dfu(DfuError),
+    /// CBOR encoding of the response failed.
+    Encode(EncodeError),
+}
+
+impl From<DfuError> for FwRequestError {
+    fn from(e: DfuError) -> Self {
+        FwRequestError::Dfu(e)
+    }
+}
+
+impl From<EncodeError> for FwRequestError {
+    fn from(e: EncodeError) -> Self {
+        FwRequestError::Encode(e)
+    }
+}
+
 /// Trait abstracting DFU flash write operations.
 ///
 /// Board-specific implementations wrap embassy-boot-rp's
@@ -31,29 +76,29 @@ pub trait DfuFlashWriter {
     ///
     /// # Errors
     ///
-    /// Returns `()` if the erase operation fails.
-    fn erase_dfu(&mut self) -> Result<(), ()>;
+    /// Returns [`DfuError::EraseFailed`] if the erase operation fails.
+    fn erase_dfu(&mut self) -> Result<(), DfuError>;
 
     /// Writes a chunk of firmware data at the given offset in the DFU partition.
     ///
     /// # Errors
     ///
-    /// Returns `()` if the write operation fails.
-    fn write_dfu(&mut self, offset: u32, data: &[u8]) -> Result<(), ()>;
+    /// Returns [`DfuError::WriteFailed`] if the write operation fails.
+    fn write_dfu(&mut self, offset: u32, data: &[u8]) -> Result<(), DfuError>;
 
     /// Reads firmware data from the DFU partition at the given offset.
     ///
     /// # Errors
     ///
-    /// Returns `()` if the read operation fails.
-    fn read_dfu(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), ()>;
+    /// Returns [`DfuError::ReadFailed`] if the read operation fails.
+    fn read_dfu(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), DfuError>;
 
     /// Marks the DFU image as ready to be swapped on next boot.
     ///
     /// # Errors
     ///
-    /// Returns `()` if the mark operation fails.
-    fn mark_updated(&mut self) -> Result<(), ()>;
+    /// Returns [`DfuError::MarkFailed`] if the mark operation fails.
+    fn mark_updated(&mut self) -> Result<(), DfuError>;
 
     /// Marks the current running firmware as successfully booted.
     ///
@@ -61,8 +106,8 @@ pub trait DfuFlashWriter {
     ///
     /// # Errors
     ///
-    /// Returns `()` if the mark operation fails.
-    fn mark_booted(&mut self) -> Result<(), ()>;
+    /// Returns [`DfuError::MarkFailed`] if the mark operation fails.
+    fn mark_booted(&mut self) -> Result<(), DfuError>;
 
     /// Performs a system reset to boot into the new firmware.
     fn system_reset(&mut self) -> !;
@@ -112,17 +157,19 @@ pub fn is_fw_tag(tag: u32) -> bool {
 ///
 /// # Errors
 ///
-/// Returns `()` if CBOR decoding fails or the response buffer is too small.
+/// Returns a [`FwRequestError`] if CBOR decoding fails, the state machine
+/// rejects the request, a DFU operation fails, or the response buffer is
+/// too small.
 pub fn handle_fw_request(
     state: FwUpdateState,
     writer: &mut impl DfuFlashWriter,
     request: &[u8],
     resp_buf: &mut [u8],
-) -> Result<(FwUpdateState, usize), ()> {
+) -> Result<(FwUpdateState, usize), FwRequestError> {
     let mut dec = minicbor::Decoder::new(request);
-    let _map_len = dec.map().map_err(|_| ())?;
-    let _key0 = dec.u32().map_err(|_| ())?;
-    let tag = dec.u32().map_err(|_| ())?;
+    let _map_len = dec.map().map_err(|_| FwRequestError::MalformedRequest)?;
+    let _key0 = dec.u32().map_err(|_| FwRequestError::MalformedRequest)?;
+    let tag = dec.u32().map_err(|_| FwRequestError::MalformedRequest)?;
 
     match tag {
         // FwBegin: {0:20, 1:total_size(u32), 2:crc32(u32)}
@@ -133,7 +180,7 @@ pub fn handle_fw_request(
         22 => handle_fw_finish(state, writer, &mut dec, resp_buf),
         // FwMarkBooted: {0:23}
         23 => handle_fw_mark_booted(state, writer, resp_buf),
-        _ => Err(()),
+        _ => Err(FwRequestError::MalformedRequest),
     }
 }
 
@@ -143,16 +190,16 @@ fn handle_fw_begin(
     writer: &mut impl DfuFlashWriter,
     dec: &mut minicbor::Decoder<'_>,
     resp_buf: &mut [u8],
-) -> Result<(FwUpdateState, usize), ()> {
+) -> Result<(FwUpdateState, usize), FwRequestError> {
     // Only accept FwBegin from Idle state
     if !matches!(state, FwUpdateState::Idle) {
-        return Err(());
+        return Err(FwRequestError::InvalidState);
     }
 
-    let _k1 = dec.u32().map_err(|_| ())?;
-    let total_size = dec.u32().map_err(|_| ())?;
-    let _k2 = dec.u32().map_err(|_| ())?;
-    let expected_crc = dec.u32().map_err(|_| ())?;
+    let _k1 = dec.u32().map_err(|_| FwRequestError::MalformedRequest)?;
+    let total_size = dec.u32().map_err(|_| FwRequestError::MalformedRequest)?;
+    let _k2 = dec.u32().map_err(|_| FwRequestError::MalformedRequest)?;
+    let expected_crc = dec.u32().map_err(|_| FwRequestError::MalformedRequest)?;
 
     writer.erase_dfu()?;
 
@@ -174,7 +221,7 @@ fn handle_fw_chunk(
     writer: &mut impl DfuFlashWriter,
     dec: &mut minicbor::Decoder<'_>,
     resp_buf: &mut [u8],
-) -> Result<(FwUpdateState, usize), ()> {
+) -> Result<(FwUpdateState, usize), FwRequestError> {
     let (total_size, expected_crc, received, crc_state) = match state {
         FwUpdateState::Receiving {
             total_size,
@@ -182,23 +229,23 @@ fn handle_fw_chunk(
             received,
             crc_state,
         } => (total_size, expected_crc, received, crc_state),
-        _ => return Err(()),
+        _ => return Err(FwRequestError::InvalidState),
     };
 
-    let _k1 = dec.u32().map_err(|_| ())?;
-    let offset = dec.u32().map_err(|_| ())?;
-    let _k2 = dec.u32().map_err(|_| ())?;
-    let data = dec.bytes().map_err(|_| ())?;
+    let _k1 = dec.u32().map_err(|_| FwRequestError::MalformedRequest)?;
+    let offset = dec.u32().map_err(|_| FwRequestError::MalformedRequest)?;
+    let _k2 = dec.u32().map_err(|_| FwRequestError::MalformedRequest)?;
+    let data = dec.bytes().map_err(|_| FwRequestError::MalformedRequest)?;
 
     // Verify offset matches expected
     if offset != received {
-        return Err(());
+        return Err(FwRequestError::InvalidState);
     }
 
     // Verify we won't exceed total size
     let new_received = received + data.len() as u32;
     if new_received > total_size {
-        return Err(());
+        return Err(FwRequestError::InvalidState);
     }
 
     writer.write_dfu(offset, data)?;
@@ -224,7 +271,7 @@ fn handle_fw_finish(
     writer: &mut impl DfuFlashWriter,
     dec: &mut minicbor::Decoder<'_>,
     resp_buf: &mut [u8],
-) -> Result<(FwUpdateState, usize), ()> {
+) -> Result<(FwUpdateState, usize), FwRequestError> {
     let (total_size, expected_crc, received, crc_state) = match state {
         FwUpdateState::Receiving {
             total_size,
@@ -232,21 +279,21 @@ fn handle_fw_finish(
             received,
             crc_state,
         } => (total_size, expected_crc, received, crc_state),
-        _ => return Err(()),
+        _ => return Err(FwRequestError::InvalidState),
     };
 
-    let _k1 = dec.u32().map_err(|_| ())?;
-    let final_crc = dec.u32().map_err(|_| ())?;
+    let _k1 = dec.u32().map_err(|_| FwRequestError::MalformedRequest)?;
+    let final_crc = dec.u32().map_err(|_| FwRequestError::MalformedRequest)?;
 
     // Verify all bytes received
     if received != total_size {
-        return Err(());
+        return Err(FwRequestError::InvalidState);
     }
 
     // Finalize CRC and verify
     let computed_crc = crc32_finalize(crc_state);
     if computed_crc != expected_crc || computed_crc != final_crc {
-        return Err(());
+        return Err(FwRequestError::InvalidState);
     }
 
     writer.mark_updated()?;
@@ -261,7 +308,7 @@ fn handle_fw_mark_booted(
     state: FwUpdateState,
     writer: &mut impl DfuFlashWriter,
     resp_buf: &mut [u8],
-) -> Result<(FwUpdateState, usize), ()> {
+) -> Result<(FwUpdateState, usize), FwRequestError> {
     writer.mark_booted()?;
     let n = encode_fw_mark_booted_ack(resp_buf)?;
     Ok((state, n))
@@ -323,16 +370,16 @@ pub fn crc32(data: &[u8]) -> u32 {
 // --- CBOR encoders for firmware update responses ---
 
 /// Encodes FwReady: `{0:20, 1:max_chunk(u16)}`.
-fn encode_fw_ready(buf: &mut [u8]) -> Result<usize, ()> {
+fn encode_fw_ready(buf: &mut [u8]) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(2).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(20).map_err(|_| ())?;
-    enc.u32(1).map_err(|_| ())?;
-    enc.u16(MAX_CHUNK_SIZE).map_err(|_| ())?;
+    enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(20).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u16(MAX_CHUNK_SIZE).map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -340,16 +387,16 @@ fn encode_fw_ready(buf: &mut [u8]) -> Result<usize, ()> {
 }
 
 /// Encodes FwChunkAck: `{0:21, 1:next_offset(u32)}`.
-fn encode_fw_chunk_ack(buf: &mut [u8], next_offset: u32) -> Result<usize, ()> {
+fn encode_fw_chunk_ack(buf: &mut [u8], next_offset: u32) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(2).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(21).map_err(|_| ())?;
-    enc.u32(1).map_err(|_| ())?;
-    enc.u32(next_offset).map_err(|_| ())?;
+    enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(21).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(next_offset).map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -357,14 +404,14 @@ fn encode_fw_chunk_ack(buf: &mut [u8], next_offset: u32) -> Result<usize, ()> {
 }
 
 /// Encodes FwFinishAck: `{0:22}`.
-fn encode_fw_finish_ack(buf: &mut [u8]) -> Result<usize, ()> {
+fn encode_fw_finish_ack(buf: &mut [u8]) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(1).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(22).map_err(|_| ())?;
+    enc.map(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(22).map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -372,14 +419,14 @@ fn encode_fw_finish_ack(buf: &mut [u8]) -> Result<usize, ()> {
 }
 
 /// Encodes FwMarkBootedAck: `{0:23}`.
-fn encode_fw_mark_booted_ack(buf: &mut [u8]) -> Result<usize, ()> {
+fn encode_fw_mark_booted_ack(buf: &mut [u8]) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(1).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(23).map_err(|_| ())?;
+    enc.map(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(23).map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -389,18 +436,18 @@ fn encode_fw_mark_booted_ack(buf: &mut [u8]) -> Result<usize, ()> {
 // --- CBOR encoders for firmware update requests (used by tests and frontend) ---
 
 /// Encodes FwBegin request: `{0:20, 1:total_size(u32), 2:crc32(u32)}`.
-pub fn encode_fw_begin(buf: &mut [u8], total_size: u32, crc: u32) -> Result<usize, ()> {
+pub fn encode_fw_begin(buf: &mut [u8], total_size: u32, crc: u32) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(3).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(20).map_err(|_| ())?;
-    enc.u32(1).map_err(|_| ())?;
-    enc.u32(total_size).map_err(|_| ())?;
-    enc.u32(2).map_err(|_| ())?;
-    enc.u32(crc).map_err(|_| ())?;
+    enc.map(3).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(20).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(total_size).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(2).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(crc).map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -408,18 +455,18 @@ pub fn encode_fw_begin(buf: &mut [u8], total_size: u32, crc: u32) -> Result<usiz
 }
 
 /// Encodes FwChunk request: `{0:21, 1:offset(u32), 2:data(bstr)}`.
-pub fn encode_fw_chunk(buf: &mut [u8], offset: u32, data: &[u8]) -> Result<usize, ()> {
+pub fn encode_fw_chunk(buf: &mut [u8], offset: u32, data: &[u8]) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(3).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(21).map_err(|_| ())?;
-    enc.u32(1).map_err(|_| ())?;
-    enc.u32(offset).map_err(|_| ())?;
-    enc.u32(2).map_err(|_| ())?;
-    enc.bytes(data).map_err(|_| ())?;
+    enc.map(3).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(21).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(offset).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(2).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.bytes(data).map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -427,16 +474,16 @@ pub fn encode_fw_chunk(buf: &mut [u8], offset: u32, data: &[u8]) -> Result<usize
 }
 
 /// Encodes FwFinish request: `{0:22, 1:crc32(u32)}`.
-pub fn encode_fw_finish(buf: &mut [u8], crc: u32) -> Result<usize, ()> {
+pub fn encode_fw_finish(buf: &mut [u8], crc: u32) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(2).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(22).map_err(|_| ())?;
-    enc.u32(1).map_err(|_| ())?;
-    enc.u32(crc).map_err(|_| ())?;
+    enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(22).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(crc).map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -444,14 +491,14 @@ pub fn encode_fw_finish(buf: &mut [u8], crc: u32) -> Result<usize, ()> {
 }
 
 /// Encodes FwMarkBooted request: `{0:23}`.
-pub fn encode_fw_mark_booted(buf: &mut [u8]) -> Result<usize, ()> {
+pub fn encode_fw_mark_booted(buf: &mut [u8]) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(1).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(23).map_err(|_| ())?;
+    enc.map(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(23).map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -462,7 +509,7 @@ pub fn encode_fw_mark_booted(buf: &mut [u8]) -> Result<usize, ()> {
 ///
 /// Boards without OTA support use this to satisfy the [`DfuFlashWriter`]
 /// trait bound in `ws_server::run()`. Since all write operations return
-/// `Err(())`, the firmware update protocol never reaches `system_reset`.
+/// errors, the firmware update protocol never reaches `system_reset`.
 pub struct StubDfuWriter;
 
 impl Default for StubDfuWriter {
@@ -479,23 +526,23 @@ impl StubDfuWriter {
 }
 
 impl DfuFlashWriter for StubDfuWriter {
-    fn erase_dfu(&mut self) -> Result<(), ()> {
-        Err(())
+    fn erase_dfu(&mut self) -> Result<(), DfuError> {
+        Err(DfuError::EraseFailed)
     }
 
-    fn write_dfu(&mut self, _offset: u32, _data: &[u8]) -> Result<(), ()> {
-        Err(())
+    fn write_dfu(&mut self, _offset: u32, _data: &[u8]) -> Result<(), DfuError> {
+        Err(DfuError::WriteFailed)
     }
 
-    fn read_dfu(&mut self, _offset: u32, _buf: &mut [u8]) -> Result<(), ()> {
-        Err(())
+    fn read_dfu(&mut self, _offset: u32, _buf: &mut [u8]) -> Result<(), DfuError> {
+        Err(DfuError::ReadFailed)
     }
 
-    fn mark_updated(&mut self) -> Result<(), ()> {
-        Err(())
+    fn mark_updated(&mut self) -> Result<(), DfuError> {
+        Err(DfuError::MarkFailed)
     }
 
-    fn mark_booted(&mut self) -> Result<(), ()> {
+    fn mark_booted(&mut self) -> Result<(), DfuError> {
         Ok(())
     }
 
@@ -541,17 +588,17 @@ mod tests {
     }
 
     impl DfuFlashWriter for MockDfuWriter {
-        fn erase_dfu(&mut self) -> Result<(), ()> {
+        fn erase_dfu(&mut self) -> Result<(), DfuError> {
             self.data = [0xFF; MOCK_DFU_SIZE];
             self.erased = true;
             Ok(())
         }
 
-        fn write_dfu(&mut self, offset: u32, data: &[u8]) -> Result<(), ()> {
+        fn write_dfu(&mut self, offset: u32, data: &[u8]) -> Result<(), DfuError> {
             let start = offset as usize;
             let end = start + data.len();
             if end > MOCK_DFU_SIZE {
-                return Err(());
+                return Err(DfuError::WriteFailed);
             }
             self.data[start..end].copy_from_slice(data);
             if self.range_count < self.written_ranges.len() {
@@ -561,22 +608,22 @@ mod tests {
             Ok(())
         }
 
-        fn read_dfu(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), ()> {
+        fn read_dfu(&mut self, offset: u32, buf: &mut [u8]) -> Result<(), DfuError> {
             let start = offset as usize;
             let end = start + buf.len();
             if end > MOCK_DFU_SIZE {
-                return Err(());
+                return Err(DfuError::ReadFailed);
             }
             buf.copy_from_slice(&self.data[start..end]);
             Ok(())
         }
 
-        fn mark_updated(&mut self) -> Result<(), ()> {
+        fn mark_updated(&mut self) -> Result<(), DfuError> {
             self.marked_updated = true;
             Ok(())
         }
 
-        fn mark_booted(&mut self) -> Result<(), ()> {
+        fn mark_booted(&mut self) -> Result<(), DfuError> {
             self.marked_booted = true;
             Ok(())
         }

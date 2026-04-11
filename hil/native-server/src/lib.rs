@@ -298,7 +298,7 @@ fn handle_add_device(state: &SharedState, data: &[u8]) -> Option<Vec<u8>> {
     let bus = st.i2c_buses.get_mut(bus_idx as usize)?;
     match bus.add_device(address, name.as_bytes(), registers) {
         Ok(()) => encode_tag_ok(30),
-        Err(()) => encode_error("add device failed"),
+        Err(_) => encode_error("add device failed"),
     }
 }
 
@@ -313,7 +313,7 @@ fn handle_remove_device(state: &SharedState, data: &[u8]) -> Option<Vec<u8>> {
     let bus = st.i2c_buses.get_mut(bus_idx as usize)?;
     match bus.remove_device(address) {
         Ok(()) => encode_tag_ok(31),
-        Err(()) => encode_error("remove device failed"),
+        Err(_) => encode_error("remove device failed"),
     }
 }
 
