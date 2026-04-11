@@ -830,12 +830,10 @@ mod tests {
         DATAFLOW_GRAPHS.with(|g| {
             let mut graphs = g.borrow_mut();
             let graph = graphs.get_mut(&gid).unwrap();
-            let src = graph.add_block(Box::new(dataflow::blocks::constant::ConstantBlock::new(
-                1.0,
-            )));
-            let dst = graph.add_block(Box::new(dataflow::blocks::function::FunctionBlock::gain(
-                2.0,
-            )));
+            let src = dataflow::blocks::create_block("constant", r#"{"value":1.0}"#).unwrap();
+            let dst = dataflow::blocks::create_block("gain", r#"{"gain":2.0}"#).unwrap();
+            let src = graph.add_block(src);
+            let dst = graph.add_block(dst);
             let ch = graph.connect(src, 0, dst, 0).unwrap();
             graph.disconnect(ch);
         });

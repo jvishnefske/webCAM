@@ -498,7 +498,6 @@ fn tmc2209_stallguard_sim_tick() {
 #[test]
 fn sim_mode_graph_adc_to_gain_to_pwm() {
     use blocks::embedded::{AdcBlock, AdcConfig, PwmBlock, PwmConfig};
-    use blocks::function::FunctionBlock;
 
     let mut g = DataflowGraph::new();
     g.set_simulation_mode(true);
@@ -507,7 +506,7 @@ fn sim_mode_graph_adc_to_gain_to_pwm() {
     g.set_sim_peripherals(peripherals);
 
     let adc = g.add_block(Box::new(AdcBlock::from_config(AdcConfig::default())));
-    let gain = g.add_block(Box::new(FunctionBlock::gain(0.4)));
+    let gain = g.add_block(blocks::create_block("gain", r#"{"gain":0.4}"#).unwrap());
     let pwm = g.add_block(Box::new(PwmBlock::from_config(PwmConfig::default())));
 
     g.connect(adc, 0, gain, 0).unwrap();
