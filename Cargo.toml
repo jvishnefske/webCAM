@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/rustcam",
     "crates/rustsim",
+    "graph-model",
     "module-traits",
     "dag-core",
     "dag-runtime",
@@ -32,6 +33,7 @@ members = [
 default-members = [
     "crates/rustcam",
     "crates/rustsim",
+    "graph-model",
     "module-traits",
     "dag-core",
     "dag-runtime",

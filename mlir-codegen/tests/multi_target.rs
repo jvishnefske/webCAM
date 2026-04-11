@@ -10,9 +10,8 @@
 
 use std::cell::RefCell;
 
-use mlir_codegen::lower::{BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef};
+use mlir_codegen::lower::{BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef, PortKind};
 use mlir_codegen::{build_runtime_graph, HwBridge, NullHw};
-use module_traits::value::PortKind;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -21,7 +20,7 @@ use module_traits::value::PortKind;
 /// Create a block snapshot with no inputs (source-style).
 fn source_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSnapshot {
     BlockSnapshot {
-        id,
+        id: BlockId(id),
         block_type: block_type.to_string(),
         name: format!("{block_type}_{id}"),
         inputs: vec![],
@@ -30,8 +29,6 @@ fn source_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSn
             kind: PortKind::Float,
         }],
         config,
-        output_values: vec![],
-        custom_codegen: None,
         is_delay: false,
     }
 }
@@ -39,7 +36,7 @@ fn source_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSn
 /// Create a single-input, single-output processing block.
 fn process_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSnapshot {
     BlockSnapshot {
-        id,
+        id: BlockId(id),
         block_type: block_type.to_string(),
         name: format!("{block_type}_{id}"),
         inputs: vec![PortDef {
@@ -51,8 +48,6 @@ fn process_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockS
             kind: PortKind::Float,
         }],
         config,
-        output_values: vec![],
-        custom_codegen: None,
         is_delay: false,
     }
 }
@@ -60,7 +55,7 @@ fn process_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockS
 /// Create a sink block (one input, no outputs).
 fn sink_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSnapshot {
     BlockSnapshot {
-        id,
+        id: BlockId(id),
         block_type: block_type.to_string(),
         name: format!("{block_type}_{id}"),
         inputs: vec![PortDef {
@@ -69,8 +64,6 @@ fn sink_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSnap
         }],
         outputs: vec![],
         config,
-        output_values: vec![],
-        custom_codegen: None,
         is_delay: false,
     }
 }
@@ -78,7 +71,7 @@ fn sink_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSnap
 /// Create a two-input, one-output block (add, subtract, multiply).
 fn dual_input_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSnapshot {
     BlockSnapshot {
-        id,
+        id: BlockId(id),
         block_type: block_type.to_string(),
         name: format!("{block_type}_{id}"),
         inputs: vec![
@@ -96,8 +89,6 @@ fn dual_input_block(id: u32, block_type: &str, config: serde_json::Value) -> Blo
             kind: PortKind::Float,
         }],
         config,
-        output_values: vec![],
-        custom_codegen: None,
         is_delay: false,
     }
 }
@@ -116,8 +107,6 @@ fn make_snap(blocks: Vec<BlockSnapshot>, channels: Vec<Channel>) -> GraphSnapsho
     GraphSnapshot {
         blocks,
         channels,
-        tick_count: 0,
-        time: 0.0,
     }
 }
 
