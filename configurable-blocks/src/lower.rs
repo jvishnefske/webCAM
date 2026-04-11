@@ -588,6 +588,48 @@ mod tests {
         assert_eq!(shifted, Op::Subscribe("topic".into()));
     }
 
+    #[test]
+    fn test_offset_op_add() {
+        let op = Op::Add(1, 2);
+        let shifted = offset_op(&op, 10);
+        assert_eq!(shifted, Op::Add(11, 12));
+    }
+
+    #[test]
+    fn test_offset_op_mul() {
+        let op = Op::Mul(0, 3);
+        let shifted = offset_op(&op, 5);
+        assert_eq!(shifted, Op::Mul(5, 8));
+    }
+
+    #[test]
+    fn test_offset_op_sub() {
+        let op = Op::Sub(2, 0);
+        let shifted = offset_op(&op, 7);
+        assert_eq!(shifted, Op::Sub(9, 7));
+    }
+
+    #[test]
+    fn test_offset_op_neg() {
+        let op = Op::Neg(3);
+        let shifted = offset_op(&op, 10);
+        assert_eq!(shifted, Op::Neg(13));
+    }
+
+    #[test]
+    fn test_offset_op_relu() {
+        let op = Op::Relu(5);
+        let shifted = offset_op(&op, 2);
+        assert_eq!(shifted, Op::Relu(7));
+    }
+
+    #[test]
+    fn test_offset_op_publish() {
+        let op = Op::Publish("out".into(), 3);
+        let shifted = offset_op(&op, 10);
+        assert_eq!(shifted, Op::Publish("out".into(), 13));
+    }
+
     // ── lower_block_set_per_node with unassigned blocks ─────────────────
 
     #[test]
@@ -625,5 +667,25 @@ mod tests {
         assert!(text.contains("block @pwm"), "should contain block type");
         assert!(text.contains("hw"), "should contain hw label for hardware channel");
         assert!(text.contains("pwm0"), "should contain channel name");
+    }
+
+    #[test]
+    fn test_lower_block_set_per_node_unknown_block_type() {
+        let profile = DeploymentProfile::new("bench");
+        let blocks: Vec<(String, serde_json::Value)> = vec![
+            ("nonexistent_block_xyz".into(), serde_json::json!({})),
+        ];
+        let result = lower_block_set_per_node(&blocks, &profile);
+        match result {
+            Err(e) => assert!(e.contains("unknown block type"), "unexpected error: {e}"),
+            Ok(_) => panic!("expected an error for unknown block type"),
+        }
+    }
+
+    #[test]
+    fn test_lower_block_set_per_node_empty() {
+        let profile = DeploymentProfile::new("bench");
+        let node_dags = lower_block_set_per_node(&[], &profile).expect("should succeed");
+        assert!(node_dags.is_empty());
     }
 }

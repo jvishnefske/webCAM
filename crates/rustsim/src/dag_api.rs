@@ -131,6 +131,12 @@ impl DagHandle {
         Ok(DagHandle { dag })
     }
 
+    /// Decode from CBOR bytes (testable helper).
+    pub fn from_cbor_impl(bytes: &[u8]) -> Result<DagHandle, String> {
+        let dag = cbor::decode_dag(bytes).map_err(|e| format!("{}", e))?;
+        Ok(DagHandle { dag })
+    }
+
     /// Get a JSON representation of the DAG structure for the UI.
     pub fn to_json(&self) -> Result<String, JsValue> {
         let mut nodes = Vec::new();
@@ -182,6 +188,58 @@ impl DagHandle {
             nodes.push(node_str);
         }
         Ok(format!("[{}]", nodes.join(",")))
+    }
+}
+
+// ── Testable _impl helpers (returning Result<_, String>) ──────────────
+impl DagHandle {
+    /// Add constant (testable).
+    pub fn constant_impl(&mut self, value: f64) -> Result<u16, String> {
+        self.dag.constant(value).map_err(|e| format!("{:?}", e))
+    }
+    /// Add input (testable).
+    pub fn input_impl(&mut self, name: &str) -> Result<u16, String> {
+        self.dag.input(name).map_err(|e| format!("{:?}", e))
+    }
+    /// Add output (testable).
+    pub fn output_impl(&mut self, name: &str, src: u16) -> Result<u16, String> {
+        self.dag.output(name, src).map_err(|e| format!("{:?}", e))
+    }
+    /// Add (testable).
+    pub fn add_impl(&mut self, a: u16, b: u16) -> Result<u16, String> {
+        self.dag.add(a, b).map_err(|e| format!("{:?}", e))
+    }
+    /// Mul (testable).
+    pub fn mul_impl(&mut self, a: u16, b: u16) -> Result<u16, String> {
+        self.dag.mul(a, b).map_err(|e| format!("{:?}", e))
+    }
+    /// Sub (testable).
+    pub fn sub_impl(&mut self, a: u16, b: u16) -> Result<u16, String> {
+        self.dag.sub(a, b).map_err(|e| format!("{:?}", e))
+    }
+    /// Div (testable).
+    pub fn div_impl(&mut self, a: u16, b: u16) -> Result<u16, String> {
+        self.dag.div(a, b).map_err(|e| format!("{:?}", e))
+    }
+    /// Pow (testable).
+    pub fn pow_impl(&mut self, base: u16, exp: u16) -> Result<u16, String> {
+        self.dag.pow(base, exp).map_err(|e| format!("{:?}", e))
+    }
+    /// Neg (testable).
+    pub fn neg_impl(&mut self, a: u16) -> Result<u16, String> {
+        self.dag.neg(a).map_err(|e| format!("{:?}", e))
+    }
+    /// Relu (testable).
+    pub fn relu_impl(&mut self, a: u16) -> Result<u16, String> {
+        self.dag.relu(a).map_err(|e| format!("{:?}", e))
+    }
+    /// Subscribe (testable).
+    pub fn subscribe_impl(&mut self, topic: &str) -> Result<u16, String> {
+        self.dag.subscribe(topic).map_err(|e| format!("{:?}", e))
+    }
+    /// Publish (testable).
+    pub fn publish_impl(&mut self, topic: &str, src: u16) -> Result<u16, String> {
+        self.dag.publish(topic, src).map_err(|e| format!("{:?}", e))
     }
 }
 
@@ -529,5 +587,196 @@ mod tests {
         assert_eq!(values[0], 3.0);
         assert_eq!(values[1], 4.0);
         assert_eq!(values[2], 7.0);
+    }
+
+    // ── _impl helper tests (error paths) ──────────────────────────────
+
+    #[test]
+    fn test_constant_impl_success() {
+        let mut h = DagHandle::new();
+        let id = h.constant_impl(3.25).unwrap();
+        assert_eq!(id, 0);
+    }
+
+    #[test]
+    fn test_input_impl_success() {
+        let mut h = DagHandle::new();
+        let id = h.input_impl("x").unwrap();
+        assert_eq!(id, 0);
+    }
+
+    #[test]
+    fn test_output_impl_success() {
+        let mut h = DagHandle::new();
+        let c = h.constant_impl(5.0).unwrap();
+        let id = h.output_impl("y", c).unwrap();
+        assert_eq!(id, 1);
+    }
+
+    #[test]
+    fn test_output_impl_invalid_ref() {
+        let mut h = DagHandle::new();
+        let result = h.output_impl("y", 99);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_impl_success() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(1.0).unwrap();
+        let b = h.constant_impl(2.0).unwrap();
+        let c = h.add_impl(a, b).unwrap();
+        assert_eq!(c, 2);
+    }
+
+    #[test]
+    fn test_add_impl_invalid_ref() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(1.0).unwrap();
+        let result = h.add_impl(a, 99);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mul_impl_invalid_ref() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(1.0).unwrap();
+        let result = h.mul_impl(a, 99);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sub_impl_invalid_ref() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(1.0).unwrap();
+        let result = h.sub_impl(a, 99);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_div_impl_invalid_ref() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(1.0).unwrap();
+        let result = h.div_impl(a, 99);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_pow_impl_invalid_ref() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(1.0).unwrap();
+        let result = h.pow_impl(a, 99);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_neg_impl_invalid_ref() {
+        let mut h = DagHandle::new();
+        let result = h.neg_impl(99);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_relu_impl_invalid_ref() {
+        let mut h = DagHandle::new();
+        let result = h.relu_impl(99);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_subscribe_impl_success() {
+        let mut h = DagHandle::new();
+        let id = h.subscribe_impl("topic").unwrap();
+        assert_eq!(id, 0);
+    }
+
+    #[test]
+    fn test_publish_impl_success() {
+        let mut h = DagHandle::new();
+        let c = h.constant_impl(1.0).unwrap();
+        let id = h.publish_impl("topic", c).unwrap();
+        assert_eq!(id, 1);
+    }
+
+    #[test]
+    fn test_publish_impl_invalid_ref() {
+        let mut h = DagHandle::new();
+        let result = h.publish_impl("topic", 99);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_cbor_impl_success() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(2.0).unwrap();
+        let b = h.constant_impl(3.0).unwrap();
+        let _ = h.add_impl(a, b).unwrap();
+        let bytes = h.to_cbor();
+        let h2 = DagHandle::from_cbor_impl(&bytes).unwrap();
+        assert_eq!(h2.len(), 3);
+    }
+
+    #[test]
+    fn test_from_cbor_impl_invalid() {
+        let result = DagHandle::from_cbor_impl(&[0xFF, 0xFF, 0xFF]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_cbor_impl_empty() {
+        let result = DagHandle::from_cbor_impl(&[]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_mul_impl_success() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(3.0).unwrap();
+        let b = h.constant_impl(4.0).unwrap();
+        let c = h.mul_impl(a, b).unwrap();
+        assert_eq!(h.evaluate_node(c), 12.0);
+    }
+
+    #[test]
+    fn test_sub_impl_success() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(5.0).unwrap();
+        let b = h.constant_impl(3.0).unwrap();
+        let c = h.sub_impl(a, b).unwrap();
+        assert_eq!(h.evaluate_node(c), 2.0);
+    }
+
+    #[test]
+    fn test_div_impl_success() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(10.0).unwrap();
+        let b = h.constant_impl(2.0).unwrap();
+        let c = h.div_impl(a, b).unwrap();
+        assert_eq!(h.evaluate_node(c), 5.0);
+    }
+
+    #[test]
+    fn test_pow_impl_success() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(2.0).unwrap();
+        let b = h.constant_impl(3.0).unwrap();
+        let c = h.pow_impl(a, b).unwrap();
+        assert_eq!(h.evaluate_node(c), 8.0);
+    }
+
+    #[test]
+    fn test_neg_impl_success() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(7.0).unwrap();
+        let b = h.neg_impl(a).unwrap();
+        assert_eq!(h.evaluate_node(b), -7.0);
+    }
+
+    #[test]
+    fn test_relu_impl_success() {
+        let mut h = DagHandle::new();
+        let a = h.constant_impl(-3.0).unwrap();
+        let b = h.relu_impl(a).unwrap();
+        assert_eq!(h.evaluate_node(b), 0.0);
     }
 }
