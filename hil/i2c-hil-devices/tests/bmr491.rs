@@ -417,6 +417,22 @@ fn computed_status_word_mfr_aggregation() {
     );
 }
 
+// --- on_write empty body (trigger for coverage) ---
+
+#[test]
+fn on_write_triggered_via_w1c() {
+    let dev = Bmr491::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_vout(0xFF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    // Writing to a W1C register triggers on_write
+    bus.write(ADDR, &[0x7A, 0x0F]).unwrap();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7A], &mut buf).unwrap();
+    assert_eq!(buf[0], 0xF0);
+}
+
 // --- CLEAR_FAULTS with injected faults ---
 
 #[test]

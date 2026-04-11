@@ -247,7 +247,35 @@ fn status_vout_w1c() {
     assert_eq!(buf[0], 0x00);
 }
 
+// --- on_write empty body (trigger for coverage) ---
+
+#[test]
+fn on_write_triggered_via_w1c() {
+    let dev = Isl68224::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_vout(0xFF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    // Writing to a W1C register triggers on_write
+    bus.write(ADDR, &[0x7A, 0x0F]).unwrap();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7A], &mut buf).unwrap();
+    assert_eq!(buf[0], 0xF0);
+}
+
 // --- Computed STATUS_BYTE with injected faults ---
+
+#[test]
+fn computed_status_byte_input_bit() {
+    let dev = Isl68224::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_input(0x10);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x78], &mut buf).unwrap();
+    assert_ne!(buf[0] & (1 << 3), 0, "INPUT should set STATUS_BYTE bit 3");
+}
 
 #[test]
 fn computed_status_byte_iout_bit() {
