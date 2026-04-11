@@ -5,10 +5,8 @@
 //! (embedded, state_machine, udp) are kept for features not yet expressible
 //! as pure `FunctionDef` values.
 
-pub mod constant;
 pub mod data_driven;
 pub mod embedded;
-pub mod function;
 pub mod plot;
 pub mod pubsub;
 pub mod register;
@@ -122,7 +120,6 @@ impl BlockRegistry for BuiltinBlocks {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use module_traits::Module;
 
     #[test]
     fn create_block_constant() {
@@ -367,14 +364,14 @@ mod tests {
 
     #[test]
     fn constant_block_default_trait_methods() {
-        let b = constant::ConstantBlock::new(1.0);
+        let b = create_block("constant", r#"{"value": 1.0}"#).unwrap();
         assert!(b.as_analysis().is_none());
         assert!(b.as_codegen().is_none());
     }
 
     #[test]
     fn constant_block_as_sim_model_none() {
-        let mut b = constant::ConstantBlock::new(1.0);
+        let mut b = create_block("constant", r#"{"value": 1.0}"#).unwrap();
         assert!(b.as_sim_model().is_none());
     }
 

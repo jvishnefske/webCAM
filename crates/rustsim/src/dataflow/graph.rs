@@ -424,13 +424,20 @@ impl GraphSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataflow::blocks::constant::ConstantBlock;
-    use crate::dataflow::blocks::function::FunctionBlock;
+    use crate::dataflow::blocks::create_block;
+
+    fn make_constant(value: f64) -> Box<dyn module_traits::Module> {
+        create_block("constant", &format!(r#"{{"value": {value}}}"#)).unwrap()
+    }
+
+    fn make_gain(factor: f64) -> Box<dyn module_traits::Module> {
+        create_block("gain", &format!(r#"{{"gain": {factor}}}"#)).unwrap()
+    }
 
     #[test]
     fn constant_emits_value() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(42.0)));
+        let c = g.add_block(make_constant(42.0));
         g.tick(0.01);
         let snap = g.snapshot();
         let block = snap.blocks.iter().find(|b| b.id == c.0).unwrap();
@@ -443,8 +450,8 @@ mod tests {
     #[test]
     fn connect_and_propagate() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(5.0)));
-        let gain = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+        let c = g.add_block(make_constant(5.0));
+        let gain = g.add_block(make_gain(2.0));
         g.connect(c, 0, gain, 0).unwrap();
 
         // First tick: constant produces 5.0, gain hasn't seen it yet.
@@ -463,8 +470,8 @@ mod tests {
     #[test]
     fn disconnect_removes_channel() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
-        let f = g.add_block(Box::new(FunctionBlock::gain(1.0)));
+        let c = g.add_block(make_constant(1.0));
+        let f = g.add_block(make_gain(1.0));
         let ch = g.connect(c, 0, f, 0).unwrap();
         assert!(g.disconnect(ch));
         assert!(!g.disconnect(ch)); // already removed
@@ -473,8 +480,8 @@ mod tests {
     #[test]
     fn remove_block_cleans_channels() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
-        let f = g.add_block(Box::new(FunctionBlock::gain(1.0)));
+        let c = g.add_block(make_constant(1.0));
+        let f = g.add_block(make_gain(1.0));
         g.connect(c, 0, f, 0).unwrap();
         g.remove_block(c);
         let snap = g.snapshot();
@@ -485,13 +492,12 @@ mod tests {
     #[test]
     fn replace_block_preserves_channels() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(5.0)));
-        let gain = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+        let c = g.add_block(make_constant(5.0));
+        let gain = g.add_block(make_gain(2.0));
         g.connect(c, 0, gain, 0).unwrap();
 
         // Replace the constant with a different value
-        g.replace_block(c, Box::new(ConstantBlock::new(10.0)))
-            .unwrap();
+        g.replace_block(c, make_constant(10.0)).unwrap();
 
         let snap = g.snapshot();
         // Channel should still exist
@@ -513,7 +519,7 @@ mod tests {
     #[test]
     fn batch_run() {
         let mut g = DataflowGraph::new();
-        g.add_block(Box::new(ConstantBlock::new(1.0)));
+        g.add_block(make_constant(1.0));
         g.run(100, 0.01);
         assert_eq!(g.tick_count, 100);
         assert!((g.time - 1.0).abs() < 1e-9);
@@ -522,7 +528,7 @@ mod tests {
     #[test]
     fn snapshot_target_is_none_by_default() {
         let mut g = DataflowGraph::new();
-        g.add_block(Box::new(ConstantBlock::new(1.0)));
+        g.add_block(make_constant(1.0));
         let snap = g.snapshot();
         assert!(snap.blocks[0].target.is_none());
     }
@@ -584,15 +590,15 @@ mod tests {
     #[test]
     fn replace_block_error_for_missing() {
         let mut g = DataflowGraph::new();
-        let res = g.replace_block(BlockId(999), Box::new(ConstantBlock::new(1.0)));
+        let res = g.replace_block(BlockId(999), make_constant(1.0));
         assert!(res.is_err());
     }
 
     #[test]
     fn snapshot_returns_sorted_blocks_and_channels() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
-        let f = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+        let c = g.add_block(make_constant(1.0));
+        let f = g.add_block(make_gain(2.0));
         g.connect(c, 0, f, 0).unwrap();
         g.tick(0.01);
         let snap = g.snapshot();
@@ -646,7 +652,7 @@ mod tests {
     fn remove_block_with_outputs() {
         // Exercise remove_block::{closure#1} (outputs.retain)
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
+        let c = g.add_block(make_constant(1.0));
         g.tick(0.01); // produce output
         assert!(g.remove_block(c));
         let snap = g.snapshot();
@@ -657,15 +663,14 @@ mod tests {
     fn replace_block_prunes_extra_ports() {
         // Exercise replace_block::{closure#0} (channels.retain for port pruning)
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
-        let gain = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+        let c = g.add_block(make_constant(1.0));
+        let gain = g.add_block(make_gain(2.0));
         g.connect(c, 0, gain, 0).unwrap();
         // Replace gain (1 input, 1 output) with a block that has 0 inputs
         // This should prune the channel because to_port 0 >= new n_in=0
-        g.replace_block(gain, Box::new(ConstantBlock::new(5.0)))
-            .unwrap();
+        g.replace_block(gain, make_constant(5.0)).unwrap();
         let snap = g.snapshot();
-        // Channel should be pruned since ConstantBlock has 0 inputs
+        // Channel should be pruned since constant has 0 inputs
         assert!(snap.channels.is_empty());
     }
 
@@ -816,11 +821,11 @@ mod tests {
         use crate::dataflow::blocks::register::{RegisterBlock, RegisterConfig};
 
         let mut g = DataflowGraph::new();
-        let constant = g.add_block(Box::new(ConstantBlock::new(5.0)));
+        let constant = g.add_block(make_constant(5.0));
         let register = g.add_block(Box::new(RegisterBlock::new(RegisterConfig {
             initial_value: 0.0,
         })));
-        let gain = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+        let gain = g.add_block(make_gain(2.0));
 
         // Constant → Register → Gain, with Gain output feeding back into Register
         // But since each input port can only have one connection, we wire:
@@ -876,7 +881,7 @@ mod tests {
         let register = g.add_block(Box::new(RegisterBlock::new(RegisterConfig {
             initial_value: 1.0,
         })));
-        let gain = g.add_block(Box::new(FunctionBlock::gain(3.0)));
+        let gain = g.add_block(make_gain(3.0));
 
         // Register(out) → Gain(in), Gain(out) → Register(in)
         g.connect(register, 0, gain, 0).unwrap();
@@ -936,8 +941,8 @@ mod tests {
     #[test]
     fn connect_errors() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
-        let f = g.add_block(Box::new(FunctionBlock::gain(1.0)));
+        let c = g.add_block(make_constant(1.0));
+        let f = g.add_block(make_gain(1.0));
 
         // Source port out of range
         let result = g.connect(c, 99, f, 0);
