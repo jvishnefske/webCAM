@@ -2,8 +2,7 @@
 //!
 //! Tests the complete flow: GraphSnapshot → typed IR → MLIR text → Rust source.
 
-use mlir_codegen::lower::{BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef};
-use module_traits::value::PortKind;
+use mlir_codegen::lower::{BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef, PortKind};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -17,14 +16,13 @@ fn make_block(
     outputs: Vec<PortDef>,
 ) -> BlockSnapshot {
     BlockSnapshot {
-        id,
+        id: BlockId(id),
         block_type: block_type.to_string(),
         name: format!("{}_{}", block_type, id),
         inputs,
         outputs,
         config,
-        output_values: vec![],
-        custom_codegen: None,
+        is_delay: false,
     }
 }
 
@@ -49,8 +47,6 @@ fn make_snap(blocks: Vec<BlockSnapshot>, channels: Vec<Channel>) -> GraphSnapsho
     GraphSnapshot {
         blocks,
         channels,
-        tick_count: 0,
-        time: 0.0,
     }
 }
 

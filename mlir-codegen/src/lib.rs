@@ -13,7 +13,6 @@
 //! - [`dialect`] — MLIR op names, type strings, attribute formatting
 //! - [`c_types`] — PortKind → C type mapping
 //! - [`lower`] — GraphSnapshot → `.mlir` text generation
-//! - [`state_machine`] — FSM blocks → MLIR region-based control flow
 //! - [`peripherals`] — Generate safe Rust state modules
 //! - [`pipeline`] — Orchestrate mlir-opt → mlir-translate pipeline
 
@@ -26,7 +25,6 @@ pub mod peripherals;
 pub mod pipeline;
 pub mod printer;
 pub mod runtime;
-pub mod state_machine;
 
 use lower::GraphSnapshot;
 
@@ -154,21 +152,18 @@ mod tests {
     fn compile_to_c_produces_output() {
         let snap = GraphSnapshot {
             blocks: vec![lower::BlockSnapshot {
-                id: 1,
+                id: lower::BlockId(1),
                 block_type: "constant".to_string(),
                 name: "c".to_string(),
                 inputs: vec![],
                 outputs: vec![lower::PortDef {
                     name: "out".to_string(),
-                    kind: module_traits::value::PortKind::Float,
+                    kind: lower::PortKind::Float,
                 }],
                 config: serde_json::json!({"value": 1.0}),
-                output_values: vec![],
-                custom_codegen: None,
+                is_delay: false,
             }],
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let output = compile_to_c(&snap).unwrap();
         assert!(output.mlir_text.contains("arith.constant"));
@@ -253,21 +248,18 @@ mod tests {
     fn test_generate_logic_files_has_expected_paths() {
         let snap = GraphSnapshot {
             blocks: vec![lower::BlockSnapshot {
-                id: 1,
+                id: lower::BlockId(1),
                 block_type: "constant".to_string(),
                 name: "c".to_string(),
                 inputs: vec![],
                 outputs: vec![lower::PortDef {
                     name: "out".to_string(),
-                    kind: module_traits::value::PortKind::Float,
+                    kind: lower::PortKind::Float,
                 }],
                 config: serde_json::json!({"value": 1.0}),
-                output_values: vec![],
-                custom_codegen: None,
+                is_delay: false,
             }],
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let files = generate_logic_files(&snap).unwrap();
         let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
@@ -300,8 +292,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks: vec![],
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = graph_to_mlir(&snap).unwrap();
         assert!(
@@ -319,38 +309,123 @@ mod tests {
     }
 
     #[test]
+    fn test_graph_json_to_ir_valid() {
+        let json = r#"{
+            "blocks": [{
+                "id": 1,
+                "block_type": "constant",
+                "name": "const_1",
+                "inputs": [],
+                "outputs": [{"name": "out", "kind": "Float"}],
+                "config": {"value": 7.0},
+                "output_values": []
+            }],
+            "channels": [],
+            "tick_count": 0,
+            "time": 0.0
+        }"#;
+        let module = graph_json_to_ir(json).unwrap();
+        assert_eq!(module.funcs.len(), 1, "should have 1 function");
+        assert!(
+            module.funcs[0].ops.len() >= 2,
+            "expected at least 2 ops (zero + constant)"
+        );
+    }
+
+    #[test]
+    fn test_graph_json_to_ir_invalid_json() {
+        let result = graph_json_to_ir("not json");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to parse"));
+    }
+
+    #[test]
+    fn test_run_ir_pipeline_basic() {
+        let snap = GraphSnapshot {
+            blocks: vec![lower::BlockSnapshot {
+                id: lower::BlockId(1),
+                block_type: "constant".to_string(),
+                name: "c".to_string(),
+                inputs: vec![],
+                outputs: vec![lower::PortDef {
+                    name: "out".to_string(),
+                    kind: lower::PortKind::Float,
+                }],
+                config: serde_json::json!({"value": std::f64::consts::PI}),
+                is_delay: false,
+            }],
+            channels: vec![],
+        };
+        let output = run_ir_pipeline(&snap).unwrap();
+        assert!(
+            !output.mlir_text.is_empty(),
+            "MLIR text should not be empty"
+        );
+        assert!(
+            !output.rust_source.is_empty(),
+            "Rust source should not be empty"
+        );
+        assert!(
+            !output.ir_module.funcs.is_empty(),
+            "IR module should have at least 1 function"
+        );
+    }
+
+    #[test]
+    fn test_generate_ir_logic_files_produces_expected_paths() {
+        let snap = GraphSnapshot {
+            blocks: vec![lower::BlockSnapshot {
+                id: lower::BlockId(1),
+                block_type: "constant".to_string(),
+                name: "c".to_string(),
+                inputs: vec![],
+                outputs: vec![lower::PortDef {
+                    name: "out".to_string(),
+                    kind: lower::PortKind::Float,
+                }],
+                config: serde_json::json!({"value": 1.0}),
+                is_delay: false,
+            }],
+            channels: vec![],
+        };
+        let files = generate_ir_logic_files(&snap).unwrap();
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(paths.contains(&"logic/mlir/graph.mlir"));
+        assert!(paths.contains(&"logic/Cargo.toml"));
+        assert!(paths.contains(&"logic/src/lib.rs"));
+    }
+
+    #[test]
     fn test_compile_multi_block() {
         // constant(5.0) -> gain(2.0) chain
         let snap = GraphSnapshot {
             blocks: vec![
                 lower::BlockSnapshot {
-                    id: 1,
+                    id: lower::BlockId(1),
                     block_type: "constant".to_string(),
                     name: "src".to_string(),
                     inputs: vec![],
                     outputs: vec![lower::PortDef {
                         name: "out".to_string(),
-                        kind: module_traits::value::PortKind::Float,
+                        kind: lower::PortKind::Float,
                     }],
                     config: serde_json::json!({"value": 5.0}),
-                    output_values: vec![],
-                    custom_codegen: None,
+                    is_delay: false,
                 },
                 lower::BlockSnapshot {
-                    id: 2,
+                    id: lower::BlockId(2),
                     block_type: "gain".to_string(),
                     name: "amp".to_string(),
                     inputs: vec![lower::PortDef {
                         name: "in".to_string(),
-                        kind: module_traits::value::PortKind::Float,
+                        kind: lower::PortKind::Float,
                     }],
                     outputs: vec![lower::PortDef {
                         name: "out".to_string(),
-                        kind: module_traits::value::PortKind::Float,
+                        kind: lower::PortKind::Float,
                     }],
                     config: serde_json::json!({"param1": 2.0}),
-                    output_values: vec![],
-                    custom_codegen: None,
+                    is_delay: false,
                 },
             ],
             channels: vec![lower::Channel {
@@ -360,8 +435,6 @@ mod tests {
                 to_block: lower::BlockId(2),
                 to_port: 0,
             }],
-            tick_count: 0,
-            time: 0.0,
         };
         let output = compile_to_c(&snap).unwrap();
         assert!(

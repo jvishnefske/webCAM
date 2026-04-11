@@ -512,6 +512,77 @@ fn write_empty_does_not_error() {
     bus.write(0x40, &[0x00]).unwrap();
 }
 
+// --- Direct read_register/write_register branch coverage ---
+
+#[test]
+fn read_register_all_valid_pointers() {
+    use i2c_hil_sim::smbus::SmBusWordDevice;
+    let mut dev = Ina230::new(addr());
+    dev.set_shunt_voltage_raw(100);
+    dev.set_bus_voltage_raw(200);
+
+    // Read each valid pointer to exercise all match arms
+    assert_eq!(dev.read_register(0x00), 0x4127); // config
+    assert_eq!(dev.read_register(0x01), 100u16); // shunt_voltage as u16
+    assert_eq!(dev.read_register(0x02), 200); // bus_voltage
+    assert_eq!(dev.read_register(0x03), 0); // power (cal=0)
+    assert_eq!(dev.read_register(0x04), 0); // current (cal=0)
+    assert_eq!(dev.read_register(0x05), 0); // calibration
+    // 0x06 has side effect (CVRF clear) -- already tested
+    assert_eq!(dev.read_register(0x07), 0); // alert_limit
+    assert_eq!(dev.read_register(0xFF), 0x2260); // die_id
+}
+
+#[test]
+fn read_register_unknown_returns_zero() {
+    use i2c_hil_sim::smbus::SmBusWordDevice;
+    let mut dev = Ina230::new(addr());
+    // Pointers beyond valid range
+    assert_eq!(dev.read_register(0x08), 0);
+    assert_eq!(dev.read_register(0x10), 0);
+    assert_eq!(dev.read_register(0xFE), 0);
+}
+
+#[test]
+fn write_register_unknown_returns_nak() {
+    use i2c_hil_sim::smbus::SmBusWordDevice;
+    let mut dev = Ina230::new(addr());
+    assert_eq!(
+        dev.write_register(0x08, 0x1234),
+        Err(BusError::DataNak)
+    );
+    assert_eq!(
+        dev.write_register(0x10, 0x1234),
+        Err(BusError::DataNak)
+    );
+}
+
+#[test]
+fn write_register_config_without_rst() {
+    use i2c_hil_sim::smbus::SmBusWordDevice;
+    let mut dev = Ina230::new(addr());
+    dev.write_register(0x00, 0x1234).unwrap();
+    assert_eq!(dev.read_register(0x00), 0x1234);
+}
+
+#[test]
+fn write_register_config_with_rst() {
+    use i2c_hil_sim::smbus::SmBusWordDevice;
+    let mut dev = Ina230::new(addr());
+    dev.set_shunt_voltage_raw(999);
+    dev.write_register(0x00, 0x8000).unwrap(); // RST bit
+    assert_eq!(dev.read_register(0x00), 0x4127); // POR default
+    assert_eq!(dev.read_register(0x01), 0); // shunt reset
+}
+
+#[test]
+fn write_register_calibration_direct() {
+    use i2c_hil_sim::smbus::SmBusWordDevice;
+    let mut dev = Ina230::new(addr());
+    dev.write_register(0x05, 0xFFFF).unwrap();
+    assert_eq!(dev.calibration(), 0x7FFF); // D15 masked
+}
+
 #[test]
 fn reset_clears_injected_measurements() {
     let mut dev = Ina230::new(addr());

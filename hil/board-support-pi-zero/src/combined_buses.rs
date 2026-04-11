@@ -7,7 +7,7 @@
 //! indices `linux_count..total` route to simulated buses.
 
 use embedded_hal::i2c::I2c;
-use hil_firmware_support::ws_dispatch::I2cBusSet;
+use hil_firmware_support::ws_dispatch::{BusSetError, I2cBusSet};
 use i2c_hil_sim::{Address, RuntimeBus};
 
 use crate::linux_i2c::LinuxI2cBus;
@@ -77,23 +77,29 @@ impl CombinedBusSet {
 }
 
 impl I2cBusSet for CombinedBusSet {
-    fn i2c_read(&mut self, bus: u8, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), ()> {
+    fn i2c_read(&mut self, bus: u8, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), BusSetError> {
         if self.is_linux_bus(bus) {
-            self.linux_buses[bus as usize].i2c_read(addr, reg, buf)
+            self.linux_buses[bus as usize]
+                .i2c_read(addr, reg, buf)
+                .map_err(|_| BusSetError::TransactionFailed)
         } else if let Some(idx) = self.sim_index(bus) {
-            I2c::write_read(&mut self.sim_buses[idx], addr, &[reg], buf).map_err(|_| ())
+            I2c::write_read(&mut self.sim_buses[idx], addr, &[reg], buf)
+                .map_err(|_| BusSetError::TransactionFailed)
         } else {
-            Err(())
+            Err(BusSetError::InvalidBus)
         }
     }
 
-    fn i2c_write(&mut self, bus: u8, addr: u8, data: &[u8]) -> Result<(), ()> {
+    fn i2c_write(&mut self, bus: u8, addr: u8, data: &[u8]) -> Result<(), BusSetError> {
         if self.is_linux_bus(bus) {
-            self.linux_buses[bus as usize].i2c_write(addr, data)
+            self.linux_buses[bus as usize]
+                .i2c_write(addr, data)
+                .map_err(|_| BusSetError::TransactionFailed)
         } else if let Some(idx) = self.sim_index(bus) {
-            I2c::write(&mut self.sim_buses[idx], addr, data).map_err(|_| ())
+            I2c::write(&mut self.sim_buses[idx], addr, data)
+                .map_err(|_| BusSetError::TransactionFailed)
         } else {
-            Err(())
+            Err(BusSetError::InvalidBus)
         }
     }
 
@@ -111,62 +117,80 @@ impl I2cBusSet for CombinedBusSet {
         }
     }
 
-    fn with_device_info<R>(&self, bus: u8, index: u8, f: impl FnOnce(u8, &[u8]) -> R) -> Option<R> {
+    fn device_info(&self, bus: u8, index: u8) -> Option<(u8, &[u8])> {
         if self.is_linux_bus(bus) {
             None
         } else {
             let idx = self.sim_index(bus)?;
-            self.sim_buses[idx].active_device_info(index).map(|(addr, name)| f(addr, name))
+            self.sim_buses[idx].active_device_info(index)
         }
     }
 
-    fn with_device_registers<R>(&self, bus: u8, addr: u8, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
+    fn device_registers(&self, bus: u8, addr: u8) -> Option<&[u8]> {
         if self.is_linux_bus(bus) {
             None
         } else {
             let idx = self.sim_index(bus)?;
-            self.sim_buses[idx].device_registers(addr).map(|r| f(r.as_slice()))
+            self.sim_buses[idx].device_registers(addr).map(|r| r.as_slice())
         }
     }
 
-    fn add_device(&mut self, bus: u8, addr: u8, name: &[u8], registers: &[u8]) -> Result<(), ()> {
+    fn add_device(
+        &mut self,
+        bus: u8,
+        addr: u8,
+        name: &[u8],
+        registers: &[u8],
+    ) -> Result<(), BusSetError> {
         if self.is_linux_bus(bus) {
-            Err(())
+            Err(BusSetError::InvalidBus)
         } else if let Some(idx) = self.sim_index(bus) {
-            let address = Address::new(addr).ok_or(())?;
-            self.sim_buses[idx].add_device(address, name, registers)
+            let address = Address::new(addr).ok_or(BusSetError::DeviceNotFound)?;
+            self.sim_buses[idx]
+                .add_device(address, name, registers)
+                .map_err(|_| BusSetError::TransactionFailed)
         } else {
-            Err(())
+            Err(BusSetError::InvalidBus)
         }
     }
 
-    fn remove_device(&mut self, bus: u8, addr: u8) -> Result<(), ()> {
+    fn remove_device(&mut self, bus: u8, addr: u8) -> Result<(), BusSetError> {
         if self.is_linux_bus(bus) {
-            Err(())
+            Err(BusSetError::InvalidBus)
         } else if let Some(idx) = self.sim_index(bus) {
-            let address = Address::new(addr).ok_or(())?;
-            self.sim_buses[idx].remove_device(address)
+            let address = Address::new(addr).ok_or(BusSetError::DeviceNotFound)?;
+            self.sim_buses[idx]
+                .remove_device(address)
+                .map_err(|_| BusSetError::DeviceNotFound)
         } else {
-            Err(())
+            Err(BusSetError::InvalidBus)
         }
     }
 
-    fn set_registers(&mut self, bus: u8, addr: u8, offset: u8, data: &[u8]) -> Result<(), ()> {
+    fn set_registers(
+        &mut self,
+        bus: u8,
+        addr: u8,
+        offset: u8,
+        data: &[u8],
+    ) -> Result<(), BusSetError> {
         if self.is_linux_bus(bus) {
-            Err(())
+            Err(BusSetError::InvalidBus)
         } else if let Some(idx) = self.sim_index(bus) {
-            let address = Address::new(addr).ok_or(())?;
-            self.sim_buses[idx].set_registers(address, offset, data)
+            let address = Address::new(addr).ok_or(BusSetError::DeviceNotFound)?;
+            self.sim_buses[idx]
+                .set_registers(address, offset, data)
+                .map_err(|_| BusSetError::DeviceNotFound)
         } else {
-            Err(())
+            Err(BusSetError::InvalidBus)
         }
     }
 
-    fn set_bus_count(&mut self, count: u8) -> Result<(), ()> {
+    fn set_bus_count(&mut self, count: u8) -> Result<(), BusSetError> {
         let linux_count = self.linux_buses.len() as u8;
-        let new_sim_count = count.checked_sub(linux_count).ok_or(())?;
+        let new_sim_count = count.checked_sub(linux_count).ok_or(BusSetError::InvalidBus)?;
         if new_sim_count as usize > self.sim_buses.len() {
-            return Err(());
+            return Err(BusSetError::InvalidBus);
         }
         self.sim_bus_count = new_sim_count;
         Ok(())

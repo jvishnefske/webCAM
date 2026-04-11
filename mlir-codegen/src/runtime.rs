@@ -22,25 +22,24 @@ use crate::ir::{ArithOp, Attr, DataflowOp, FuncOp, IrModule, IrOpKind};
 // ── Hardware Bridge ──────────────────────────────────────────────
 
 /// Hardware abstraction for peripheral I/O. Default impls return 0 / no-op.
-#[allow(unused_variables)]
 pub trait HwBridge {
-    fn adc_read(&self, channel: u8) -> f64 {
+    fn adc_read(&self, _channel: u8) -> f64 {
         0.0
     }
-    fn pwm_write(&mut self, channel: u8, duty: f64) {}
-    fn gpio_read(&self, pin: u8) -> f64 {
+    fn pwm_write(&mut self, _channel: u8, _duty: f64) {}
+    fn gpio_read(&self, _pin: u8) -> f64 {
         0.0
     }
-    fn gpio_write(&mut self, pin: u8, value: f64) {}
-    fn uart_read(&self, port: u8) -> f64 {
+    fn gpio_write(&mut self, _pin: u8, _value: f64) {}
+    fn uart_read(&self, _port: u8) -> f64 {
         0.0
     }
-    fn uart_write(&mut self, port: u8, value: f64) {}
-    fn encoder_read(&self, channel: u8) -> f64 {
+    fn uart_write(&mut self, _port: u8, _value: f64) {}
+    fn encoder_read(&self, _channel: u8) -> f64 {
         0.0
     }
-    fn publish(&mut self, topic: u16, value: f64) {}
-    fn subscribe(&self, topic: u16) -> f64 {
+    fn publish(&mut self, _topic: u16, _value: f64) {}
+    fn subscribe(&self, _topic: u16) -> f64 {
         0.0
     }
 }
@@ -831,5 +830,288 @@ mod tests {
         let graph = CompiledGraph::<TB, TS>::default();
         assert_eq!(graph.block_count(), 0);
         assert_eq!(graph.slot_count(), 0);
+    }
+
+    // Additional: Debug impl
+    #[test]
+    fn test_compiled_graph_debug() {
+        let module = build_constant_graph(42.0);
+        let graph = compile::<TB, TS>(&module).unwrap();
+        let debug_str = format!("{:?}", graph);
+        assert!(debug_str.contains("CompiledGraph"));
+        assert!(debug_str.contains("block_count"));
+        assert!(debug_str.contains("slot_count"));
+    }
+
+    // Additional: inject out-of-bounds index returns early
+    #[test]
+    fn test_inject_out_of_bounds() {
+        let module = build_constant_graph(42.0);
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        graph.tick(1.0, &mut NullHw);
+        let slot_count = graph.slot_count();
+        // Inject at a slot beyond the allocated range -- should not panic
+        graph.inject(slot_count as u16 + 10, 999.0, &mut NullHw);
+        // Verify the graph is unchanged
+        assert_eq!(graph.read_slot(1), 42.0);
+    }
+
+    // Additional: Nop opcode execution
+    #[test]
+    fn test_nop_opcode() {
+        // Build a graph using custom_op which produces a Custom IrOpKind,
+        // which maps to OpCode::Nop in the runtime.
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let c = b.constant_f64(5.0);
+        b.custom_op("my.unknown_op", &[c], &[], 1);
+        let module = b.build();
+
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        graph.tick(1.0, &mut NullHw);
+        // The constant should still produce its value
+        assert_eq!(graph.read_slot(1), 5.0);
+        // The nop block's output slot should remain 0.0
+        assert_eq!(graph.read_slot(2), 0.0);
+    }
+
+    // Additional: ir_op_to_opcode for ChannelRead and ChannelWrite
+    #[test]
+    fn test_ir_op_to_opcode_channel_read() {
+        let mut attrs = HashMap::new();
+        attrs.insert("topic".to_string(), Attr::I64(42));
+        let opcode = ir_op_to_opcode(
+            &IrOpKind::Dataflow(DataflowOp::ChannelRead),
+            &attrs,
+        );
+        assert_eq!(opcode, OpCode::Subscribe(42));
+    }
+
+    #[test]
+    fn test_ir_op_to_opcode_channel_write() {
+        let mut attrs = HashMap::new();
+        attrs.insert("topic".to_string(), Attr::I64(7));
+        let opcode = ir_op_to_opcode(
+            &IrOpKind::Dataflow(DataflowOp::ChannelWrite),
+            &attrs,
+        );
+        assert_eq!(opcode, OpCode::Publish(7));
+    }
+
+    // Additional: ir_op_to_opcode fallback to Nop
+    #[test]
+    fn test_ir_op_to_opcode_nop_fallback() {
+        let attrs = HashMap::new();
+        let opcode = ir_op_to_opcode(
+            &IrOpKind::Custom("unknown.op".to_string()),
+            &attrs,
+        );
+        assert_eq!(opcode, OpCode::Nop);
+    }
+
+    // ── execute_op coverage for all OpCode variants ──────────────────
+
+    #[test]
+    fn test_execute_op_sub() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let c10 = b.constant_f64(10.0);
+        let c3 = b.constant_f64(3.0);
+        b.subf(c10, c3);
+        let module = b.build();
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        graph.tick(1.0, &mut NullHw);
+        assert_eq!(graph.read_slot(3), 7.0);
+    }
+
+    #[test]
+    fn test_execute_op_gpio_read() {
+        struct MockGpio;
+        impl HwBridge for MockGpio {
+            fn gpio_read(&self, _pin: u8) -> f64 { 1.0 }
+        }
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        b.gpio_read(5);
+        let module = b.build();
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        graph.tick(1.0, &mut MockGpio);
+        assert_eq!(graph.read_slot(1), 1.0);
+    }
+
+    #[test]
+    fn test_execute_op_gpio_write() {
+        use std::cell::Cell;
+        struct MockGpioW { pin: Cell<u8>, val: Cell<f64> }
+        impl HwBridge for MockGpioW {
+            fn gpio_write(&mut self, pin: u8, value: f64) {
+                self.pin.set(pin);
+                self.val.set(value);
+            }
+        }
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let c = b.constant_f64(1.0);
+        b.gpio_write(3, c);
+        let module = b.build();
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        let mut hw = MockGpioW { pin: Cell::new(255), val: Cell::new(-1.0) };
+        graph.tick(1.0, &mut hw);
+        assert_eq!(hw.pin.get(), 3);
+        assert_eq!(hw.val.get(), 1.0);
+    }
+
+    #[test]
+    fn test_execute_op_uart_rx() {
+        struct MockUartRx;
+        impl HwBridge for MockUartRx {
+            fn uart_read(&self, _port: u8) -> f64 { 42.0 }
+        }
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        b.uart_rx(1);
+        let module = b.build();
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        graph.tick(1.0, &mut MockUartRx);
+        assert_eq!(graph.read_slot(1), 42.0);
+    }
+
+    #[test]
+    fn test_execute_op_uart_tx() {
+        use std::cell::Cell;
+        struct MockUartTx { port: Cell<u8>, val: Cell<f64> }
+        impl HwBridge for MockUartTx {
+            fn uart_write(&mut self, port: u8, value: f64) {
+                self.port.set(port);
+                self.val.set(value);
+            }
+        }
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let c = b.constant_f64(99.0);
+        b.uart_tx(2, c);
+        let module = b.build();
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        let mut hw = MockUartTx { port: Cell::new(0), val: Cell::new(0.0) };
+        graph.tick(1.0, &mut hw);
+        assert_eq!(hw.port.get(), 2);
+        assert_eq!(hw.val.get(), 99.0);
+    }
+
+    #[test]
+    fn test_execute_op_encoder_read() {
+        struct MockEncoder;
+        impl HwBridge for MockEncoder {
+            fn encoder_read(&self, _ch: u8) -> f64 { 1024.0 }
+        }
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        b.encoder_read(0);
+        let module = b.build();
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        graph.tick(1.0, &mut MockEncoder);
+        assert_eq!(graph.read_slot(1), 1024.0);
+    }
+
+    #[test]
+    fn test_execute_op_subscribe() {
+        struct MockSub;
+        impl HwBridge for MockSub {
+            fn subscribe(&self, _topic: u16) -> f64 { 42.0 }
+        }
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        b.subscribe("sensor");
+        let module = b.build();
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        graph.tick(1.0, &mut MockSub);
+        // String topics currently resolve to topic=0 (known limitation)
+        assert_eq!(graph.read_slot(1), 42.0);
+    }
+
+    #[test]
+    fn test_execute_op_publish() {
+        use std::cell::Cell;
+        struct MockPub { val: Cell<f64> }
+        impl HwBridge for MockPub {
+            fn publish(&mut self, _topic: u16, value: f64) {
+                self.val.set(value);
+            }
+        }
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let c = b.constant_f64(7.7);
+        b.publish("output", c);
+        let module = b.build();
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        let mut hw = MockPub { val: Cell::new(0.0) };
+        graph.tick(1.0, &mut hw);
+        assert!((hw.val.get() - 7.7).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_compiled_graph_debug_empty() {
+        let graph = CompiledGraph::<4, 8>::new();
+        let debug = format!("{:?}", graph);
+        assert!(debug.contains("CompiledGraph"));
+        assert!(debug.contains("block_count"));
+        assert!(debug.contains("slot_count"));
+    }
+
+    #[test]
+    fn test_compiled_graph_default() {
+        let graph = CompiledGraph::<4, 8>::default();
+        assert_eq!(graph.block_count(), 0);
+        assert_eq!(graph.slot_count(), 0);
+    }
+
+    #[test]
+    fn test_inject_out_of_range() {
+        let mut graph = CompiledGraph::<4, 8>::new();
+        // Inject into slot beyond slot_count should be a no-op
+        graph.inject(100, 42.0, &mut NullHw);
+        // Should not panic
+    }
+
+    #[test]
+    fn test_compile_empty_module_fails() {
+        let module = IrModule { funcs: vec![] };
+        let result = compile::<4, 8>(&module);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("no functions"));
+    }
+
+    #[test]
+    fn test_execute_nop() {
+        // NOP should produce no output change
+        let inputs = [0.0; MAX_INPUTS];
+        let mut outputs = [0.0; MAX_OUTPUTS];
+        execute_op(OpCode::Nop, &inputs, &mut outputs, &mut NullHw);
+        assert_eq!(outputs[0], 0.0);
+        assert_eq!(outputs[1], 0.0);
+    }
+
+    #[test]
+    fn test_clamp_below_range() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let c = b.constant_f64(-50.0);
+        b.clamp(c, 0.0, 100.0);
+        let module = b.build();
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        graph.tick(1.0, &mut NullHw);
+        assert_eq!(graph.read_slot(2), 0.0);
+    }
+
+    #[test]
+    fn test_clamp_in_range() {
+        let mut b = IrBuilder::new();
+        b.begin_func("tick", &[], &[]);
+        let c = b.constant_f64(50.0);
+        b.clamp(c, 0.0, 100.0);
+        let module = b.build();
+        let mut graph = compile::<TB, TS>(&module).unwrap();
+        graph.tick(1.0, &mut NullHw);
+        assert_eq!(graph.read_slot(2), 50.0);
     }
 }

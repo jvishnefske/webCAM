@@ -1,6 +1,6 @@
 //! The dataflow graph: owns blocks and channels, runs the tick loop.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 use tsify_next::Tsify;
@@ -28,6 +28,9 @@ pub struct BlockSnapshot {
     /// When present, emit.rs uses this instead of built-in code generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_codegen: Option<String>,
+    /// Whether this block is a delay element (z⁻¹) that breaks feedback cycles.
+    #[serde(default)]
+    pub is_delay: bool,
 }
 
 /// Snapshot of the entire graph.
@@ -38,6 +41,29 @@ pub struct GraphSnapshot {
     pub channels: Vec<Channel>,
     pub tick_count: u64,
     pub time: f64,
+}
+
+/// Migrate v1 state machine channels: shift incoming port indices by +1
+/// to account for the new `state_in` port at index 0.
+///
+/// Old layout (pre-Phase-3): guard_0 was at port 0.
+/// New layout (Phase-3+):    state_in is at port 0, guard_0 is at port 1.
+///
+/// Call this once when deserializing a saved `GraphSnapshot` that may have
+/// been produced before the `state_in` port was added.
+pub fn migrate_state_machine_ports(snap: &mut GraphSnapshot) {
+    let sm_block_ids: std::collections::HashSet<u32> = snap
+        .blocks
+        .iter()
+        .filter(|b| b.block_type == "state_machine")
+        .map(|b| b.id)
+        .collect();
+
+    for ch in &mut snap.channels {
+        if sm_block_ids.contains(&ch.to_block.0) {
+            ch.to_port += 1;
+        }
+    }
 }
 
 pub struct DataflowGraph {
@@ -224,9 +250,36 @@ impl DataflowGraph {
 
     /// Execute one simulation step.
     pub fn tick(&mut self, dt: f64) {
-        // Topological-ish execution: iterate blocks in id order (sources first).
-        let mut block_ids: Vec<BlockId> = self.blocks.keys().copied().collect();
-        block_ids.sort_by_key(|id| id.0);
+        use crate::dataflow::codegen::topo::topological_sort;
+
+        // Build set of delay blocks (z⁻¹ elements) for back-edge exclusion.
+        let delay_blocks: HashSet<graph_model::BlockId> = self.blocks.iter()
+            .filter(|(_, block)| block.is_delay())
+            .map(|(&id, _)| graph_model::BlockId(id.0))
+            .collect();
+
+        // Convert to graph_model types for topological sort.
+        let all_ids: Vec<graph_model::BlockId> = self.blocks.keys()
+            .map(|id| graph_model::BlockId(id.0))
+            .collect();
+        let gm_channels: Vec<graph_model::Channel> = self.channels.iter()
+            .map(|c| graph_model::Channel {
+                id: graph_model::ChannelId(c.id.0),
+                from_block: graph_model::BlockId(c.from_block.0),
+                from_port: c.from_port,
+                to_block: graph_model::BlockId(c.to_block.0),
+                to_port: c.to_port,
+            })
+            .collect();
+        let block_ids: Vec<BlockId> = match topological_sort(&all_ids, &gm_channels, &delay_blocks) {
+            Ok(sorted) => sorted.into_iter().map(|id| BlockId(id.0)).collect(),
+            Err(_) => {
+                // Fallback to ID order if cycle detected (shouldn't happen with delay exclusion)
+                let mut ids: Vec<BlockId> = self.blocks.keys().copied().collect();
+                ids.sort_by_key(|id| id.0);
+                ids
+            }
+        };
 
         for &bid in &block_ids {
             let block = self.blocks.get(&bid).unwrap();
@@ -305,6 +358,7 @@ impl DataflowGraph {
                 let config =
                     serde_json::from_str(&block.config_json()).unwrap_or(serde_json::Value::Null);
                 let custom_codegen = block.as_codegen().and_then(|cg| cg.emit_rust("host").ok());
+                let is_delay = block.is_delay();
                 BlockSnapshot {
                     id,
                     block_type: block.block_type().to_string(),
@@ -315,6 +369,7 @@ impl DataflowGraph {
                     output_values,
                     target: None,
                     custom_codegen,
+                    is_delay,
                 }
             })
             .collect();
@@ -329,16 +384,60 @@ impl DataflowGraph {
     }
 }
 
+impl GraphSnapshot {
+    /// Convert to codegen-emit's snapshot type for code generation.
+    pub fn to_codegen_snapshot(&self) -> codegen_emit::CodegenGraphSnapshot {
+        codegen_emit::CodegenGraphSnapshot {
+            blocks: self
+                .blocks
+                .iter()
+                .map(|b| codegen_emit::CodegenBlockSnapshot {
+                    id: b.id,
+                    block_type: b.block_type.clone(),
+                    name: b.name.clone(),
+                    inputs: b.inputs.clone(),
+                    outputs: b.outputs.clone(),
+                    config: b.config.clone(),
+                    output_values: b.output_values.clone(),
+                    target: b.target,
+                    custom_codegen: b.custom_codegen.clone(),
+                    is_delay: b.is_delay,
+                })
+                .collect(),
+            channels: self
+                .channels
+                .iter()
+                .map(|c| graph_model::Channel {
+                    id: graph_model::ChannelId(c.id.0),
+                    from_block: graph_model::BlockId(c.from_block.0),
+                    from_port: c.from_port,
+                    to_block: graph_model::BlockId(c.to_block.0),
+                    to_port: c.to_port,
+                })
+                .collect(),
+            tick_count: self.tick_count,
+            time: self.time,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataflow::blocks::constant::ConstantBlock;
-    use crate::dataflow::blocks::function::FunctionBlock;
+    use crate::dataflow::blocks::create_block;
+
+    fn make_constant(value: f64) -> Box<dyn module_traits::Module> {
+        create_block("constant", &format!(r#"{{"value": {value}}}"#)).unwrap()
+    }
+
+    fn make_gain(factor: f64) -> Box<dyn module_traits::Module> {
+        create_block("gain", &format!(r#"{{"gain": {factor}}}"#)).unwrap()
+    }
 
     #[test]
     fn constant_emits_value() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(42.0)));
+        let c = g.add_block(make_constant(42.0));
         g.tick(0.01);
         let snap = g.snapshot();
         let block = snap.blocks.iter().find(|b| b.id == c.0).unwrap();
@@ -351,8 +450,8 @@ mod tests {
     #[test]
     fn connect_and_propagate() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(5.0)));
-        let gain = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+        let c = g.add_block(make_constant(5.0));
+        let gain = g.add_block(make_gain(2.0));
         g.connect(c, 0, gain, 0).unwrap();
 
         // First tick: constant produces 5.0, gain hasn't seen it yet.
@@ -371,8 +470,8 @@ mod tests {
     #[test]
     fn disconnect_removes_channel() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
-        let f = g.add_block(Box::new(FunctionBlock::gain(1.0)));
+        let c = g.add_block(make_constant(1.0));
+        let f = g.add_block(make_gain(1.0));
         let ch = g.connect(c, 0, f, 0).unwrap();
         assert!(g.disconnect(ch));
         assert!(!g.disconnect(ch)); // already removed
@@ -381,8 +480,8 @@ mod tests {
     #[test]
     fn remove_block_cleans_channels() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
-        let f = g.add_block(Box::new(FunctionBlock::gain(1.0)));
+        let c = g.add_block(make_constant(1.0));
+        let f = g.add_block(make_gain(1.0));
         g.connect(c, 0, f, 0).unwrap();
         g.remove_block(c);
         let snap = g.snapshot();
@@ -393,13 +492,12 @@ mod tests {
     #[test]
     fn replace_block_preserves_channels() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(5.0)));
-        let gain = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+        let c = g.add_block(make_constant(5.0));
+        let gain = g.add_block(make_gain(2.0));
         g.connect(c, 0, gain, 0).unwrap();
 
         // Replace the constant with a different value
-        g.replace_block(c, Box::new(ConstantBlock::new(10.0)))
-            .unwrap();
+        g.replace_block(c, make_constant(10.0)).unwrap();
 
         let snap = g.snapshot();
         // Channel should still exist
@@ -421,7 +519,7 @@ mod tests {
     #[test]
     fn batch_run() {
         let mut g = DataflowGraph::new();
-        g.add_block(Box::new(ConstantBlock::new(1.0)));
+        g.add_block(make_constant(1.0));
         g.run(100, 0.01);
         assert_eq!(g.tick_count, 100);
         assert!((g.time - 1.0).abs() < 1e-9);
@@ -430,7 +528,7 @@ mod tests {
     #[test]
     fn snapshot_target_is_none_by_default() {
         let mut g = DataflowGraph::new();
-        g.add_block(Box::new(ConstantBlock::new(1.0)));
+        g.add_block(make_constant(1.0));
         let snap = g.snapshot();
         assert!(snap.blocks[0].target.is_none());
     }
@@ -450,6 +548,7 @@ mod tests {
             output_values: vec![Some(Value::Float(42.0))],
             target: Some(TargetFamily::Rp2040),
             custom_codegen: None,
+            is_delay: false,
         };
 
         let json = serde_json::to_string(&snap).unwrap();
@@ -472,6 +571,7 @@ mod tests {
             output_values: vec![None],
             target: None,
             custom_codegen: None,
+            is_delay: false,
         };
 
         let json = serde_json::to_string(&snap).unwrap();
@@ -490,15 +590,15 @@ mod tests {
     #[test]
     fn replace_block_error_for_missing() {
         let mut g = DataflowGraph::new();
-        let res = g.replace_block(BlockId(999), Box::new(ConstantBlock::new(1.0)));
+        let res = g.replace_block(BlockId(999), make_constant(1.0));
         assert!(res.is_err());
     }
 
     #[test]
     fn snapshot_returns_sorted_blocks_and_channels() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
-        let f = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+        let c = g.add_block(make_constant(1.0));
+        let f = g.add_block(make_gain(2.0));
         g.connect(c, 0, f, 0).unwrap();
         g.tick(0.01);
         let snap = g.snapshot();
@@ -552,7 +652,7 @@ mod tests {
     fn remove_block_with_outputs() {
         // Exercise remove_block::{closure#1} (outputs.retain)
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
+        let c = g.add_block(make_constant(1.0));
         g.tick(0.01); // produce output
         assert!(g.remove_block(c));
         let snap = g.snapshot();
@@ -563,15 +663,14 @@ mod tests {
     fn replace_block_prunes_extra_ports() {
         // Exercise replace_block::{closure#0} (channels.retain for port pruning)
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
-        let gain = g.add_block(Box::new(FunctionBlock::gain(2.0)));
+        let c = g.add_block(make_constant(1.0));
+        let gain = g.add_block(make_gain(2.0));
         g.connect(c, 0, gain, 0).unwrap();
         // Replace gain (1 input, 1 output) with a block that has 0 inputs
         // This should prune the channel because to_port 0 >= new n_in=0
-        g.replace_block(gain, Box::new(ConstantBlock::new(5.0)))
-            .unwrap();
+        g.replace_block(gain, make_constant(5.0)).unwrap();
         let snap = g.snapshot();
-        // Channel should be pruned since ConstantBlock has 0 inputs
+        // Channel should be pruned since constant has 0 inputs
         assert!(snap.channels.is_empty());
     }
 
@@ -710,10 +809,140 @@ mod tests {
     }
 
     #[test]
+    fn tick_with_register_feedback_loop() {
+        // Create: Constant(5.0) → Gain(2.0) → Register(init=0) → Gain
+        // This forms a feedback loop through the Register delay block.
+        // The topo sort should handle the cycle via delay-block back-edge exclusion.
+        //
+        // Tick 1: Register outputs 0.0 (initial), Gain outputs 0.0, Constant outputs 5.0
+        // Tick 2: Register outputs 0.0 (stored from Gain tick 1), Gain receives Register=0.0 + routed...
+        //
+        // Simplified test: Constant → Register → Gain, verify no panic and correct propagation.
+        use crate::dataflow::blocks::register::{RegisterBlock, RegisterConfig};
+
+        let mut g = DataflowGraph::new();
+        let constant = g.add_block(make_constant(5.0));
+        let register = g.add_block(Box::new(RegisterBlock::new(RegisterConfig {
+            initial_value: 0.0,
+        })));
+        let gain = g.add_block(make_gain(2.0));
+
+        // Constant → Register → Gain, with Gain output feeding back into Register
+        // But since each input port can only have one connection, we wire:
+        // Constant(out) → Register(in), Register(out) → Gain(in)
+        g.connect(constant, 0, register, 0).unwrap();
+        g.connect(register, 0, gain, 0).unwrap();
+
+        // First tick: Register outputs initial value 0.0, Gain gets 0.0 → outputs 0.0
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let reg_snap = snap.blocks.iter().find(|b| b.id == register.0).unwrap();
+        assert_eq!(
+            reg_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(0.0),
+            "Register should output initial value on first tick"
+        );
+
+        // Second tick: Register stored 5.0 from Constant, outputs 5.0; Gain gets 5.0 → outputs 10.0
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let reg_snap = snap.blocks.iter().find(|b| b.id == register.0).unwrap();
+        assert_eq!(
+            reg_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(5.0),
+            "Register should output stored value (5.0) on second tick"
+        );
+        let gain_snap = snap.blocks.iter().find(|b| b.id == gain.0).unwrap();
+        assert_eq!(
+            gain_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(10.0),
+            "Gain should output 2.0 * 5.0 = 10.0 on second tick"
+        );
+    }
+
+    #[test]
+    fn tick_with_true_feedback_cycle() {
+        // Create a true feedback cycle: Register → Gain → Register
+        // This would be a cycle without delay-block exclusion.
+        // With the Register as a delay block, topo sort breaks the cycle.
+        //
+        // Execution order (topo sort): Register first, then Gain.
+        // Register is z⁻¹: outputs previous stored value, then stores new input.
+        //
+        // Tick 1: Register outputs 1.0 (initial), no input yet from Gain (no prior output).
+        //         Gain receives 1.0, outputs 3.0.
+        // Tick 2: Register reads Gain's previous output (3.0), outputs 1.0 (stored from init),
+        //         stores 3.0. Gain receives 1.0, outputs 3.0.
+        // Tick 3: Register reads Gain's previous output (3.0), outputs 3.0 (stored from tick 2),
+        //         stores 3.0. Gain receives 3.0, outputs 9.0.
+        use crate::dataflow::blocks::register::{RegisterBlock, RegisterConfig};
+
+        let mut g = DataflowGraph::new();
+        let register = g.add_block(Box::new(RegisterBlock::new(RegisterConfig {
+            initial_value: 1.0,
+        })));
+        let gain = g.add_block(make_gain(3.0));
+
+        // Register(out) → Gain(in), Gain(out) → Register(in)
+        g.connect(register, 0, gain, 0).unwrap();
+        g.connect(gain, 0, register, 0).unwrap();
+
+        // Tick 1: Register outputs 1.0 (initial), Gain gets 1.0 → outputs 3.0
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let reg_snap = snap.blocks.iter().find(|b| b.id == register.0).unwrap();
+        assert_eq!(
+            reg_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(1.0),
+            "Register should output initial value 1.0"
+        );
+        let gain_snap = snap.blocks.iter().find(|b| b.id == gain.0).unwrap();
+        assert_eq!(
+            gain_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(3.0),
+            "Gain should output 3.0 * 1.0 = 3.0"
+        );
+
+        // Tick 2: Register reads Gain(3.0) from tick 1, outputs stored 1.0, stores 3.0.
+        //         Gain receives Register's output 1.0, outputs 3.0.
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let reg_snap = snap.blocks.iter().find(|b| b.id == register.0).unwrap();
+        assert_eq!(
+            reg_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(1.0),
+            "Register should output 1.0 on second tick (z⁻¹ delay)"
+        );
+        let gain_snap = snap.blocks.iter().find(|b| b.id == gain.0).unwrap();
+        assert_eq!(
+            gain_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(3.0),
+            "Gain should still output 3.0 on second tick"
+        );
+
+        // Tick 3: Register reads Gain(3.0) from tick 2, outputs stored 3.0, stores 3.0.
+        //         Gain receives 3.0, outputs 9.0.
+        g.tick(0.01);
+        let snap = g.snapshot();
+        let reg_snap = snap.blocks.iter().find(|b| b.id == register.0).unwrap();
+        assert_eq!(
+            reg_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(3.0),
+            "Register should output 3.0 on third tick"
+        );
+        let gain_snap = snap.blocks.iter().find(|b| b.id == gain.0).unwrap();
+        assert_eq!(
+            gain_snap.output_values[0].as_ref().unwrap().as_float(),
+            Some(9.0),
+            "Gain should output 3.0 * 3.0 = 9.0 on third tick"
+        );
+    }
+
+    #[test]
     fn connect_errors() {
         let mut g = DataflowGraph::new();
-        let c = g.add_block(Box::new(ConstantBlock::new(1.0)));
-        let f = g.add_block(Box::new(FunctionBlock::gain(1.0)));
+        let c = g.add_block(make_constant(1.0));
+        let f = g.add_block(make_gain(1.0));
 
         // Source port out of range
         let result = g.connect(c, 99, f, 0);
@@ -740,5 +969,222 @@ mod tests {
         let result = g.connect(c, 0, BlockId(999), 0);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("destination block not found"));
+    }
+
+    // ── migrate_state_machine_ports tests ────────────────────────────
+
+    /// Helper: build a minimal BlockSnapshot for testing migration.
+    fn make_block_snap(id: u32, block_type: &str) -> BlockSnapshot {
+        BlockSnapshot {
+            id,
+            block_type: block_type.to_string(),
+            name: block_type.to_string(),
+            inputs: vec![],
+            outputs: vec![],
+            config: serde_json::Value::Null,
+            output_values: vec![],
+            target: None,
+            custom_codegen: None,
+            is_delay: false,
+        }
+    }
+
+    /// Helper: build a Channel directly (bypasses graph validation).
+    fn make_channel(id: u32, from_block: u32, from_port: usize, to_block: u32, to_port: usize) -> Channel {
+        Channel {
+            id: super::super::channel::ChannelId(id),
+            from_block: BlockId(from_block),
+            from_port,
+            to_block: BlockId(to_block),
+            to_port,
+        }
+    }
+
+    #[test]
+    fn migrate_shifts_sm_input_ports() {
+        // Old-style: channel goes to port 0 of a state_machine block.
+        // After migration, to_port should be 1 (guard_0 shifted by +1 for state_in at 0).
+        let mut snap = GraphSnapshot {
+            blocks: vec![
+                make_block_snap(1, "constant"),
+                make_block_snap(2, "state_machine"),
+            ],
+            channels: vec![make_channel(1, 1, 0, 2, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        super::migrate_state_machine_ports(&mut snap);
+
+        assert_eq!(snap.channels[0].to_port, 1, "to_port should be shifted from 0 to 1");
+    }
+
+    #[test]
+    fn migrate_ignores_non_sm_blocks() {
+        // Channel connects to a gain block (not state_machine) — should not be shifted.
+        let mut snap = GraphSnapshot {
+            blocks: vec![
+                make_block_snap(1, "constant"),
+                make_block_snap(2, "gain"),
+            ],
+            channels: vec![make_channel(1, 1, 0, 2, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        super::migrate_state_machine_ports(&mut snap);
+
+        assert_eq!(snap.channels[0].to_port, 0, "non-SM channel should not be shifted");
+    }
+
+    #[test]
+    fn migrate_shifts_multiple_channels() {
+        // Multiple channels all pointing to the same SM block, each at different ports.
+        let mut snap = GraphSnapshot {
+            blocks: vec![
+                make_block_snap(1, "constant"),
+                make_block_snap(2, "constant"),
+                make_block_snap(3, "constant"),
+                make_block_snap(4, "state_machine"),
+            ],
+            channels: vec![
+                make_channel(1, 1, 0, 4, 0), // guard_0 was at port 0
+                make_channel(2, 2, 0, 4, 1), // guard_1 was at port 1
+                make_channel(3, 3, 0, 4, 2), // guard_2 was at port 2
+            ],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        super::migrate_state_machine_ports(&mut snap);
+
+        assert_eq!(snap.channels[0].to_port, 1, "guard_0 should shift to port 1");
+        assert_eq!(snap.channels[1].to_port, 2, "guard_1 should shift to port 2");
+        assert_eq!(snap.channels[2].to_port, 3, "guard_2 should shift to port 3");
+    }
+
+    #[test]
+    fn migrate_no_sm_blocks_is_noop() {
+        // Graph with no state_machine blocks: channels unchanged.
+        let mut snap = GraphSnapshot {
+            blocks: vec![
+                make_block_snap(1, "constant"),
+                make_block_snap(2, "gain"),
+                make_block_snap(3, "register"),
+            ],
+            channels: vec![
+                make_channel(1, 1, 0, 2, 0),
+                make_channel(2, 2, 0, 3, 0),
+            ],
+            tick_count: 5,
+            time: 0.05,
+        };
+
+        super::migrate_state_machine_ports(&mut snap);
+
+        // Nothing should change
+        assert_eq!(snap.channels[0].to_port, 0);
+        assert_eq!(snap.channels[1].to_port, 0);
+        assert_eq!(snap.tick_count, 5);
+    }
+
+    #[test]
+    fn migrate_mixed_sm_and_non_sm() {
+        // Mixed graph: one channel to SM (should shift), one to gain (should not).
+        let mut snap = GraphSnapshot {
+            blocks: vec![
+                make_block_snap(1, "constant"),
+                make_block_snap(2, "constant"),
+                make_block_snap(3, "state_machine"),
+                make_block_snap(4, "gain"),
+            ],
+            channels: vec![
+                make_channel(1, 1, 0, 3, 0), // to SM → shifts
+                make_channel(2, 2, 0, 4, 0), // to gain → unchanged
+            ],
+            tick_count: 0,
+            time: 0.0,
+        };
+
+        super::migrate_state_machine_ports(&mut snap);
+
+        assert_eq!(snap.channels[0].to_port, 1, "SM channel should shift");
+        assert_eq!(snap.channels[1].to_port, 0, "gain channel should not shift");
+    }
+
+    #[test]
+    fn sim_peripherals_ref_error() {
+        let g = DataflowGraph::new();
+        let result = g.sim_peripherals_ref();
+        match result {
+            Err(msg) => assert!(msg.contains("simulation mode not enabled")),
+            Ok(_) => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn sim_peripherals_mut_error() {
+        let mut g = DataflowGraph::new();
+        let result = g.sim_peripherals_mut();
+        match result {
+            Err(msg) => assert!(msg.contains("simulation mode not enabled")),
+            Ok(_) => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn tick_simulation_mode_with_peripherals() {
+        use crate::dataflow::blocks::embedded::{AdcBlock, AdcConfig, PwmBlock, PwmConfig};
+
+        let mut g = DataflowGraph::new();
+        g.set_simulation_mode(true);
+        let mut sim = crate::dataflow::sim_peripherals::WasmSimPeripherals::new();
+        sim.set_adc_voltage(0, 2.5);
+        g.set_sim_peripherals(sim);
+
+        let adc = g.add_block(Box::new(AdcBlock::from_config(AdcConfig::default())));
+        let pwm = g.add_block(Box::new(PwmBlock::from_config(PwmConfig::default())));
+        g.connect(adc, 0, pwm, 0).unwrap();
+
+        g.tick(0.01);
+        g.tick(0.01);
+
+        let snap = g.snapshot();
+        let adc_snap = snap.blocks.iter().find(|b| b.id == adc.0).unwrap();
+        // ADC should read simulated voltage
+        assert!(adc_snap.output_values[0].is_some());
+    }
+
+    #[test]
+    fn tick_simulation_mode_without_peripherals() {
+        use crate::dataflow::blocks::embedded::{AdcBlock, AdcConfig};
+
+        let mut g = DataflowGraph::new();
+        g.set_simulation_mode(true);
+        // Don't set sim peripherals — test the None path
+
+        let adc = g.add_block(Box::new(AdcBlock::from_config(AdcConfig::default())));
+        g.tick(0.01);
+
+        let snap = g.snapshot();
+        let adc_snap = snap.blocks.iter().find(|b| b.id == adc.0).unwrap();
+        // Without peripherals, sim_tick has no peripherals => empty outputs
+        assert_eq!(adc_snap.output_values.len(), 1);
+    }
+
+    #[test]
+    fn to_codegen_snapshot_roundtrip() {
+        let mut g = DataflowGraph::new();
+        let c = g.add_block(make_constant(5.0));
+        let gain = g.add_block(make_gain(2.0));
+        g.connect(c, 0, gain, 0).unwrap();
+        g.tick(0.01);
+
+        let snap = g.snapshot();
+        let codegen_snap = snap.to_codegen_snapshot();
+
+        assert_eq!(codegen_snap.blocks.len(), 2);
+        assert_eq!(codegen_snap.channels.len(), 1);
+        assert_eq!(codegen_snap.tick_count, 1);
     }
 }

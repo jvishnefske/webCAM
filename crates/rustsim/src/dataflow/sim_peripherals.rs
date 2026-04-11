@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use embedded_hal::i2c::I2c;
 use i2c_hil_sim::{Address, RuntimeBus};
-use module_traits::SimPeripherals;
+use module_traits::{PeripheralError, SimPeripherals};
 
 /// Parity mode for serial communication.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -281,7 +281,7 @@ impl SimPeripherals for WasmSimPeripherals {
         self.stepper_positions.get(&port).copied().unwrap_or(0)
     }
 
-    fn tcp_connect(&mut self, id: u8, _addr: &str, _port: u16) -> Result<(), ()> {
+    fn tcp_connect(&mut self, id: u8, _addr: &str, _port: u16) -> Result<(), PeripheralError> {
         self.tcp_sockets.insert(
             id,
             VirtualTcpSocket {
@@ -292,14 +292,20 @@ impl SimPeripherals for WasmSimPeripherals {
         Ok(())
     }
 
-    fn tcp_send(&mut self, id: u8, data: &[u8]) -> Result<usize, ()> {
-        let sock = self.tcp_sockets.get_mut(&id).ok_or(())?;
+    fn tcp_send(&mut self, id: u8, data: &[u8]) -> Result<usize, PeripheralError> {
+        let sock = self
+            .tcp_sockets
+            .get_mut(&id)
+            .ok_or(PeripheralError::NotConnected)?;
         sock.send_buf.extend_from_slice(data);
         Ok(data.len())
     }
 
-    fn tcp_recv(&mut self, id: u8, buf: &mut [u8]) -> Result<usize, ()> {
-        let sock = self.tcp_sockets.get_mut(&id).ok_or(())?;
+    fn tcp_recv(&mut self, id: u8, buf: &mut [u8]) -> Result<usize, PeripheralError> {
+        let sock = self
+            .tcp_sockets
+            .get_mut(&id)
+            .ok_or(PeripheralError::NotConnected)?;
         let n = buf.len().min(sock.recv_buf.len());
         buf[..n].copy_from_slice(&sock.recv_buf[..n]);
         sock.recv_buf.drain(..n);
@@ -310,7 +316,13 @@ impl SimPeripherals for WasmSimPeripherals {
         self.tcp_sockets.remove(&id);
     }
 
-    fn udp_send(&mut self, id: u8, _addr: &str, _port: u16, data: &[u8]) -> Result<usize, ()> {
+    fn udp_send(
+        &mut self,
+        id: u8,
+        _addr: &str,
+        _port: u16,
+        data: &[u8],
+    ) -> Result<usize, PeripheralError> {
         self.udp_send_bufs
             .entry(id)
             .or_default()
@@ -318,22 +330,35 @@ impl SimPeripherals for WasmSimPeripherals {
         Ok(data.len())
     }
 
-    fn udp_recv(&mut self, id: u8, buf: &mut [u8]) -> Result<usize, ()> {
-        let recv_buf = self.udp_recv_bufs.get_mut(&id).ok_or(())?;
+    fn udp_recv(&mut self, id: u8, buf: &mut [u8]) -> Result<usize, PeripheralError> {
+        let recv_buf = self
+            .udp_recv_bufs
+            .get_mut(&id)
+            .ok_or(PeripheralError::NotConnected)?;
         let n = buf.len().min(recv_buf.len());
         buf[..n].copy_from_slice(&recv_buf[..n]);
         recv_buf.drain(..n);
         Ok(n)
     }
 
-    fn i2c_write(&mut self, bus: u8, addr: u8, data: &[u8]) -> Result<(), ()> {
-        let runtime_bus = self.i2c_buses.get_mut(&bus).ok_or(())?;
-        runtime_bus.write(addr, data).map_err(|_| ())
+    fn i2c_write(&mut self, bus: u8, addr: u8, data: &[u8]) -> Result<(), PeripheralError> {
+        let runtime_bus = self
+            .i2c_buses
+            .get_mut(&bus)
+            .ok_or(PeripheralError::NotConnected)?;
+        runtime_bus
+            .write(addr, data)
+            .map_err(|_| PeripheralError::Nack)
     }
 
-    fn i2c_read(&mut self, bus: u8, addr: u8, buf: &mut [u8]) -> Result<(), ()> {
-        let runtime_bus = self.i2c_buses.get_mut(&bus).ok_or(())?;
-        runtime_bus.read(addr, buf).map_err(|_| ())
+    fn i2c_read(&mut self, bus: u8, addr: u8, buf: &mut [u8]) -> Result<(), PeripheralError> {
+        let runtime_bus = self
+            .i2c_buses
+            .get_mut(&bus)
+            .ok_or(PeripheralError::NotConnected)?;
+        runtime_bus
+            .read(addr, buf)
+            .map_err(|_| PeripheralError::Nack)
     }
 
     fn i2c_write_read(
@@ -342,9 +367,14 @@ impl SimPeripherals for WasmSimPeripherals {
         addr: u8,
         write: &[u8],
         read: &mut [u8],
-    ) -> Result<(), ()> {
-        let runtime_bus = self.i2c_buses.get_mut(&bus).ok_or(())?;
-        runtime_bus.write_read(addr, write, read).map_err(|_| ())
+    ) -> Result<(), PeripheralError> {
+        let runtime_bus = self
+            .i2c_buses
+            .get_mut(&bus)
+            .ok_or(PeripheralError::NotConnected)?;
+        runtime_bus
+            .write_read(addr, write, read)
+            .map_err(|_| PeripheralError::Nack)
     }
 }
 

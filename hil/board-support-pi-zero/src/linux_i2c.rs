@@ -7,6 +7,10 @@
 use embedded_hal::i2c::I2c;
 use linux_embedded_hal::I2cdev;
 
+/// Error from a Linux I2C bus transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct I2cError;
+
 /// A real I2C bus backed by a Linux `/dev/i2c-N` device node.
 ///
 /// Constructed via [`open`](Self::open), which maps to the kernel's
@@ -45,9 +49,11 @@ impl LinuxI2cBus {
     ///
     /// # Errors
     ///
-    /// Returns `()` if the I2C transaction fails.
-    pub fn i2c_read(&mut self, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), ()> {
-        self.dev.write_read(addr, &[reg], buf).map_err(|_| ())
+    /// Returns [`I2cError`] if the I2C transaction fails.
+    pub fn i2c_read(&mut self, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), I2cError> {
+        self.dev
+            .write_read(addr, &[reg], buf)
+            .map_err(|_| I2cError)
     }
 
     /// Performs an I2C write transaction.
@@ -57,8 +63,8 @@ impl LinuxI2cBus {
     ///
     /// # Errors
     ///
-    /// Returns `()` if the I2C transaction fails.
-    pub fn i2c_write(&mut self, addr: u8, data: &[u8]) -> Result<(), ()> {
-        self.dev.write(addr, data).map_err(|_| ())
+    /// Returns [`I2cError`] if the I2C transaction fails.
+    pub fn i2c_write(&mut self, addr: u8, data: &[u8]) -> Result<(), I2cError> {
+        self.dev.write(addr, data).map_err(|_| I2cError)
     }
 }

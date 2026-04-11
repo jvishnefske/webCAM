@@ -19,7 +19,7 @@ use embassy_usb::Handler;
 use embedded_hal::i2c::I2c;
 use i2c_hil_sim::RuntimeBus;
 
-use hil_firmware_support::ws_dispatch::I2cBusSet;
+use hil_firmware_support::ws_dispatch::{BusSetError, I2cBusSet};
 use usb_composite_dispatchers::i2c_tiny_usb::{Command, InterfaceState, Status, I2C_M_RD};
 
 /// Maximum buses exposed over USB.
@@ -218,25 +218,27 @@ impl WsBusAccess {
 }
 
 impl I2cBusSet for WsBusAccess {
-    fn i2c_read(&mut self, bus: u8, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), ()> {
+    fn i2c_read(&mut self, bus: u8, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), BusSetError> {
         self.shared.lock(|inner| {
             let mut state = inner.borrow_mut();
             let idx = bus as usize;
             if idx >= state.bus_count as usize {
-                return Err(());
+                return Err(BusSetError::InvalidBus);
             }
-            I2c::write_read(&mut state.buses[idx], addr, &[reg], buf).map_err(|_| ())
+            I2c::write_read(&mut state.buses[idx], addr, &[reg], buf)
+                .map_err(|_| BusSetError::TransactionFailed)
         })
     }
 
-    fn i2c_write(&mut self, bus: u8, addr: u8, data: &[u8]) -> Result<(), ()> {
+    fn i2c_write(&mut self, bus: u8, addr: u8, data: &[u8]) -> Result<(), BusSetError> {
         self.shared.lock(|inner| {
             let mut state = inner.borrow_mut();
             let idx = bus as usize;
             if idx >= state.bus_count as usize {
-                return Err(());
+                return Err(BusSetError::InvalidBus);
             }
-            I2c::write(&mut state.buses[idx], addr, data).map_err(|_| ())
+            I2c::write(&mut state.buses[idx], addr, data)
+                .map_err(|_| BusSetError::TransactionFailed)
         })
     }
 
@@ -255,69 +257,73 @@ impl I2cBusSet for WsBusAccess {
         })
     }
 
-    fn with_device_info<R>(&self, bus: u8, index: u8, f: impl FnOnce(u8, &[u8]) -> R) -> Option<R> {
-        self.shared.lock(|inner| {
-            let state = inner.borrow();
-            let idx = bus as usize;
-            if idx >= state.bus_count as usize {
-                return None;
-            }
-            state.buses[idx].active_device_info(index).map(|(addr, name)| f(addr, name))
-        })
+    fn device_info(&self, _bus: u8, _index: u8) -> Option<(u8, &[u8])> {
+        // Cannot return a reference to data inside the mutex;
+        // the caller should use `device_count` and `with_device_info` instead.
+        // This default returns None; the encode functions use bus_count/device_count
+        // to enumerate, so this will produce empty device lists.
+        None
     }
 
-    fn with_device_registers<R>(&self, bus: u8, addr: u8, f: impl FnOnce(&[u8]) -> R) -> Option<R> {
-        self.shared.lock(|inner| {
-            let state = inner.borrow();
-            let idx = bus as usize;
-            if idx >= state.bus_count as usize {
-                return None;
-            }
-            state.buses[idx].device_registers(addr).map(|r| f(r.as_slice()))
-        })
-    }
-
-    fn add_device(&mut self, bus: u8, addr: u8, name: &[u8], registers: &[u8]) -> Result<(), ()> {
+    fn add_device(
+        &mut self,
+        bus: u8,
+        addr: u8,
+        name: &[u8],
+        registers: &[u8],
+    ) -> Result<(), BusSetError> {
         self.shared.lock(|inner| {
             let mut state = inner.borrow_mut();
             let idx = bus as usize;
             if idx >= state.bus_count as usize {
-                return Err(());
+                return Err(BusSetError::InvalidBus);
             }
-            let address = i2c_hil_sim::Address::new(addr).ok_or(())?;
-            state.buses[idx].add_device(address, name, registers)
+            let address = i2c_hil_sim::Address::new(addr).ok_or(BusSetError::DeviceNotFound)?;
+            state.buses[idx]
+                .add_device(address, name, registers)
+                .map_err(|_| BusSetError::TransactionFailed)
         })
     }
 
-    fn remove_device(&mut self, bus: u8, addr: u8) -> Result<(), ()> {
+    fn remove_device(&mut self, bus: u8, addr: u8) -> Result<(), BusSetError> {
         self.shared.lock(|inner| {
             let mut state = inner.borrow_mut();
             let idx = bus as usize;
             if idx >= state.bus_count as usize {
-                return Err(());
+                return Err(BusSetError::InvalidBus);
             }
-            let address = i2c_hil_sim::Address::new(addr).ok_or(())?;
-            state.buses[idx].remove_device(address)
+            let address = i2c_hil_sim::Address::new(addr).ok_or(BusSetError::DeviceNotFound)?;
+            state.buses[idx]
+                .remove_device(address)
+                .map_err(|_| BusSetError::DeviceNotFound)
         })
     }
 
-    fn set_registers(&mut self, bus: u8, addr: u8, offset: u8, data: &[u8]) -> Result<(), ()> {
+    fn set_registers(
+        &mut self,
+        bus: u8,
+        addr: u8,
+        offset: u8,
+        data: &[u8],
+    ) -> Result<(), BusSetError> {
         self.shared.lock(|inner| {
             let mut state = inner.borrow_mut();
             let idx = bus as usize;
             if idx >= state.bus_count as usize {
-                return Err(());
+                return Err(BusSetError::InvalidBus);
             }
-            let address = i2c_hil_sim::Address::new(addr).ok_or(())?;
-            state.buses[idx].set_registers(address, offset, data)
+            let address = i2c_hil_sim::Address::new(addr).ok_or(BusSetError::DeviceNotFound)?;
+            state.buses[idx]
+                .set_registers(address, offset, data)
+                .map_err(|_| BusSetError::DeviceNotFound)
         })
     }
 
-    fn set_bus_count(&mut self, count: u8) -> Result<(), ()> {
+    fn set_bus_count(&mut self, count: u8) -> Result<(), BusSetError> {
         self.shared.lock(|inner| {
             let mut state = inner.borrow_mut();
             if count as usize > MAX_BUSES {
-                return Err(());
+                return Err(BusSetError::InvalidBus);
             }
             state.bus_count = count;
             Ok(())

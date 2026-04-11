@@ -199,15 +199,6 @@ impl Emc2305 {
         }
     }
 
-    /// Returns the current PWM duty setting for the given fan (0–4).
-    ///
-    /// # Panics
-    ///
-    /// Panics if `fan >= 5`.
-    pub fn fan_setting(&self, fan: usize) -> u8 {
-        self.fans[fan].setting
-    }
-
     /// Computes the RPM for the given fan from the linear transfer function.
     ///
     /// Returns `(pwm_duty * max_rpm) / 255`, or 0 when PWM is zero.

@@ -375,4 +375,44 @@ mod tests {
     fn parse_error_invalid_syntax() {
         assert!(flow_parser::graph("block : missing_id").is_err());
     }
+
+    #[test]
+    fn parse_string_tab_escape() {
+        assert_eq!(flow_parser::string("\"a\\tb\""), Ok("a\tb".to_string()));
+    }
+
+    #[test]
+    fn parse_config_structured_comma_sep() {
+        // Structured config using comma separators rather than newlines.
+        let input = "{ x: 1, y: 2 }";
+        let result = flow_parser::config(input);
+        assert_eq!(
+            result,
+            Ok(Config::Structured(vec![
+                ("x".into(), Value::Int(1)),
+                ("y".into(), Value::Int(2)),
+            ]))
+        );
+    }
+
+    #[test]
+    fn parse_empty_list() {
+        assert_eq!(flow_parser::value("[]"), Ok(Value::List(vec![])));
+    }
+
+    #[test]
+    fn parse_graph_empty() {
+        let g = flow_parser::graph("").unwrap();
+        assert_eq!(g.blocks.len(), 0);
+        assert_eq!(g.connections.len(), 0);
+    }
+
+    #[test]
+    fn parse_block_decl_multiple_annotations() {
+        let input = "@target(rp2040)\n@priority(1)\nblock led: pwm_sink(channel = 0)";
+        let result = flow_parser::block_decl(input).unwrap();
+        assert_eq!(result.annotations.len(), 2);
+        assert_eq!(result.annotations[0].name, "target");
+        assert_eq!(result.annotations[1].name, "priority");
+    }
 }

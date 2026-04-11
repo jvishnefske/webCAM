@@ -15,6 +15,19 @@ use crate::protocol::DapProcessor;
 /// CBOR map key 0 value identifying DAP command messages.
 pub const DAP_COMMAND_TAG: u32 = 40;
 
+/// Error type for DAP CBOR dispatch operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CborDispatchError {
+    /// The CBOR data is malformed or cannot be decoded.
+    MalformedCbor,
+    /// The CBOR tag is not the expected DAP command tag (40).
+    WrongTag,
+    /// The output buffer is too small for the encoded response.
+    BufferTooSmall,
+    /// The DAP processor returned an empty (zero-length) response.
+    EmptyResponse,
+}
+
 /// Returns `true` if `tag` is the DAP command tag (40).
 pub fn is_dap_tag(tag: u32) -> bool {
     tag == DAP_COMMAND_TAG
@@ -27,24 +40,23 @@ pub fn is_dap_tag(tag: u32) -> bool {
 ///
 /// # Errors
 ///
-/// Returns `Err(())` if the CBOR is malformed or does not contain
-/// a tag-40 message with a byte string at key 1.
-#[allow(clippy::result_unit_err)]
-pub fn decode_dap_request(cbor: &[u8]) -> Result<&[u8], ()> {
+/// Returns [`CborDispatchError::MalformedCbor`] if the CBOR cannot be decoded,
+/// or [`CborDispatchError::WrongTag`] if the tag is not 40.
+pub fn decode_dap_request(cbor: &[u8]) -> Result<&[u8], CborDispatchError> {
     let mut dec = minicbor::Decoder::new(cbor);
 
-    let _map_len = dec.map().map_err(|_| ())?;
+    let _map_len = dec.map().map_err(|_| CborDispatchError::MalformedCbor)?;
 
     // Key 0: tag
-    let _k0 = dec.u32().map_err(|_| ())?;
-    let tag = dec.u32().map_err(|_| ())?;
+    let _k0 = dec.u32().map_err(|_| CborDispatchError::MalformedCbor)?;
+    let tag = dec.u32().map_err(|_| CborDispatchError::MalformedCbor)?;
     if tag != DAP_COMMAND_TAG {
-        return Err(());
+        return Err(CborDispatchError::WrongTag);
     }
 
     // Key 1: DAP bytes
-    let _k1 = dec.u32().map_err(|_| ())?;
-    let data = dec.bytes().map_err(|_| ())?;
+    let _k1 = dec.u32().map_err(|_| CborDispatchError::MalformedCbor)?;
+    let data = dec.bytes().map_err(|_| CborDispatchError::MalformedCbor)?;
 
     Ok(data)
 }
@@ -56,18 +68,19 @@ pub fn decode_dap_request(cbor: &[u8]) -> Result<&[u8], ()> {
 ///
 /// # Errors
 ///
-/// Returns `Err(())` if `buf` is too small for the encoded response.
-#[allow(clippy::result_unit_err)]
-pub fn encode_dap_response(buf: &mut [u8], dap_data: &[u8]) -> Result<usize, ()> {
+/// Returns [`CborDispatchError::BufferTooSmall`] if `buf` is too small for the encoded response.
+pub fn encode_dap_response(buf: &mut [u8], dap_data: &[u8]) -> Result<usize, CborDispatchError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(2).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(DAP_COMMAND_TAG).map_err(|_| ())?;
-    enc.u32(1).map_err(|_| ())?;
-    enc.bytes(dap_data).map_err(|_| ())?;
+    enc.map(2).map_err(|_| CborDispatchError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| CborDispatchError::BufferTooSmall)?;
+    enc.u32(DAP_COMMAND_TAG)
+        .map_err(|_| CborDispatchError::BufferTooSmall)?;
+    enc.u32(1).map_err(|_| CborDispatchError::BufferTooSmall)?;
+    enc.bytes(dap_data)
+        .map_err(|_| CborDispatchError::BufferTooSmall)?;
 
     // End the encoder's borrow on `writer` so we can measure remaining capacity.
     let _ = enc;
@@ -85,14 +98,15 @@ pub fn encode_dap_response(buf: &mut [u8], dap_data: &[u8]) -> Result<usize, ()>
 ///
 /// # Errors
 ///
-/// Returns `Err(())` if CBOR decoding fails, the tag is not 40,
-/// the processor returns 0 bytes, or the response buffer is too small.
-#[allow(clippy::result_unit_err)]
+/// Returns [`CborDispatchError::MalformedCbor`] or [`CborDispatchError::WrongTag`]
+/// if CBOR decoding fails, [`CborDispatchError::EmptyResponse`] if the processor
+/// returns 0 bytes, or [`CborDispatchError::BufferTooSmall`] if the response buffer
+/// is too small.
 pub fn handle_dap_request<P: DapProcessor + ?Sized>(
     dap: &mut P,
     request: &[u8],
     resp_buf: &mut [u8],
-) -> Result<usize, ()> {
+) -> Result<usize, CborDispatchError> {
     let dap_bytes = decode_dap_request(request)?;
 
     // Use a fixed intermediate buffer for the raw DAP response.
@@ -101,7 +115,7 @@ pub fn handle_dap_request<P: DapProcessor + ?Sized>(
     let resp_len = dap.process_command(dap_bytes, &mut dap_resp);
 
     if resp_len == 0 {
-        return Err(());
+        return Err(CborDispatchError::EmptyResponse);
     }
 
     encode_dap_response(resp_buf, &dap_resp[..resp_len])

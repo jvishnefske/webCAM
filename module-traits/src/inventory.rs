@@ -8,6 +8,7 @@
 //! target families (RP2040, STM32F401, ESP32-C3, STM32G0B1, Host).
 
 use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 
 use serde::{Deserialize, Serialize};
@@ -589,196 +590,195 @@ fn rp2040_mcu() -> McuDef {
 
 // -- STM32F401 --------------------------------------------------------------
 
-#[allow(clippy::vec_init_then_push)]
 fn stm32f401_mcu() -> McuDef {
-    let mut peripherals = Vec::new();
-
-    // USART1
-    peripherals.push(periph(
-        "USART1",
-        PeripheralKind::Uart,
-        BusConnection::Apb2,
-        Some("USART1"),
-        &[
-            ("TX", "PA9", 7),
-            ("RX", "PA10", 7),
-            ("TX", "PB6", 7),
-            ("RX", "PB7", 7),
-        ],
-    ));
-    // USART2
-    peripherals.push(periph(
-        "USART2",
-        PeripheralKind::Uart,
-        BusConnection::Apb1,
-        Some("USART2"),
-        &[("TX", "PA2", 7), ("RX", "PA3", 7)],
-    ));
-    // USART6
-    peripherals.push(periph(
-        "USART6",
-        PeripheralKind::Uart,
-        BusConnection::Apb2,
-        Some("USART6"),
-        &[("TX", "PA11", 8), ("RX", "PA12", 8)],
-    ));
-    // SPI1
-    peripherals.push(periph(
-        "SPI1",
-        PeripheralKind::Spi,
-        BusConnection::Apb2,
-        Some("SPI1"),
-        &[
-            ("SCK", "PA5", 5),
-            ("MOSI", "PA7", 5),
-            ("MISO", "PA6", 5),
-            ("SCK", "PB3", 5),
-            ("MOSI", "PB5", 5),
-            ("MISO", "PB4", 5),
-        ],
-    ));
-    // SPI2
-    peripherals.push(periph(
-        "SPI2",
-        PeripheralKind::Spi,
-        BusConnection::Apb1,
-        Some("SPI2"),
-        &[("SCK", "PB13", 5), ("MOSI", "PB15", 5), ("MISO", "PB14", 5)],
-    ));
-    // SPI3
-    peripherals.push(periph(
-        "SPI3",
-        PeripheralKind::Spi,
-        BusConnection::Apb1,
-        Some("SPI3"),
-        &[
-            ("SCK", "PB3", 6),
-            ("MOSI", "PB5", 6),
-            ("MISO", "PB4", 6),
-            ("SCK", "PC10", 6),
-            ("MOSI", "PC12", 6),
-            ("MISO", "PC11", 6),
-        ],
-    ));
-    // I2C1
-    peripherals.push(periph(
-        "I2C1",
-        PeripheralKind::I2c,
-        BusConnection::Apb1,
-        Some("I2C1_EV"),
-        &[
-            ("SDA", "PB7", 4),
-            ("SCL", "PB6", 4),
-            ("SDA", "PB9", 4),
-            ("SCL", "PB8", 4),
-        ],
-    ));
-    // I2C2
-    peripherals.push(periph(
-        "I2C2",
-        PeripheralKind::I2c,
-        BusConnection::Apb1,
-        Some("I2C2_EV"),
-        &[("SDA", "PB3", 9), ("SCL", "PB10", 4)],
-    ));
-    // I2C3
-    peripherals.push(periph(
-        "I2C3",
-        PeripheralKind::I2c,
-        BusConnection::Apb1,
-        Some("I2C3_EV"),
-        &[("SDA", "PB4", 9), ("SCL", "PA8", 4)],
-    ));
-    // ADC1
-    peripherals.push(periph(
-        "ADC1",
-        PeripheralKind::Adc,
-        BusConnection::Apb2,
-        Some("ADC"),
-        &[
-            ("IN0", "PA0", 0),
-            ("IN1", "PA1", 0),
-            ("IN4", "PA4", 0),
-            ("IN5", "PA5", 0),
-            ("IN6", "PA6", 0),
-            ("IN7", "PA7", 0),
-            ("IN8", "PB0", 0),
-            ("IN9", "PB1", 0),
-        ],
-    ));
-    // TIM1 (advanced)
-    peripherals.push(periph(
-        "TIM1",
-        PeripheralKind::Timer,
-        BusConnection::Apb2,
-        Some("TIM1_UP_TIM10"),
-        &[
-            ("CH1", "PA8", 1),
-            ("CH2", "PA9", 1),
-            ("CH3", "PA10", 1),
-            ("CH4", "PA11", 1),
-        ],
-    ));
-    // TIM2
-    peripherals.push(periph(
-        "TIM2",
-        PeripheralKind::Timer,
-        BusConnection::Apb1,
-        Some("TIM2"),
-        &[
-            ("CH1", "PA0", 1),
-            ("CH2", "PA1", 1),
-            ("CH3", "PA2", 1),
-            ("CH4", "PA3", 1),
-        ],
-    ));
-    // TIM3
-    peripherals.push(periph(
-        "TIM3",
-        PeripheralKind::Timer,
-        BusConnection::Apb1,
-        Some("TIM3"),
-        &[
-            ("CH1", "PA6", 2),
-            ("CH2", "PA7", 2),
-            ("CH3", "PB0", 2),
-            ("CH4", "PB1", 2),
-        ],
-    ));
-    // TIM4
-    peripherals.push(periph(
-        "TIM4",
-        PeripheralKind::Timer,
-        BusConnection::Apb1,
-        Some("TIM4"),
-        &[
-            ("CH1", "PB6", 2),
-            ("CH2", "PB7", 2),
-            ("CH3", "PB8", 2),
-            ("CH4", "PB9", 2),
-        ],
-    ));
-    // TIM5
-    peripherals.push(periph(
-        "TIM5",
-        PeripheralKind::Timer,
-        BusConnection::Apb1,
-        Some("TIM5"),
-        &[
-            ("CH1", "PA0", 2),
-            ("CH2", "PA1", 2),
-            ("CH3", "PA2", 2),
-            ("CH4", "PA3", 2),
-        ],
-    ));
-    // USB OTG FS
-    peripherals.push(periph(
-        "USB_OTG_FS",
-        PeripheralKind::Usb,
-        BusConnection::Ahb,
-        Some("OTG_FS"),
-        &[("DM", "PA11", 10), ("DP", "PA12", 10)],
-    ));
+    let peripherals = vec![
+        // USART1
+        periph(
+            "USART1",
+            PeripheralKind::Uart,
+            BusConnection::Apb2,
+            Some("USART1"),
+            &[
+                ("TX", "PA9", 7),
+                ("RX", "PA10", 7),
+                ("TX", "PB6", 7),
+                ("RX", "PB7", 7),
+            ],
+        ),
+        // USART2
+        periph(
+            "USART2",
+            PeripheralKind::Uart,
+            BusConnection::Apb1,
+            Some("USART2"),
+            &[("TX", "PA2", 7), ("RX", "PA3", 7)],
+        ),
+        // USART6
+        periph(
+            "USART6",
+            PeripheralKind::Uart,
+            BusConnection::Apb2,
+            Some("USART6"),
+            &[("TX", "PA11", 8), ("RX", "PA12", 8)],
+        ),
+        // SPI1
+        periph(
+            "SPI1",
+            PeripheralKind::Spi,
+            BusConnection::Apb2,
+            Some("SPI1"),
+            &[
+                ("SCK", "PA5", 5),
+                ("MOSI", "PA7", 5),
+                ("MISO", "PA6", 5),
+                ("SCK", "PB3", 5),
+                ("MOSI", "PB5", 5),
+                ("MISO", "PB4", 5),
+            ],
+        ),
+        // SPI2
+        periph(
+            "SPI2",
+            PeripheralKind::Spi,
+            BusConnection::Apb1,
+            Some("SPI2"),
+            &[("SCK", "PB13", 5), ("MOSI", "PB15", 5), ("MISO", "PB14", 5)],
+        ),
+        // SPI3
+        periph(
+            "SPI3",
+            PeripheralKind::Spi,
+            BusConnection::Apb1,
+            Some("SPI3"),
+            &[
+                ("SCK", "PB3", 6),
+                ("MOSI", "PB5", 6),
+                ("MISO", "PB4", 6),
+                ("SCK", "PC10", 6),
+                ("MOSI", "PC12", 6),
+                ("MISO", "PC11", 6),
+            ],
+        ),
+        // I2C1
+        periph(
+            "I2C1",
+            PeripheralKind::I2c,
+            BusConnection::Apb1,
+            Some("I2C1_EV"),
+            &[
+                ("SDA", "PB7", 4),
+                ("SCL", "PB6", 4),
+                ("SDA", "PB9", 4),
+                ("SCL", "PB8", 4),
+            ],
+        ),
+        // I2C2
+        periph(
+            "I2C2",
+            PeripheralKind::I2c,
+            BusConnection::Apb1,
+            Some("I2C2_EV"),
+            &[("SDA", "PB3", 9), ("SCL", "PB10", 4)],
+        ),
+        // I2C3
+        periph(
+            "I2C3",
+            PeripheralKind::I2c,
+            BusConnection::Apb1,
+            Some("I2C3_EV"),
+            &[("SDA", "PB4", 9), ("SCL", "PA8", 4)],
+        ),
+        // ADC1
+        periph(
+            "ADC1",
+            PeripheralKind::Adc,
+            BusConnection::Apb2,
+            Some("ADC"),
+            &[
+                ("IN0", "PA0", 0),
+                ("IN1", "PA1", 0),
+                ("IN4", "PA4", 0),
+                ("IN5", "PA5", 0),
+                ("IN6", "PA6", 0),
+                ("IN7", "PA7", 0),
+                ("IN8", "PB0", 0),
+                ("IN9", "PB1", 0),
+            ],
+        ),
+        // TIM1 (advanced)
+        periph(
+            "TIM1",
+            PeripheralKind::Timer,
+            BusConnection::Apb2,
+            Some("TIM1_UP_TIM10"),
+            &[
+                ("CH1", "PA8", 1),
+                ("CH2", "PA9", 1),
+                ("CH3", "PA10", 1),
+                ("CH4", "PA11", 1),
+            ],
+        ),
+        // TIM2
+        periph(
+            "TIM2",
+            PeripheralKind::Timer,
+            BusConnection::Apb1,
+            Some("TIM2"),
+            &[
+                ("CH1", "PA0", 1),
+                ("CH2", "PA1", 1),
+                ("CH3", "PA2", 1),
+                ("CH4", "PA3", 1),
+            ],
+        ),
+        // TIM3
+        periph(
+            "TIM3",
+            PeripheralKind::Timer,
+            BusConnection::Apb1,
+            Some("TIM3"),
+            &[
+                ("CH1", "PA6", 2),
+                ("CH2", "PA7", 2),
+                ("CH3", "PB0", 2),
+                ("CH4", "PB1", 2),
+            ],
+        ),
+        // TIM4
+        periph(
+            "TIM4",
+            PeripheralKind::Timer,
+            BusConnection::Apb1,
+            Some("TIM4"),
+            &[
+                ("CH1", "PB6", 2),
+                ("CH2", "PB7", 2),
+                ("CH3", "PB8", 2),
+                ("CH4", "PB9", 2),
+            ],
+        ),
+        // TIM5
+        periph(
+            "TIM5",
+            PeripheralKind::Timer,
+            BusConnection::Apb1,
+            Some("TIM5"),
+            &[
+                ("CH1", "PA0", 2),
+                ("CH2", "PA1", 2),
+                ("CH3", "PA2", 2),
+                ("CH4", "PA3", 2),
+            ],
+        ),
+        // USB OTG FS
+        periph(
+            "USB_OTG_FS",
+            PeripheralKind::Usb,
+            BusConnection::Ahb,
+            Some("OTG_FS"),
+            &[("DM", "PA11", 10), ("DP", "PA12", 10)],
+        ),
+    ];
 
     // GPIO pins
     let mut pins = Vec::new();
@@ -891,89 +891,88 @@ fn stm32f401_mcu() -> McuDef {
 
 // -- ESP32-C3 ---------------------------------------------------------------
 
-#[allow(clippy::vec_init_then_push)]
 fn esp32c3_mcu() -> McuDef {
-    let mut peripherals = Vec::new();
-
-    peripherals.push(periph(
-        "UART0",
-        PeripheralKind::Uart,
-        BusConnection::SysBus,
-        Some("UART0"),
-        &[("TX", "GPIO21", 0), ("RX", "GPIO20", 0)],
-    ));
-    peripherals.push(periph(
-        "UART1",
-        PeripheralKind::Uart,
-        BusConnection::SysBus,
-        Some("UART1"),
-        &[
-            ("TX", "GPIO0", 0),
-            ("TX", "GPIO1", 0),
-            ("RX", "GPIO2", 0),
-            ("RX", "GPIO3", 0),
-        ],
-    ));
-    peripherals.push(periph(
-        "SPI2",
-        PeripheralKind::Spi,
-        BusConnection::SysBus,
-        Some("SPI2"),
-        &[
-            ("SCK", "GPIO6", 0),
-            ("MOSI", "GPIO7", 0),
-            ("MISO", "GPIO2", 0),
-            ("CS", "GPIO10", 0),
-        ],
-    ));
-    peripherals.push(periph(
-        "I2C0",
-        PeripheralKind::I2c,
-        BusConnection::SysBus,
-        Some("I2C_EXT0"),
-        &[
-            ("SDA", "GPIO1", 0),
-            ("SCL", "GPIO0", 0),
-            ("SDA", "GPIO3", 0),
-            ("SCL", "GPIO2", 0),
-            ("SDA", "GPIO5", 0),
-            ("SCL", "GPIO4", 0),
-        ],
-    ));
-    peripherals.push(periph(
-        "ADC1",
-        PeripheralKind::Adc,
-        BusConnection::SysBus,
-        None,
-        &[
-            ("CH0", "GPIO0", 0),
-            ("CH1", "GPIO1", 0),
-            ("CH2", "GPIO2", 0),
-            ("CH3", "GPIO3", 0),
-            ("CH4", "GPIO4", 0),
-        ],
-    ));
-    peripherals.push(periph(
-        "LEDC",
-        PeripheralKind::Ledc,
-        BusConnection::SysBus,
-        None,
-        &[
-            ("CH0", "GPIO0", 0),
-            ("CH1", "GPIO1", 0),
-            ("CH2", "GPIO2", 0),
-            ("CH3", "GPIO3", 0),
-            ("CH4", "GPIO4", 0),
-            ("CH5", "GPIO5", 0),
-        ],
-    ));
-    peripherals.push(periph(
-        "USB_SERIAL_JTAG",
-        PeripheralKind::Usb,
-        BusConnection::SysBus,
-        Some("USB_SERIAL_JTAG"),
-        &[("DM", "GPIO18", 0), ("DP", "GPIO19", 0)],
-    ));
+    let peripherals = vec![
+        periph(
+            "UART0",
+            PeripheralKind::Uart,
+            BusConnection::SysBus,
+            Some("UART0"),
+            &[("TX", "GPIO21", 0), ("RX", "GPIO20", 0)],
+        ),
+        periph(
+            "UART1",
+            PeripheralKind::Uart,
+            BusConnection::SysBus,
+            Some("UART1"),
+            &[
+                ("TX", "GPIO0", 0),
+                ("TX", "GPIO1", 0),
+                ("RX", "GPIO2", 0),
+                ("RX", "GPIO3", 0),
+            ],
+        ),
+        periph(
+            "SPI2",
+            PeripheralKind::Spi,
+            BusConnection::SysBus,
+            Some("SPI2"),
+            &[
+                ("SCK", "GPIO6", 0),
+                ("MOSI", "GPIO7", 0),
+                ("MISO", "GPIO2", 0),
+                ("CS", "GPIO10", 0),
+            ],
+        ),
+        periph(
+            "I2C0",
+            PeripheralKind::I2c,
+            BusConnection::SysBus,
+            Some("I2C_EXT0"),
+            &[
+                ("SDA", "GPIO1", 0),
+                ("SCL", "GPIO0", 0),
+                ("SDA", "GPIO3", 0),
+                ("SCL", "GPIO2", 0),
+                ("SDA", "GPIO5", 0),
+                ("SCL", "GPIO4", 0),
+            ],
+        ),
+        periph(
+            "ADC1",
+            PeripheralKind::Adc,
+            BusConnection::SysBus,
+            None,
+            &[
+                ("CH0", "GPIO0", 0),
+                ("CH1", "GPIO1", 0),
+                ("CH2", "GPIO2", 0),
+                ("CH3", "GPIO3", 0),
+                ("CH4", "GPIO4", 0),
+            ],
+        ),
+        periph(
+            "LEDC",
+            PeripheralKind::Ledc,
+            BusConnection::SysBus,
+            None,
+            &[
+                ("CH0", "GPIO0", 0),
+                ("CH1", "GPIO1", 0),
+                ("CH2", "GPIO2", 0),
+                ("CH3", "GPIO3", 0),
+                ("CH4", "GPIO4", 0),
+                ("CH5", "GPIO5", 0),
+            ],
+        ),
+        periph(
+            "USB_SERIAL_JTAG",
+            PeripheralKind::Usb,
+            BusConnection::SysBus,
+            Some("USB_SERIAL_JTAG"),
+            &[("DM", "GPIO18", 0), ("DP", "GPIO19", 0)],
+        ),
+    ];
 
     let mut pins = Vec::new();
     for i in 0u8..22 {
@@ -1062,220 +1061,219 @@ fn esp32c3_mcu() -> McuDef {
 
 // -- STM32G0B1 --------------------------------------------------------------
 
-#[allow(clippy::vec_init_then_push)]
 fn stm32g0b1_mcu() -> McuDef {
-    let mut peripherals = Vec::new();
-
-    // USARTs
-    peripherals.push(periph(
-        "USART1",
-        PeripheralKind::Uart,
-        BusConnection::Apb1,
-        Some("USART1"),
-        &[
-            ("TX", "PA9", 1),
-            ("RX", "PA10", 1),
-            ("TX", "PB6", 0),
-            ("RX", "PB7", 0),
-        ],
-    ));
-    peripherals.push(periph(
-        "USART2",
-        PeripheralKind::Uart,
-        BusConnection::Apb1,
-        Some("USART2"),
-        &[
-            ("TX", "PA2", 1),
-            ("RX", "PA3", 1),
-            ("TX", "PA14", 1),
-            ("RX", "PA15", 1),
-        ],
-    ));
-    peripherals.push(periph(
-        "USART3",
-        PeripheralKind::Uart,
-        BusConnection::Apb1,
-        Some("USART3_4_5_6_LPUART1"),
-        &[
-            ("TX", "PB8", 4),
-            ("RX", "PB9", 4),
-            ("TX", "PB10", 4),
-            ("RX", "PB11", 4),
-            ("TX", "PC4", 1),
-            ("RX", "PC5", 1),
-        ],
-    ));
-    peripherals.push(periph(
-        "USART4",
-        PeripheralKind::Uart,
-        BusConnection::Apb1,
-        Some("USART3_4_5_6_LPUART1"),
-        &[
-            ("TX", "PA0", 4),
-            ("RX", "PA1", 4),
-            ("TX", "PC10", 1),
-            ("RX", "PC11", 1),
-        ],
-    ));
-    peripherals.push(periph(
-        "LPUART1",
-        PeripheralKind::Uart,
-        BusConnection::Apb1,
-        Some("USART3_4_5_6_LPUART1"),
-        &[("TX", "PB11", 1), ("RX", "PB10", 1)],
-    ));
-    // SPI1
-    peripherals.push(periph(
-        "SPI1",
-        PeripheralKind::Spi,
-        BusConnection::Apb1,
-        Some("SPI1"),
-        &[
-            ("SCK", "PA1", 0),
-            ("MOSI", "PA2", 0),
-            ("MISO", "PA6", 0),
-            ("SCK", "PA5", 0),
-            ("MOSI", "PA7", 0),
-            ("MISO", "PA11", 0),
-            ("SCK", "PB3", 0),
-            ("MOSI", "PB5", 0),
-            ("MISO", "PB4", 0),
-        ],
-    ));
-    // SPI2
-    peripherals.push(periph(
-        "SPI2",
-        PeripheralKind::Spi,
-        BusConnection::Apb1,
-        Some("SPI2_3"),
-        &[
-            ("SCK", "PB13", 0),
-            ("MOSI", "PB15", 0),
-            ("MISO", "PB14", 0),
-            ("SCK", "PB8", 1),
-            ("MOSI", "PB11", 0),
-            ("MISO", "PB2", 1),
-        ],
-    ));
-    // I2C1
-    peripherals.push(periph(
-        "I2C1",
-        PeripheralKind::I2c,
-        BusConnection::Apb1,
-        Some("I2C1"),
-        &[
-            ("SDA", "PB7", 6),
-            ("SCL", "PB6", 6),
-            ("SDA", "PB9", 6),
-            ("SCL", "PB8", 6),
-        ],
-    ));
-    // I2C2
-    peripherals.push(periph(
-        "I2C2",
-        PeripheralKind::I2c,
-        BusConnection::Apb1,
-        Some("I2C2_3"),
-        &[
-            ("SDA", "PA12", 6),
-            ("SCL", "PA11", 6),
-            ("SDA", "PB11", 6),
-            ("SCL", "PB10", 6),
-            ("SDA", "PB14", 6),
-            ("SCL", "PB13", 6),
-        ],
-    ));
-    // ADC1
-    peripherals.push(periph(
-        "ADC1",
-        PeripheralKind::Adc,
-        BusConnection::Apb1,
-        Some("ADC1_COMP"),
-        &[
-            ("IN0", "PA0", 0),
-            ("IN1", "PA1", 0),
-            ("IN2", "PA2", 0),
-            ("IN3", "PA3", 0),
-            ("IN4", "PA4", 0),
-            ("IN5", "PA5", 0),
-            ("IN6", "PA6", 0),
-            ("IN7", "PA7", 0),
-            ("IN8", "PB0", 0),
-            ("IN9", "PB1", 0),
-        ],
-    ));
-    // Timers
-    peripherals.push(periph(
-        "TIM1",
-        PeripheralKind::Timer,
-        BusConnection::Apb1,
-        Some("TIM1_BRK_UP_TRG_COM"),
-        &[
-            ("CH1", "PA8", 2),
-            ("CH2", "PA9", 2),
-            ("CH3", "PA10", 2),
-            ("CH4", "PA11", 2),
-        ],
-    ));
-    peripherals.push(periph(
-        "TIM2",
-        PeripheralKind::Timer,
-        BusConnection::Apb1,
-        Some("TIM2"),
-        &[
-            ("CH1", "PA0", 2),
-            ("CH2", "PA1", 2),
-            ("CH3", "PA2", 10),
-            ("CH4", "PA3", 10),
-        ],
-    ));
-    peripherals.push(periph(
-        "TIM3",
-        PeripheralKind::Timer,
-        BusConnection::Apb1,
-        Some("TIM3_TIM4"),
-        &[
-            ("CH1", "PA6", 1),
-            ("CH2", "PA7", 1),
-            ("CH3", "PB0", 1),
-            ("CH4", "PB1", 1),
-        ],
-    ));
-    // FDCAN
-    peripherals.push(periph(
-        "FDCAN1",
-        PeripheralKind::Can,
-        BusConnection::Apb1,
-        Some("TIM16_FDCAN_IT0"),
-        &[
-            ("TX", "PA12", 3),
-            ("RX", "PA11", 3),
-            ("TX", "PB9", 3),
-            ("RX", "PB8", 3),
-            ("TX", "PD1", 3),
-            ("RX", "PD0", 3),
-        ],
-    ));
-    peripherals.push(periph(
-        "FDCAN2",
-        PeripheralKind::Can,
-        BusConnection::Apb1,
-        Some("TIM17_FDCAN_IT1"),
-        &[
-            ("TX", "PB6", 3),
-            ("RX", "PB5", 3),
-            ("TX", "PB13", 3),
-            ("RX", "PB12", 3),
-        ],
-    ));
-    // USB
-    peripherals.push(periph(
-        "USB",
-        PeripheralKind::Usb,
-        BusConnection::Apb1,
-        Some("USB_UCPD1_2"),
-        &[("DM", "PA11", 0), ("DP", "PA12", 0)],
-    ));
+    let peripherals = vec![
+        // USARTs
+        periph(
+            "USART1",
+            PeripheralKind::Uart,
+            BusConnection::Apb1,
+            Some("USART1"),
+            &[
+                ("TX", "PA9", 1),
+                ("RX", "PA10", 1),
+                ("TX", "PB6", 0),
+                ("RX", "PB7", 0),
+            ],
+        ),
+        periph(
+            "USART2",
+            PeripheralKind::Uart,
+            BusConnection::Apb1,
+            Some("USART2"),
+            &[
+                ("TX", "PA2", 1),
+                ("RX", "PA3", 1),
+                ("TX", "PA14", 1),
+                ("RX", "PA15", 1),
+            ],
+        ),
+        periph(
+            "USART3",
+            PeripheralKind::Uart,
+            BusConnection::Apb1,
+            Some("USART3_4_5_6_LPUART1"),
+            &[
+                ("TX", "PB8", 4),
+                ("RX", "PB9", 4),
+                ("TX", "PB10", 4),
+                ("RX", "PB11", 4),
+                ("TX", "PC4", 1),
+                ("RX", "PC5", 1),
+            ],
+        ),
+        periph(
+            "USART4",
+            PeripheralKind::Uart,
+            BusConnection::Apb1,
+            Some("USART3_4_5_6_LPUART1"),
+            &[
+                ("TX", "PA0", 4),
+                ("RX", "PA1", 4),
+                ("TX", "PC10", 1),
+                ("RX", "PC11", 1),
+            ],
+        ),
+        periph(
+            "LPUART1",
+            PeripheralKind::Uart,
+            BusConnection::Apb1,
+            Some("USART3_4_5_6_LPUART1"),
+            &[("TX", "PB11", 1), ("RX", "PB10", 1)],
+        ),
+        // SPI1
+        periph(
+            "SPI1",
+            PeripheralKind::Spi,
+            BusConnection::Apb1,
+            Some("SPI1"),
+            &[
+                ("SCK", "PA1", 0),
+                ("MOSI", "PA2", 0),
+                ("MISO", "PA6", 0),
+                ("SCK", "PA5", 0),
+                ("MOSI", "PA7", 0),
+                ("MISO", "PA11", 0),
+                ("SCK", "PB3", 0),
+                ("MOSI", "PB5", 0),
+                ("MISO", "PB4", 0),
+            ],
+        ),
+        // SPI2
+        periph(
+            "SPI2",
+            PeripheralKind::Spi,
+            BusConnection::Apb1,
+            Some("SPI2_3"),
+            &[
+                ("SCK", "PB13", 0),
+                ("MOSI", "PB15", 0),
+                ("MISO", "PB14", 0),
+                ("SCK", "PB8", 1),
+                ("MOSI", "PB11", 0),
+                ("MISO", "PB2", 1),
+            ],
+        ),
+        // I2C1
+        periph(
+            "I2C1",
+            PeripheralKind::I2c,
+            BusConnection::Apb1,
+            Some("I2C1"),
+            &[
+                ("SDA", "PB7", 6),
+                ("SCL", "PB6", 6),
+                ("SDA", "PB9", 6),
+                ("SCL", "PB8", 6),
+            ],
+        ),
+        // I2C2
+        periph(
+            "I2C2",
+            PeripheralKind::I2c,
+            BusConnection::Apb1,
+            Some("I2C2_3"),
+            &[
+                ("SDA", "PA12", 6),
+                ("SCL", "PA11", 6),
+                ("SDA", "PB11", 6),
+                ("SCL", "PB10", 6),
+                ("SDA", "PB14", 6),
+                ("SCL", "PB13", 6),
+            ],
+        ),
+        // ADC1
+        periph(
+            "ADC1",
+            PeripheralKind::Adc,
+            BusConnection::Apb1,
+            Some("ADC1_COMP"),
+            &[
+                ("IN0", "PA0", 0),
+                ("IN1", "PA1", 0),
+                ("IN2", "PA2", 0),
+                ("IN3", "PA3", 0),
+                ("IN4", "PA4", 0),
+                ("IN5", "PA5", 0),
+                ("IN6", "PA6", 0),
+                ("IN7", "PA7", 0),
+                ("IN8", "PB0", 0),
+                ("IN9", "PB1", 0),
+            ],
+        ),
+        // Timers
+        periph(
+            "TIM1",
+            PeripheralKind::Timer,
+            BusConnection::Apb1,
+            Some("TIM1_BRK_UP_TRG_COM"),
+            &[
+                ("CH1", "PA8", 2),
+                ("CH2", "PA9", 2),
+                ("CH3", "PA10", 2),
+                ("CH4", "PA11", 2),
+            ],
+        ),
+        periph(
+            "TIM2",
+            PeripheralKind::Timer,
+            BusConnection::Apb1,
+            Some("TIM2"),
+            &[
+                ("CH1", "PA0", 2),
+                ("CH2", "PA1", 2),
+                ("CH3", "PA2", 10),
+                ("CH4", "PA3", 10),
+            ],
+        ),
+        periph(
+            "TIM3",
+            PeripheralKind::Timer,
+            BusConnection::Apb1,
+            Some("TIM3_TIM4"),
+            &[
+                ("CH1", "PA6", 1),
+                ("CH2", "PA7", 1),
+                ("CH3", "PB0", 1),
+                ("CH4", "PB1", 1),
+            ],
+        ),
+        // FDCAN
+        periph(
+            "FDCAN1",
+            PeripheralKind::Can,
+            BusConnection::Apb1,
+            Some("TIM16_FDCAN_IT0"),
+            &[
+                ("TX", "PA12", 3),
+                ("RX", "PA11", 3),
+                ("TX", "PB9", 3),
+                ("RX", "PB8", 3),
+                ("TX", "PD1", 3),
+                ("RX", "PD0", 3),
+            ],
+        ),
+        periph(
+            "FDCAN2",
+            PeripheralKind::Can,
+            BusConnection::Apb1,
+            Some("TIM17_FDCAN_IT1"),
+            &[
+                ("TX", "PB6", 3),
+                ("RX", "PB5", 3),
+                ("TX", "PB13", 3),
+                ("RX", "PB12", 3),
+            ],
+        ),
+        // USB
+        periph(
+            "USB",
+            PeripheralKind::Usb,
+            BusConnection::Apb1,
+            Some("USB_UCPD1_2"),
+            &[("DM", "PA11", 0), ("DP", "PA12", 0)],
+        ),
+    ];
 
     // GPIO pins
     let mut pins = Vec::new();

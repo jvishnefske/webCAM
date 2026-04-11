@@ -398,4 +398,65 @@ mod tests {
         let result = minicbor::decode::<NodeAnnounce>(&buf);
         assert!(result.is_err());
     }
+
+    #[test]
+    fn decode_indefinite_map_fails() {
+        // CBOR byte 0xBF starts an indefinite-length map, which our decoder rejects
+        let buf = [0xBF, 0xFF];
+        let result = minicbor::decode::<NodeAnnounce>(&buf);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_indefinite_publishes_array_fails() {
+        // Definite map with key 2 (publishes) using indefinite-length array
+        let mut buf = Vec::new();
+        let mut e = minicbor::Encoder::new(&mut buf);
+        e.map(4).unwrap();
+        e.u32(0).unwrap().encode(NodeId::new(1)).unwrap();
+        e.u32(1).unwrap().str("test").unwrap();
+        drop(e);
+        // Key 2 with indefinite-length array: CBOR 0x9F ... 0xFF
+        buf.extend_from_slice(&[0x02, 0x9F, 0xFF]); // key=2, indef array, break
+        // Key 3 with empty definite array
+        buf.extend_from_slice(&[0x03]);
+        // Patch to use raw CBOR -- we need to manually construct the invalid payload
+        // Actually, let's use minicbor to build a valid map but patch the array type
+        let mut buf2 = Vec::new();
+        let mut e2 = minicbor::Encoder::new(&mut buf2);
+        e2.map(4).unwrap();
+        e2.u32(0).unwrap().encode(NodeId::new(1)).unwrap();
+        e2.u32(1).unwrap().str("test").unwrap();
+        e2.u32(2).unwrap();
+        drop(e2);
+        // Write indefinite array marker (0x9F)
+        buf2.push(0x9F);
+        // Write break (0xFF)
+        buf2.push(0xFF);
+        // Key 3 with definite empty array
+        {
+            let mut e3 = minicbor::Encoder::new(&mut buf2);
+            e3.u32(3).unwrap().array(0).unwrap();
+            drop(e3);
+        }
+        let result = minicbor::decode::<NodeAnnounce>(&buf2);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn decode_indefinite_serves_array_fails() {
+        let mut buf = Vec::new();
+        let mut e = minicbor::Encoder::new(&mut buf);
+        e.map(4).unwrap();
+        e.u32(0).unwrap().encode(NodeId::new(1)).unwrap();
+        e.u32(1).unwrap().str("test").unwrap();
+        e.u32(2).unwrap().array(0).unwrap();
+        e.u32(3).unwrap();
+        drop(e);
+        // Write indefinite array marker for serves
+        buf.push(0x9F);
+        buf.push(0xFF);
+        let result = minicbor::decode::<NodeAnnounce>(&buf);
+        assert!(result.is_err());
+    }
 }
