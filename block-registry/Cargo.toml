@@ -1,0 +1,20 @@
+[package]
+name = "block-registry"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Built-in block implementations for the RustCAM dataflow engine"
+
+[features]
+default = []
+tsify = ["dep:tsify-next", "dep:wasm-bindgen", "module-traits/tsify"]
+
+[dependencies]
+module-traits = { path = "../module-traits" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tsify-next = { version = "0.5", features = ["js"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+
+[lints]
+workspace = true

@@ -28,6 +28,7 @@ members = [
     "hil/combined-frontend",
     "hil/native-server",
     "mlir-codegen",
+    "block-registry",
     "configurable-blocks",
 ]
 default-members = [
@@ -41,6 +42,7 @@ default-members = [
     "pubsub",
     "parser",
     "mlir-codegen",
+    "block-registry",
     "configurable-blocks",
     "hil/native-server",
 ]

@@ -6,16 +6,16 @@
 //!
 //! In simulation mode, blocks with `SimModel` impls interact with `SimPeripherals`.
 
-use crate::dataflow::block::{Module, PortDef, PortKind, SimModel, SimPeripherals, Tick, Value};
+use module_traits::{Module, PortDef, PortKind, SimModel, SimPeripherals, Tick, Value};
 use serde::{Deserialize, Serialize};
-use tsify_next::Tsify;
 
 // ---------------------------------------------------------------------------
 // ADC Source
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct AdcConfig {
     pub channel: u8,
     pub resolution_bits: u8,
@@ -33,7 +33,7 @@ impl Default for AdcConfig {
 /// Reads an analog-to-digital converter channel.
 /// Without simulation, outputs None.
 pub struct AdcBlock {
-    pub(crate) config: AdcConfig,
+    pub config: AdcConfig,
 }
 
 impl AdcBlock {
@@ -89,8 +89,9 @@ impl SimModel for AdcBlock {
 // PWM Sink
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct PwmConfig {
     pub channel: u8,
     pub frequency_hz: u32,
@@ -108,7 +109,7 @@ impl Default for PwmConfig {
 /// Drives a PWM output channel with a duty cycle (0.0 to 1.0).
 /// Without simulation, consumes input silently.
 pub struct PwmBlock {
-    pub(crate) config: PwmConfig,
+    pub config: PwmConfig,
 }
 
 impl PwmBlock {
@@ -166,8 +167,9 @@ impl SimModel for PwmBlock {
 // GPIO Out
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct GpioOutConfig {
     pub pin: u8,
 }
@@ -181,7 +183,7 @@ impl Default for GpioOutConfig {
 /// Sets a GPIO pin high (>0.5) or low (<=0.5).
 /// Without simulation, consumes input silently.
 pub struct GpioOutBlock {
-    pub(crate) config: GpioOutConfig,
+    pub config: GpioOutConfig,
 }
 
 impl GpioOutBlock {
@@ -238,8 +240,9 @@ impl SimModel for GpioOutBlock {
 // GPIO In
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct GpioInConfig {
     pub pin: u8,
 }
@@ -253,7 +256,7 @@ impl Default for GpioInConfig {
 /// Reads a GPIO pin state (0.0 or 1.0).
 /// Without simulation, outputs None.
 pub struct GpioInBlock {
-    pub(crate) config: GpioInConfig,
+    pub config: GpioInConfig,
 }
 
 impl GpioInBlock {
@@ -312,8 +315,9 @@ impl SimModel for GpioInBlock {
 // UART TX
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct UartTxConfig {
     pub port: u8,
     pub baud: u32,
@@ -331,7 +335,7 @@ impl Default for UartTxConfig {
 /// Transmits bytes over a UART port.
 /// Without simulation, consumes input silently.
 pub struct UartTxBlock {
-    pub(crate) config: UartTxConfig,
+    pub config: UartTxConfig,
 }
 
 impl UartTxBlock {
@@ -388,8 +392,9 @@ impl SimModel for UartTxBlock {
 // UART RX
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct UartRxConfig {
     pub port: u8,
     pub baud: u32,
@@ -407,7 +412,7 @@ impl Default for UartRxConfig {
 /// Receives bytes from a UART port.
 /// Without simulation, outputs None.
 pub struct UartRxBlock {
-    pub(crate) config: UartRxConfig,
+    pub config: UartRxConfig,
 }
 
 impl UartRxBlock {
@@ -468,8 +473,9 @@ impl SimModel for UartRxBlock {
 // Encoder
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Default, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct EncoderConfig {
     pub channel: u8,
 }
@@ -477,7 +483,7 @@ pub struct EncoderConfig {
 /// Reads a quadrature encoder channel.
 /// Without simulation, outputs zero position and velocity.
 pub struct EncoderBlock {
-    pub(crate) config: EncoderConfig,
+    pub config: EncoderConfig,
     prev_position: i64,
 }
 
@@ -543,8 +549,9 @@ impl SimModel for EncoderBlock {
 // SSD1306 Display
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 #[serde(default)]
 pub struct Ssd1306DisplayConfig {
     pub i2c_bus: u8,
@@ -563,7 +570,7 @@ impl Default for Ssd1306DisplayConfig {
 /// Writes two lines to an SSD1306 OLED display.
 /// Without simulation, consumes input silently.
 pub struct Ssd1306DisplayBlock {
-    pub(crate) config: Ssd1306DisplayConfig,
+    pub config: Ssd1306DisplayConfig,
 }
 
 impl Ssd1306DisplayBlock {
@@ -629,8 +636,9 @@ impl SimModel for Ssd1306DisplayBlock {
 // TMC2209 Stepper
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 #[serde(default)]
 pub struct Tmc2209StepperConfig {
     pub uart_port: u8,
@@ -653,7 +661,7 @@ impl Default for Tmc2209StepperConfig {
 /// Controls a TMC2209 stepper driver.
 /// Without simulation, consumes input silently.
 pub struct Tmc2209StepperBlock {
-    pub(crate) config: Tmc2209StepperConfig,
+    pub config: Tmc2209StepperConfig,
 }
 
 impl Tmc2209StepperBlock {
@@ -721,8 +729,9 @@ impl SimModel for Tmc2209StepperBlock {
 // TMC2209 StallGuard
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 #[serde(default)]
 pub struct Tmc2209StallGuardConfig {
     pub uart_port: u8,
@@ -743,7 +752,7 @@ impl Default for Tmc2209StallGuardConfig {
 /// Reads TMC2209 StallGuard value for stall detection.
 /// Without simulation, outputs None.
 pub struct Tmc2209StallGuardBlock {
-    pub(crate) config: Tmc2209StallGuardConfig,
+    pub config: Tmc2209StallGuardConfig,
 }
 
 impl Tmc2209StallGuardBlock {
@@ -798,8 +807,8 @@ impl SimModel for Tmc2209StallGuardBlock {
     }
 }
 
-pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
-    reg.push(super::registry::BlockRegistration {
+pub(crate) fn register(reg: &mut Vec<crate::registry::BlockRegistration>) {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "adc_source",
         display_name: "ADC Source",
         category: "Embedded",
@@ -808,7 +817,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
             Ok(Box::new(AdcBlock::from_config(cfg)))
         },
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "pwm_sink",
         display_name: "PWM Sink",
         category: "Embedded",
@@ -817,7 +826,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
             Ok(Box::new(PwmBlock::from_config(cfg)))
         },
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "gpio_out",
         display_name: "GPIO Out",
         category: "Embedded",
@@ -826,7 +835,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
             Ok(Box::new(GpioOutBlock::from_config(cfg)))
         },
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "gpio_in",
         display_name: "GPIO In",
         category: "Embedded",
@@ -835,7 +844,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
             Ok(Box::new(GpioInBlock::from_config(cfg)))
         },
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "uart_tx",
         display_name: "UART TX",
         category: "Embedded",
@@ -844,7 +853,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
             Ok(Box::new(UartTxBlock::from_config(cfg)))
         },
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "uart_rx",
         display_name: "UART RX",
         category: "Embedded",
@@ -853,7 +862,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
             Ok(Box::new(UartRxBlock::from_config(cfg)))
         },
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "encoder",
         display_name: "Encoder",
         category: "Embedded",
@@ -862,7 +871,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
             Ok(Box::new(EncoderBlock::from_config(cfg)))
         },
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "ssd1306_display",
         display_name: "SSD1306 Display",
         category: "Embedded",
@@ -872,7 +881,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
             Ok(Box::new(Ssd1306DisplayBlock::from_config(cfg)))
         },
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "tmc2209_stepper",
         display_name: "TMC2209 Stepper",
         category: "Embedded",
@@ -882,7 +891,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
             Ok(Box::new(Tmc2209StepperBlock::from_config(cfg)))
         },
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "tmc2209_stallguard",
         display_name: "TMC2209 StallGuard",
         category: "Embedded",
@@ -901,7 +910,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataflow::block::Module;
+    use module_traits::Module;
 
     #[test]
     fn adc_source_module_only() {
@@ -978,73 +987,17 @@ mod tests {
         assert!(block.input_ports().is_empty());
     }
 
-    // --- SimModel tests ---
-
-    #[test]
-    fn adc_sim_reads_configured_voltage() {
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut block = AdcBlock::from_config(AdcConfig {
-            channel: 2,
-            resolution_bits: 12,
-        });
-        let mut peripherals = WasmSimPeripherals::new();
-        peripherals.set_adc_voltage(2, 3.3);
-
-        let sim = block.as_sim_model().unwrap();
-        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
-        assert_eq!(out[0], Some(Value::Float(3.3)));
-    }
-
-    #[test]
-    fn pwm_sim_writes_duty() {
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut block = PwmBlock::from_config(PwmConfig {
-            channel: 1,
-            frequency_hz: 1000,
-        });
-        let mut peripherals = WasmSimPeripherals::new();
-        let duty = Value::Float(0.75);
-
-        let sim = block.as_sim_model().unwrap();
-        sim.sim_tick(&[Some(&duty)], 0.01, &mut peripherals);
-        assert_eq!(peripherals.get_pwm_duty(1), 0.75);
-    }
-
-    #[test]
-    fn gpio_sim_roundtrip() {
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut peripherals = WasmSimPeripherals::new();
-        peripherals.set_gpio_state(5, true);
-
-        let mut in_block = GpioInBlock::from_config(GpioInConfig { pin: 5 });
-        let sim = in_block.as_sim_model().unwrap();
-        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
-        assert_eq!(out[0], Some(Value::Float(1.0)));
-
-        let mut out_block = GpioOutBlock::from_config(GpioOutConfig { pin: 7 });
-        let val = Value::Float(1.0);
-        let sim = out_block.as_sim_model().unwrap();
-        sim.sim_tick(&[Some(&val)], 0.01, &mut peripherals);
-        assert!(peripherals.get_gpio_state(7));
-    }
-
     // ---------------------------------------------------------------
     // Full Module trait coverage tests
     // ---------------------------------------------------------------
 
-    /// Helper: exercise every Module trait method on a block, including
-    /// the default-returning as_analysis, as_codegen, as_tick.
+    /// Helper: exercise every Module trait method on a block.
     fn assert_module_basics(block: &mut dyn Module, name: &str, block_type: &str) {
         assert_eq!(block.name(), name);
         assert_eq!(block.block_type(), block_type);
-        // input_ports / output_ports just need to not panic
         let _ = block.input_ports();
         let _ = block.output_ports();
         let _ = block.config_json();
-        // default trait impls return None for these
         assert!(block.as_analysis().is_none());
         assert!(block.as_codegen().is_none());
         assert!(block.as_tick().is_some());
@@ -1118,162 +1071,6 @@ mod tests {
         let mut b = Tmc2209StallGuardBlock::from_config(Tmc2209StallGuardConfig::default());
         assert_module_basics(&mut b, "TMC2209 StallGuard", "tmc2209_stallguard");
         assert!(b.as_sim_model().is_some());
-    }
-
-    // ---------------------------------------------------------------
-    // SimModel::sim_tick coverage for blocks not yet tested
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn uart_tx_sim_tick() {
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut block = UartTxBlock::from_config(UartTxConfig::default());
-        let mut peripherals = WasmSimPeripherals::new();
-        let data = Value::Bytes(vec![0x41, 0x42]);
-
-        let sim = block.as_sim_model().unwrap();
-        let out = sim.sim_tick(&[Some(&data)], 0.01, &mut peripherals);
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn uart_tx_sim_tick_no_input() {
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut block = UartTxBlock::from_config(UartTxConfig::default());
-        let mut peripherals = WasmSimPeripherals::new();
-
-        let sim = block.as_sim_model().unwrap();
-        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn uart_rx_sim_tick() {
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut block = UartRxBlock::from_config(UartRxConfig::default());
-        let mut peripherals = WasmSimPeripherals::new();
-
-        let sim = block.as_sim_model().unwrap();
-        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
-        // No data queued, so output should be None
-        assert_eq!(out.len(), 1);
-        assert!(out[0].is_none());
-    }
-
-    #[test]
-    fn encoder_sim_tick() {
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut block = EncoderBlock::from_config(EncoderConfig::default());
-        let mut peripherals = WasmSimPeripherals::new();
-
-        let sim = block.as_sim_model().unwrap();
-        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
-        assert_eq!(out.len(), 2);
-        // position and velocity both present
-        assert!(out[0].is_some());
-        assert!(out[1].is_some());
-    }
-
-    #[test]
-    fn ssd1306_sim_tick() {
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut block = Ssd1306DisplayBlock::from_config(Ssd1306DisplayConfig::default());
-        let mut peripherals = WasmSimPeripherals::new();
-
-        let line1 = Value::Text("hello".into());
-        let line2 = Value::Text("world".into());
-        let sim = block.as_sim_model().unwrap();
-        let out = sim.sim_tick(&[Some(&line1), Some(&line2)], 0.01, &mut peripherals);
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn ssd1306_sim_tick_no_input() {
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut block = Ssd1306DisplayBlock::from_config(Ssd1306DisplayConfig::default());
-        let mut peripherals = WasmSimPeripherals::new();
-
-        let sim = block.as_sim_model().unwrap();
-        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
-        assert!(out.is_empty());
-    }
-
-    #[test]
-    fn tmc2209_stepper_sim_tick() {
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut block = Tmc2209StepperBlock::from_config(Tmc2209StepperConfig::default());
-        let mut peripherals = WasmSimPeripherals::new();
-
-        let target = Value::Float(100.0);
-        let enable = Value::Float(1.0);
-        let sim = block.as_sim_model().unwrap();
-        let out = sim.sim_tick(&[Some(&target), Some(&enable)], 0.01, &mut peripherals);
-        assert_eq!(out.len(), 1);
-        assert!(out[0].is_some());
-    }
-
-    #[test]
-    fn tmc2209_stepper_sim_tick_disabled() {
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut block = Tmc2209StepperBlock::from_config(Tmc2209StepperConfig::default());
-        let mut peripherals = WasmSimPeripherals::new();
-
-        let target = Value::Float(100.0);
-        let enable = Value::Float(0.0);
-        let sim = block.as_sim_model().unwrap();
-        let out = sim.sim_tick(&[Some(&target), Some(&enable)], 0.01, &mut peripherals);
-        assert_eq!(out.len(), 1);
-    }
-
-    #[test]
-    fn tmc2209_stallguard_sim_tick() {
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut block = Tmc2209StallGuardBlock::from_config(Tmc2209StallGuardConfig::default());
-        let mut peripherals = WasmSimPeripherals::new();
-
-        let sim = block.as_sim_model().unwrap();
-        let out = sim.sim_tick(&[], 0.01, &mut peripherals);
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0], Some(Value::Float(0.0)));
-        assert_eq!(out[1], Some(Value::Float(0.0)));
-    }
-
-    #[test]
-    fn sim_mode_graph_adc_to_gain_to_pwm() {
-        use crate::dataflow::blocks::function::FunctionBlock;
-        use crate::dataflow::graph::DataflowGraph;
-        use crate::dataflow::sim_peripherals::WasmSimPeripherals;
-
-        let mut g = DataflowGraph::new();
-        g.set_simulation_mode(true);
-        let mut peripherals = WasmSimPeripherals::new();
-        peripherals.set_adc_voltage(0, 2.5);
-        g.set_sim_peripherals(peripherals);
-
-        let adc = g.add_block(Box::new(AdcBlock::from_config(AdcConfig::default())));
-        let gain = g.add_block(Box::new(FunctionBlock::gain(0.4)));
-        let pwm = g.add_block(Box::new(PwmBlock::from_config(PwmConfig::default())));
-
-        g.connect(adc, 0, gain, 0).unwrap();
-        g.connect(gain, 0, pwm, 0).unwrap();
-
-        // Tick 1: ADC reads 2.5
-        g.tick(0.01);
-        // Tick 2: Gain receives 2.5, outputs 1.0
-        g.tick(0.01);
-        // Tick 3: PWM receives 1.0
-        g.tick(0.01);
-
-        assert_eq!(g.get_sim_pwm(0), 1.0);
     }
 
     // --- Tick (normal mode) tests ---

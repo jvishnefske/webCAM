@@ -4,12 +4,12 @@
 //! The blocks still participate in the graph so the topology can be
 //! designed in the browser and later run natively.
 
-use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
+use module_traits::{Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
-use tsify_next::Tsify;
 
-#[derive(Debug, Serialize, Deserialize, Tsify)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "tsify", derive(tsify_next::Tsify))]
+#[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct UdpConfig {
     pub address: String,
 }
@@ -104,8 +104,8 @@ impl Tick for UdpSinkBlock {
     }
 }
 
-pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
-    reg.push(super::registry::BlockRegistration {
+pub(crate) fn register(reg: &mut Vec<crate::registry::BlockRegistration>) {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "udp_source",
         display_name: "UDP Source",
         category: "I/O",
@@ -114,7 +114,7 @@ pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
             Ok(Box::new(UdpSourceBlock::new(&cfg.address)))
         },
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "udp_sink",
         display_name: "UDP Sink",
         category: "I/O",

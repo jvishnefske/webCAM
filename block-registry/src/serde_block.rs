@@ -1,6 +1,6 @@
 //! Serde blocks: serialize/deserialize between typed values and bytes/text.
 
-use crate::dataflow::block::{Module, PortDef, PortKind, Tick, Value};
+use module_traits::{Module, PortDef, PortKind, Tick, Value};
 
 /// Encode a Float input as JSON text.
 #[derive(Default)]
@@ -80,14 +80,14 @@ impl Tick for JsonDecodeBlock {
 }
 
 #[allow(dead_code)]
-pub(crate) fn register(reg: &mut Vec<super::registry::BlockRegistration>) {
-    reg.push(super::registry::BlockRegistration {
+pub(crate) fn register(reg: &mut Vec<crate::registry::BlockRegistration>) {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "json_encode",
         display_name: "JSON Encode",
         category: "Serde",
         create_from_json: |_json| Ok(Box::new(JsonEncodeBlock::new())),
     });
-    reg.push(super::registry::BlockRegistration {
+    reg.push(crate::registry::BlockRegistration {
         block_type: "json_decode",
         display_name: "JSON Decode",
         category: "Serde",

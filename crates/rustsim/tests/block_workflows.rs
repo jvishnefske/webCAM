@@ -2,7 +2,7 @@
 //!
 //! These tests verify end-to-end dataflow through logic, embedded, and I/O blocks.
 
-use rustsim::dataflow::block::Value;
+use rustsim::dataflow::block::{Module, Value};
 use rustsim::dataflow::blocks;
 use rustsim::dataflow::graph::DataflowGraph;
 use rustsim::dataflow::sim_peripherals::WasmSimPeripherals;
@@ -357,4 +357,168 @@ fn register_state_machine_feedback_loop() {
         "Tick 3: SM should remain in running"
     );
     assert_eq!(graph.snapshot().tick_count, 3);
+}
+
+// ── SimModel tests (moved from embedded.rs — require WasmSimPeripherals) ──
+
+#[test]
+fn adc_sim_reads_configured_voltage() {
+    use blocks::embedded::{AdcBlock, AdcConfig};
+
+    let mut block = AdcBlock::from_config(AdcConfig {
+        channel: 2,
+        resolution_bits: 12,
+    });
+    let mut peripherals = WasmSimPeripherals::new();
+    peripherals.set_adc_voltage(2, 3.3);
+
+    let sim = block.as_sim_model().unwrap();
+    let out = sim.sim_tick(&[], 0.01, &mut peripherals);
+    assert_eq!(out[0], Some(Value::Float(3.3)));
+}
+
+#[test]
+fn pwm_sim_writes_duty() {
+    use blocks::embedded::{PwmBlock, PwmConfig};
+
+    let mut block = PwmBlock::from_config(PwmConfig {
+        channel: 1,
+        frequency_hz: 1000,
+    });
+    let mut peripherals = WasmSimPeripherals::new();
+    let duty = Value::Float(0.75);
+
+    let sim = block.as_sim_model().unwrap();
+    sim.sim_tick(&[Some(&duty)], 0.01, &mut peripherals);
+    assert_eq!(peripherals.get_pwm_duty(1), 0.75);
+}
+
+#[test]
+fn gpio_sim_roundtrip() {
+    use blocks::embedded::{GpioInBlock, GpioInConfig, GpioOutBlock, GpioOutConfig};
+
+    let mut peripherals = WasmSimPeripherals::new();
+    peripherals.set_gpio_state(5, true);
+
+    let mut in_block = GpioInBlock::from_config(GpioInConfig { pin: 5 });
+    let sim = in_block.as_sim_model().unwrap();
+    let out = sim.sim_tick(&[], 0.01, &mut peripherals);
+    assert_eq!(out[0], Some(Value::Float(1.0)));
+
+    let mut out_block = GpioOutBlock::from_config(GpioOutConfig { pin: 7 });
+    let val = Value::Float(1.0);
+    let sim = out_block.as_sim_model().unwrap();
+    sim.sim_tick(&[Some(&val)], 0.01, &mut peripherals);
+    assert!(peripherals.get_gpio_state(7));
+}
+
+#[test]
+fn uart_tx_sim_tick() {
+    use blocks::embedded::{UartTxBlock, UartTxConfig};
+
+    let mut block = UartTxBlock::from_config(UartTxConfig::default());
+    let mut peripherals = WasmSimPeripherals::new();
+    let data = Value::Bytes(vec![0x41, 0x42]);
+
+    let sim = block.as_sim_model().unwrap();
+    let out = sim.sim_tick(&[Some(&data)], 0.01, &mut peripherals);
+    assert!(out.is_empty());
+}
+
+#[test]
+fn uart_rx_sim_tick() {
+    use blocks::embedded::{UartRxBlock, UartRxConfig};
+
+    let mut block = UartRxBlock::from_config(UartRxConfig::default());
+    let mut peripherals = WasmSimPeripherals::new();
+
+    let sim = block.as_sim_model().unwrap();
+    let out = sim.sim_tick(&[], 0.01, &mut peripherals);
+    assert_eq!(out.len(), 1);
+    assert!(out[0].is_none());
+}
+
+#[test]
+fn encoder_sim_tick() {
+    use blocks::embedded::{EncoderBlock, EncoderConfig};
+
+    let mut block = EncoderBlock::from_config(EncoderConfig::default());
+    let mut peripherals = WasmSimPeripherals::new();
+
+    let sim = block.as_sim_model().unwrap();
+    let out = sim.sim_tick(&[], 0.01, &mut peripherals);
+    assert_eq!(out.len(), 2);
+    assert!(out[0].is_some());
+    assert!(out[1].is_some());
+}
+
+#[test]
+fn ssd1306_sim_tick() {
+    use blocks::embedded::{Ssd1306DisplayBlock, Ssd1306DisplayConfig};
+
+    let mut block = Ssd1306DisplayBlock::from_config(Ssd1306DisplayConfig::default());
+    let mut peripherals = WasmSimPeripherals::new();
+
+    let line1 = Value::Text("hello".into());
+    let line2 = Value::Text("world".into());
+    let sim = block.as_sim_model().unwrap();
+    let out = sim.sim_tick(&[Some(&line1), Some(&line2)], 0.01, &mut peripherals);
+    assert!(out.is_empty());
+}
+
+#[test]
+fn tmc2209_stepper_sim_tick() {
+    use blocks::embedded::{Tmc2209StepperBlock, Tmc2209StepperConfig};
+
+    let mut block = Tmc2209StepperBlock::from_config(Tmc2209StepperConfig::default());
+    let mut peripherals = WasmSimPeripherals::new();
+
+    let target = Value::Float(100.0);
+    let enable = Value::Float(1.0);
+    let sim = block.as_sim_model().unwrap();
+    let out = sim.sim_tick(&[Some(&target), Some(&enable)], 0.01, &mut peripherals);
+    assert_eq!(out.len(), 1);
+    assert!(out[0].is_some());
+}
+
+#[test]
+fn tmc2209_stallguard_sim_tick() {
+    use blocks::embedded::{Tmc2209StallGuardBlock, Tmc2209StallGuardConfig};
+
+    let mut block = Tmc2209StallGuardBlock::from_config(Tmc2209StallGuardConfig::default());
+    let mut peripherals = WasmSimPeripherals::new();
+
+    let sim = block.as_sim_model().unwrap();
+    let out = sim.sim_tick(&[], 0.01, &mut peripherals);
+    assert_eq!(out.len(), 2);
+    assert_eq!(out[0], Some(Value::Float(0.0)));
+    assert_eq!(out[1], Some(Value::Float(0.0)));
+}
+
+#[test]
+fn sim_mode_graph_adc_to_gain_to_pwm() {
+    use blocks::embedded::{AdcBlock, AdcConfig, PwmBlock, PwmConfig};
+    use blocks::function::FunctionBlock;
+
+    let mut g = DataflowGraph::new();
+    g.set_simulation_mode(true);
+    let mut peripherals = WasmSimPeripherals::new();
+    peripherals.set_adc_voltage(0, 2.5);
+    g.set_sim_peripherals(peripherals);
+
+    let adc = g.add_block(Box::new(AdcBlock::from_config(AdcConfig::default())));
+    let gain = g.add_block(Box::new(FunctionBlock::gain(0.4)));
+    let pwm = g.add_block(Box::new(PwmBlock::from_config(PwmConfig::default())));
+
+    g.connect(adc, 0, gain, 0).unwrap();
+    g.connect(gain, 0, pwm, 0).unwrap();
+
+    // Tick 1: ADC reads 2.5
+    g.tick(0.01);
+    // Tick 2: Gain receives 2.5, outputs 1.0
+    g.tick(0.01);
+    // Tick 3: PWM receives 1.0
+    g.tick(0.01);
+
+    assert_eq!(g.get_sim_pwm(0), 1.0);
 }
