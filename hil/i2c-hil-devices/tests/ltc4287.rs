@@ -1170,3 +1170,219 @@ fn block_read_ic_device_rev() {
     assert_eq!(buf[0], 1); // length
     assert_eq!(buf[1], 0x11);
 }
+
+// --- ON state with OPERATION=0x80: all false paths ---
+
+#[test]
+fn status_byte_on_no_faults() {
+    // No faults, but OPERATION defaults to 0x00 so OFF bit is set.
+    // We need to write OPERATION=0x80 to clear OFF bit.
+    let mut bus = SimBusBuilder::new().with_device(Ltc4287::new(addr())).build();
+    write_byte(&mut bus, 0x44, 0x01, 0x80);
+
+    let sb = read_byte(&mut bus, 0x44, 0x78);
+    assert_eq!(sb, 0x00, "STATUS_BYTE should be 0 when ON and no faults");
+}
+
+#[test]
+fn status_word_on_no_faults() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+    write_byte(&mut bus, 0x44, 0x01, 0x80);
+
+    let sw = read_word_le(&mut bus, 0x44, 0x79);
+    assert_eq!(sw, 0x0000, "STATUS_WORD should be 0 when ON and no faults");
+}
+
+// --- Extended register write/read for MFR_CONFIG2 ---
+
+#[test]
+fn extended_write_read_mfr_config2() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+    let val: u16 = 0x1234;
+    let le = val.to_le_bytes();
+    bus.write(0x44, &[0xFE, 0xF3, le[0], le[1]]).unwrap();
+
+    let mut buf = [0u8; 2];
+    bus.write_read(0x44, &[0xFE, 0xF3], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0x1234);
+}
+
+// --- Extended register write/read for MFR_ON_OFF_CONFIG ---
+
+#[test]
+fn extended_write_read_mfr_on_off_config() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+    let val: u16 = 0xABCD;
+    let le = val.to_le_bytes();
+    bus.write(0x44, &[0xFE, 0xFC, le[0], le[1]]).unwrap();
+
+    let mut buf = [0u8; 2];
+    bus.write_read(0x44, &[0xFE, 0xFC], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0xABCD);
+}
+
+// --- Extended register write/read for MFR_REBOOT_CONTROL (byte) ---
+
+#[test]
+fn extended_write_read_mfr_reboot_control() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+    bus.write(0x44, &[0xFE, 0xFD, 0x42]).unwrap();
+    assert_eq!(read_byte(&mut bus, 0x44, 0xFD), 0x42);
+}
+
+// --- Extended read for unknown register returns NAK ---
+
+#[test]
+fn extended_read_unknown_returns_nak() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+    bus.write(0x44, &[0xFE, 0x30]).unwrap();
+    let mut buf = [0u8; 1];
+    let result = bus.read(0x44, &mut buf);
+    assert_eq!(result, Err(BusError::DataNak));
+}
+
+// --- Extended write for unknown byte register returns NAK ---
+
+#[test]
+fn extended_write_unknown_byte_returns_nak() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+    let result = bus.write(0x44, &[0xFE, 0x30, 0x01]);
+    assert_eq!(result, Err(BusError::DataNak));
+}
+
+// --- Extended write for unknown word register returns NAK ---
+
+#[test]
+fn extended_write_unknown_word_returns_nak() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+    let result = bus.write(0x44, &[0xFE, 0x30, 0x01, 0x02]);
+    assert_eq!(result, Err(BusError::DataNak));
+}
+
+// --- Write byte register tests for all writable byte registers ---
+
+#[test]
+fn write_fault_response_registers() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+
+    // IOUT_OC_FAULT_RESPONSE
+    write_byte(&mut bus, 0x44, 0x47, 0x55);
+    assert_eq!(read_byte(&mut bus, 0x44, 0x47), 0x55);
+
+    // OT_FAULT_RESPONSE
+    write_byte(&mut bus, 0x44, 0x50, 0x66);
+    assert_eq!(read_byte(&mut bus, 0x44, 0x50), 0x66);
+
+    // VIN_OV_FAULT_RESPONSE
+    write_byte(&mut bus, 0x44, 0x56, 0x77);
+    assert_eq!(read_byte(&mut bus, 0x44, 0x56), 0x77);
+
+    // VIN_UV_FAULT_RESPONSE
+    write_byte(&mut bus, 0x44, 0x5A, 0x88);
+    assert_eq!(read_byte(&mut bus, 0x44, 0x5A), 0x88);
+}
+
+#[test]
+fn write_mfr_byte_registers() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+
+    // MFR_FLT_CONFIG
+    write_byte(&mut bus, 0x44, 0xD2, 0x33);
+    assert_eq!(read_byte(&mut bus, 0x44, 0xD2), 0x33);
+
+    // MFR_ADC_CONFIG
+    write_byte(&mut bus, 0x44, 0xD8, 0x44);
+    assert_eq!(read_byte(&mut bus, 0x44, 0xD8), 0x44);
+
+    // MFR_AVG_SEL
+    write_byte(&mut bus, 0x44, 0xD9, 0x55);
+    assert_eq!(read_byte(&mut bus, 0x44, 0xD9), 0x55);
+
+    // MFR_REBOOT_CONTROL
+    write_byte(&mut bus, 0x44, 0xFD, 0x66);
+    assert_eq!(read_byte(&mut bus, 0x44, 0xFD), 0x66);
+}
+
+// --- Write word limit registers ---
+
+#[test]
+fn write_word_limit_registers() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+
+    // UT_WARN_LIMIT
+    write_word_le(&mut bus, 0x44, 0x52, 0x1111);
+    assert_eq!(read_word_le(&mut bus, 0x44, 0x52), 0x1111);
+
+    // PIN_OP_WARN_LIMIT
+    write_word_le(&mut bus, 0x44, 0x6B, 0x2222);
+    assert_eq!(read_word_le(&mut bus, 0x44, 0x6B), 0x2222);
+
+    // MFR_OP_FAULT_RESPONSE
+    write_word_le(&mut bus, 0x44, 0xD7, 0x3333);
+    assert_eq!(read_word_le(&mut bus, 0x44, 0xD7), 0x3333);
+}
+
+// --- Read-only byte register writes return NAK ---
+
+#[test]
+fn write_to_capability_returns_nak() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+    let result = bus.write(0x44, &[0x19, 0x00]);
+    assert_eq!(result, Err(BusError::DataNak));
+}
+
+#[test]
+fn write_to_mfr_common_returns_nak() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+    let result = bus.write(0x44, &[0xEF, 0x00]);
+    assert_eq!(result, Err(BusError::DataNak));
+}
+
+// --- Read-only word register writes return NAK ---
+
+#[test]
+fn write_to_mfr_special_id_returns_nak() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+    let result = bus.write(0x44, &[0xE7, 0x00, 0x00]);
+    assert_eq!(result, Err(BusError::DataNak));
+}
+
+// --- Empty write is ok ---
+
+#[test]
+fn empty_write_is_noop() {
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
+    // Write with data.len() == 0 via operations
+    use embedded_hal::i2c::I2c;
+    use embedded_hal::i2c::Operation;
+    let result = bus.transaction(0x44, &mut [Operation::Write(&[])]);
+    assert!(result.is_ok());
+}

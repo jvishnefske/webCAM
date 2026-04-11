@@ -248,4 +248,62 @@ endsolid cube";
             "Error should mention too short, got: {err}"
         );
     }
+
+    #[test]
+    fn test_parse_stl_very_short_data() {
+        // Data less than 84 bytes goes to parse_ascii_stl
+        let data = b"short";
+        let result = parse_stl(data);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_vertex_line_none() {
+        let result = parse_vertex_line(None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unexpected end"));
+    }
+
+    #[test]
+    fn test_parse_ascii_vec3_wrong_float_count() {
+        let result = parse_ascii_vec3("vertex 1.0 2.0", "vertex");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Expected 3 floats"));
+    }
+
+    #[test]
+    fn test_parse_ascii_vec3_wrong_prefix() {
+        let result = parse_ascii_vec3("normal 1.0 2.0 3.0", "vertex");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Expected 'vertex'"));
+    }
+
+    #[test]
+    fn test_parse_ascii_vec3_invalid_float() {
+        let result = parse_ascii_vec3("vertex abc def ghi", "vertex");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Float parse error"));
+    }
+
+    #[test]
+    fn test_parse_stl_binary_starting_with_solid() {
+        // Binary STL that starts with "solid" but has matching size
+        let mut data = vec![0u8; 84 + 50];
+        // Write "solid" at start of header
+        data[..5].copy_from_slice(b"solid");
+        // Triangle count = 1
+        data[80] = 1;
+        // Normal (0,0,1)
+        let nz: [u8; 4] = 1.0f32.to_le_bytes();
+        data[84 + 8..84 + 12].copy_from_slice(&nz);
+        // v0 = (0,0,0) — already zeros
+        // v1 = (1,0,0)
+        let one: [u8; 4] = 1.0f32.to_le_bytes();
+        data[84 + 12..84 + 16].copy_from_slice(&one);
+        // v2 = (0,1,0)
+        data[84 + 28..84 + 32].copy_from_slice(&one);
+        // Size matches: 84 + 1*50 = 134 bytes
+        let mesh = parse_stl(&data).unwrap();
+        assert_eq!(mesh.triangles.len(), 1);
+    }
 }

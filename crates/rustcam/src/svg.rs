@@ -700,4 +700,128 @@ mod tests {
         assert!((last.x - 45.0).abs() < 1e-10);
         assert!((last.y - 5.0).abs() < 1e-10);
     }
+
+    // ── Additional coverage gap tests ──────────────────────────────
+
+    #[test]
+    fn test_read_one_unexpected_end() {
+        let tokens: Vec<String> = vec![];
+        let mut i = 0;
+        let result = read_one(&tokens, &mut i);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unexpected end"));
+    }
+
+    #[test]
+    fn test_read_one_not_a_number() {
+        let tokens = vec!["abc".to_string()];
+        let mut i = 0;
+        let result = read_one(&tokens, &mut i);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Expected number"));
+    }
+
+    #[test]
+    fn test_unknown_path_command() {
+        // Unknown command 'X' should be skipped
+        let svg = r#"<svg><path d="M 0 0 L 10 0 X 5 5 L 10 10 Z"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        // M + L + L produces 3 points (X is skipped, but 5 and 5 are consumed as L-like)
+        assert!(!paths[0].points.is_empty());
+    }
+
+    #[test]
+    fn test_implicit_lineto_after_m() {
+        // After M, subsequent coordinate pairs are implicit L commands
+        let svg = r#"<svg><path d="M 0 0 10 10 20 0"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].points.len(), 3);
+        assert_eq!(paths[0].points[1], Vec2::new(10.0, 10.0));
+        assert_eq!(paths[0].points[2], Vec2::new(20.0, 0.0));
+    }
+
+    #[test]
+    fn test_implicit_lineto_after_relative_m() {
+        // After m, subsequent coordinate pairs are implicit relative l commands
+        let svg = r#"<svg><path d="m 0 0 10 10 20 0"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths.len(), 1);
+        assert_eq!(paths[0].points.len(), 3);
+        assert_eq!(paths[0].points[1], Vec2::new(10.0, 10.0));
+        assert_eq!(paths[0].points[2], Vec2::new(30.0, 10.0));
+    }
+
+    #[test]
+    fn test_parse_points_attr_invalid_number() {
+        let result = parse_points_attr("10,abc");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("parse error"));
+    }
+
+    #[test]
+    fn test_tokenize_d_negative_after_number() {
+        // Negative sign after a number should split the token
+        let tokens = tokenize_d("10-20");
+        assert_eq!(tokens.len(), 2);
+        assert_eq!(tokens[0], "10");
+        assert_eq!(tokens[1], "-20");
+    }
+
+    #[test]
+    fn test_tokenize_d_scientific_notation() {
+        // Negative sign after 'e' should NOT split (scientific notation)
+        let tokens = tokenize_d("1e-5");
+        assert_eq!(tokens.len(), 1);
+        assert_eq!(tokens[0], "1e-5");
+    }
+
+    #[test]
+    fn test_multiple_l_commands() {
+        let svg = r#"<svg><path d="M 0 0 L 10 0 10 10 0 10"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths[0].points.len(), 4);
+    }
+
+    #[test]
+    fn test_multiple_relative_l_commands() {
+        let svg = r#"<svg><path d="M 0 0 l 10 0 0 10 -10 0"/></svg>"#;
+        let paths = parse_svg(svg).unwrap();
+        assert_eq!(paths[0].points.len(), 4);
+        assert_eq!(paths[0].points[3], Vec2::new(0.0, 10.0));
+    }
+
+    #[test]
+    fn test_empty_path_d() {
+        // Path with empty d attribute should produce empty polyline
+        let result = parse_path_d("");
+        assert!(result.is_ok());
+        assert!(result.unwrap().points.is_empty());
+    }
+
+    #[test]
+    fn test_rect_zero_dimensions() {
+        // Rect with zero width or height should be skipped
+        let svg = r#"<rect x="0" y="0" width="0" height="10"/>"#;
+        let rects = extract_rects(svg);
+        assert!(rects.is_empty());
+    }
+
+    #[test]
+    fn test_circle_zero_radius() {
+        // Circle with zero radius should be skipped
+        let svg = r#"<circle cx="5" cy="5" r="0"/>"#;
+        let circles = extract_circles(svg);
+        assert!(circles.is_empty());
+    }
+
+    #[test]
+    fn test_rect_missing_x_y() {
+        // Rect without x/y attributes should default to 0,0
+        let svg = r#"<rect width="10" height="5"/>"#;
+        let rects = extract_rects(svg);
+        assert_eq!(rects.len(), 1);
+        assert_eq!(rects[0].points[0], Vec2::new(0.0, 0.0));
+    }
 }

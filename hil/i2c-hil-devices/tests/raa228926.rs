@@ -489,3 +489,43 @@ fn clear_faults_clears_injected_faults() {
         assert_eq!(buf[0], 0x00, "Sub-status 0x{cmd:02X} should be cleared");
     }
 }
+
+// --- ON state: no OFF bit, no faults ---
+
+#[test]
+fn computed_status_byte_on_no_faults() {
+    // OPERATION=0x80 (ON) → OFF bit should be clear, no faults → 0x00
+    let mut bus = make_bus(); // default OPERATION=0x80
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x78], &mut buf).unwrap();
+    assert_eq!(buf[0], 0x00, "STATUS_BYTE should be 0 when ON and no faults");
+}
+
+#[test]
+fn computed_status_word_on_no_faults() {
+    let mut bus = make_bus();
+    let mut buf = [0u8; 2];
+    bus.write_read(ADDR, &[0x79], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0x0000, "STATUS_WORD should be 0 when ON and no faults");
+}
+
+#[test]
+fn telemetry_setters_via_bus() {
+    let dev = Raa228926::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_read_vin(0x1234);
+    engine.device_mut().set_read_vout(0x5678);
+    engine.device_mut().set_read_iout(0x9ABC);
+    engine.device_mut().set_read_temperature_1(0xDEF0);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    let mut buf = [0u8; 2];
+    bus.write_read(ADDR, &[0x88], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0x1234);
+    bus.write_read(ADDR, &[0x8B], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0x5678);
+    bus.write_read(ADDR, &[0x8C], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0x9ABC);
+    bus.write_read(ADDR, &[0x8D], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0xDEF0);
+}

@@ -351,7 +351,7 @@ mod tests {
                     name: "out".to_string(),
                     kind: lower::PortKind::Float,
                 }],
-                config: serde_json::json!({"value": 3.14}),
+                config: serde_json::json!({"value": std::f64::consts::PI}),
                 is_delay: false,
             }],
             channels: vec![],
@@ -366,7 +366,7 @@ mod tests {
             "Rust source should not be empty"
         );
         assert!(
-            output.ir_module.funcs.len() >= 1,
+            !output.ir_module.funcs.is_empty(),
             "IR module should have at least 1 function"
         );
     }

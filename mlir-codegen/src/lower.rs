@@ -2070,4 +2070,148 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("unsupported"));
     }
+
+    // ── Text MLIR lowering: multiply block ──────────────────────────
+
+    #[test]
+    fn lower_multiply_block() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 3.0})),
+            make_block(2, "constant", serde_json::json!({"value": 7.0})),
+            {
+                let mut b = make_block(3, "multiply", serde_json::json!({}));
+                b.inputs = vec![
+                    PortDef { name: "a".to_string(), kind: PortKind::Float },
+                    PortDef { name: "b".to_string(), kind: PortKind::Float },
+                ];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 3, 0), make_channel(2, 2, 0, 3, 1)];
+        let snap = GraphSnapshot { blocks, channels };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("arith.mulf %v1_p0, %v2_p0"), "expected mulf, got:\n{mlir}");
+    }
+
+    // ── Text MLIR lowering: state_machine block ─────────────────────
+
+    #[test]
+    fn lower_state_machine_block() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            {
+                let mut b = make_block(2, "state_machine", serde_json::json!({}));
+                b.inputs = vec![
+                    PortDef { name: "trigger".to_string(), kind: PortKind::Float },
+                ];
+                b.outputs = vec![
+                    PortDef { name: "state".to_string(), kind: PortKind::Float },
+                    PortDef { name: "active".to_string(), kind: PortKind::Float },
+                ];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("func.call @block_2"), "expected func.call @block_2, got:\n{mlir}");
+    }
+
+    // ── Text MLIR lowering: register (delay) block ──────────────────
+
+    #[test]
+    fn lower_register_block() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 5.0})),
+            {
+                let mut b = make_block(2, "register", serde_json::json!({"initial_value": 0.0}));
+                b.inputs = vec![
+                    PortDef { name: "in".to_string(), kind: PortKind::Float },
+                ];
+                b.is_delay = true;
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("dataflow.delay"), "expected dataflow.delay, got:\n{mlir}");
+    }
+
+    // ── Text MLIR lowering: channel_read with empty channel name ────
+
+    #[test]
+    fn lower_channel_read_empty_name() {
+        let blocks = vec![{
+            let mut b = make_block(1, "channel_read", serde_json::json!({}));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let mlir = lower_graph(&snap).unwrap();
+        // Falls back to "ch_1"
+        assert!(mlir.contains("func.call @channel_read_ch_1"), "expected fallback name ch_1, got:\n{mlir}");
+    }
+
+    // ── Text MLIR lowering: channel_write with empty channel name ───
+
+    #[test]
+    fn lower_channel_write_empty_name() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            {
+                let mut b = make_block(2, "channel_write", serde_json::json!({}));
+                b.inputs = vec![PortDef { name: "value".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("func.call @channel_write_ch_2"), "expected fallback name ch_2, got:\n{mlir}");
+    }
+
+    // ── Text MLIR lowering: pubsub_sink with empty topic ────────────
+
+    #[test]
+    fn lower_pubsub_sink_empty_topic() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            {
+                let mut b = make_block(2, "pubsub_sink", serde_json::json!({}));
+                b.inputs = vec![PortDef { name: "value".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("func.call @publish_unknown"), "expected fallback topic 'unknown', got:\n{mlir}");
+    }
+
+    // ── Text MLIR lowering: pubsub_source with empty topic ──────────
+
+    #[test]
+    fn lower_pubsub_source_empty_topic() {
+        let blocks = vec![{
+            let mut b = make_block(1, "pubsub_source", serde_json::json!({}));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("func.call @subscribe_unknown"), "expected fallback topic 'unknown', got:\n{mlir}");
+    }
+
+    // ── Config helpers coverage ─────────────────────────────────────
+
+    #[test]
+    fn config_helpers_missing_keys() {
+        let block = make_block(1, "constant", serde_json::json!({}));
+        assert_eq!(config_float(&block, "missing"), 0.0);
+        assert_eq!(config_u64(&block, "missing"), 0);
+        assert_eq!(config_str(&block, "missing"), "");
+    }
 }

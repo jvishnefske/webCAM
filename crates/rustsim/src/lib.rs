@@ -1933,4 +1933,249 @@ mod tests {
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("panel not found"));
     }
+
+    // ── Error-path tests for _impl functions (graph-not-found closures) ──
+
+    #[test]
+    fn test_add_block_impl_graph_not_found() {
+        let result = add_block_impl(99999, "constant", r#"{"value":1.0}"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_remove_block_impl_graph_not_found() {
+        let result = remove_block_impl(99999, 1);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_update_block_impl_graph_not_found() {
+        let result = update_block_impl(99999, 1, "constant", r#"{"value":1.0}"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_connect_impl_graph_not_found() {
+        let result = connect_impl(99999, 1, 0, 2, 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_disconnect_impl_graph_not_found() {
+        let result = disconnect_impl(99999, 1);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_advance_impl_graph_not_found() {
+        let result = advance_impl(99999, 0.01);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_run_impl_graph_not_found() {
+        let result = run_impl(99999, 10, 0.01);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_set_speed_impl_not_found() {
+        let result = set_speed_impl(99999, 2.0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("scheduler not found"));
+    }
+
+    #[test]
+    fn test_snapshot_impl_graph_not_found() {
+        let result = snapshot_impl(99999);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_codegen_impl_graph_not_found() {
+        let result = codegen_impl(99999, 0.01);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_codegen_multi_impl_graph_not_found() {
+        let result = codegen_multi_impl(99999, 0.01, "[]");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_set_simulation_mode_impl_not_found() {
+        let result = set_simulation_mode_impl(99999, true);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_set_sim_adc_impl_not_found() {
+        let result = set_sim_adc_impl(99999, 0, 3.3);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_get_sim_pwm_impl_not_found() {
+        let result = get_sim_pwm_impl(99999, 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_add_i2c_device_impl_not_found() {
+        let result = add_i2c_device_impl(99999, 0, 0x48, "TMP1075");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_remove_i2c_device_impl_not_found() {
+        let result = remove_i2c_device_impl(99999, 0, 0x48);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_configure_serial_impl_not_found() {
+        let result = configure_serial_impl(99999, 0, 9600, 8, 0, 1);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_tcp_inject_impl_not_found() {
+        let result = tcp_inject_impl(99999, 0, &[1, 2, 3]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_panel_save_impl_not_found() {
+        let result = panel_save_impl(99999);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel not found"));
+    }
+
+    #[test]
+    fn test_panel_add_widget_impl_not_found() {
+        let result = panel_add_widget_impl(99999, r#"{"id":0,"kind":{"type":"Toggle"},"label":"X","position":{"x":0.0,"y":0.0},"size":{"width":50.0,"height":50.0},"channels":[]}"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel not found"));
+    }
+
+    #[test]
+    fn test_panel_remove_widget_impl_not_found() {
+        let result = panel_remove_widget_impl(99999, 1);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel not found"));
+    }
+
+    #[test]
+    fn test_panel_update_widget_impl_not_found() {
+        let result = panel_update_widget_impl(99999, 1, r#"{"id":0,"kind":{"type":"Toggle"},"label":"X","position":{"x":0.0,"y":0.0},"size":{"width":50.0,"height":50.0},"channels":[]}"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel not found"));
+    }
+
+    #[test]
+    fn test_panel_set_topic_impl_not_found() {
+        let result = panel_set_topic_impl(99999, "topic", 1.0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel runtime not found"));
+    }
+
+    #[test]
+    fn test_panel_get_values_impl_not_found() {
+        let result = panel_get_values_impl(99999);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel runtime not found"));
+    }
+
+    #[test]
+    fn test_add_block_impl_invalid_block_type() {
+        let gid = dataflow_new(0.01);
+        let result = add_block_impl(gid, "nonexistent_block", "{}");
+        assert!(result.is_err());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_update_block_impl_invalid_block_type() {
+        let gid = dataflow_new(0.01);
+        let bid = add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let result = update_block_impl(gid, bid, "nonexistent_block", "{}");
+        assert!(result.is_err());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_codegen_multi_impl_invalid_targets_json() {
+        let gid = dataflow_new(0.01);
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let result = codegen_multi_impl(gid, 0.01, "not valid json");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid targets JSON"));
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_block_types_impl() {
+        let types = block_types_impl();
+        assert!(!types.is_empty());
+    }
+
+    #[test]
+    fn test_advance_impl_success() {
+        let gid = dataflow_new(0.01);
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let result = advance_impl(gid, 0.05);
+        assert!(result.is_ok());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_run_impl_success() {
+        let gid = dataflow_new(0.01);
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let result = run_impl(gid, 5, 0.01);
+        assert!(result.is_ok());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_snapshot_impl_success() {
+        let gid = dataflow_new(0.01);
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let result = snapshot_impl(gid);
+        assert!(result.is_ok());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_panel_load_impl_invalid_json() {
+        let result = panel_load_impl("not valid json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_panel_update_widget_impl_widget_not_found() {
+        let id = panel_new("Test");
+        let result = panel_update_widget_impl(id, 9999, r#"{"id":0,"kind":{"type":"Toggle"},"label":"X","position":{"x":0.0,"y":0.0},"size":{"width":50.0,"height":50.0},"channels":[]}"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("widget not found"));
+        panel_destroy(id);
+    }
 }

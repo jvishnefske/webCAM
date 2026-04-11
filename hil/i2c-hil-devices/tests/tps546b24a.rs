@@ -493,3 +493,72 @@ fn status_byte_w1c_cascade_mfr() {
     bus.write_read(ADDR, &[0x80], &mut buf).unwrap();
     assert_eq!(buf[0], 0x00, "STATUS_MFR_SPECIFIC should be cleared");
 }
+
+// --- ON state: no OFF bit, no faults ---
+
+#[test]
+fn computed_status_byte_on_no_faults() {
+    let mut bus = make_bus();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x78], &mut buf).unwrap();
+    assert_eq!(buf[0], 0x00, "STATUS_BYTE should be 0 when ON and no faults");
+}
+
+#[test]
+fn computed_status_word_on_no_faults() {
+    let mut bus = make_bus();
+    let mut buf = [0u8; 2];
+    bus.write_read(ADDR, &[0x79], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0x0000, "STATUS_WORD should be 0 when ON and no faults");
+}
+
+#[test]
+fn telemetry_setters_via_bus() {
+    let dev = Tps546b24a::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_read_vin(0x1234);
+    engine.device_mut().set_read_vout(0x5678);
+    engine.device_mut().set_read_iout(0x9ABC);
+    engine.device_mut().set_read_temperature_1(0xDEF0);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    let mut buf = [0u8; 2];
+    bus.write_read(ADDR, &[0x88], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0x1234);
+    bus.write_read(ADDR, &[0x8B], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0x5678);
+    bus.write_read(ADDR, &[0x8C], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0x9ABC);
+    bus.write_read(ADDR, &[0x8D], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0xDEF0);
+}
+
+// --- Additional computed status coverage ---
+
+#[test]
+fn computed_status_word_all_faults() {
+    let dev = Tps546b24a::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_vout(0xFF);
+    engine.device_mut().set_status_iout(0xFF);
+    engine.device_mut().set_status_input(0xFF);
+    engine.device_mut().set_status_mfr_specific(0xFF);
+    engine.device_mut().set_status_temperature(0xFF);
+    engine.device_mut().set_status_cml(0xFF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    let mut buf = [0u8; 2];
+    bus.write_read(ADDR, &[0x79], &mut buf).unwrap();
+    let word = u16::from_le_bytes(buf);
+    // All high byte bits should be set
+    assert_ne!(word & (1 << 15), 0, "VOUT bit");
+    assert_ne!(word & (1 << 14), 0, "IOUT bit");
+    assert_ne!(word & (1 << 13), 0, "INPUT bit");
+    assert_ne!(word & (1 << 12), 0, "MFR bit");
+    // All low byte bits should be set too
+    assert_ne!(word & (1 << 4), 0, "IOUT_OC bit");
+    assert_ne!(word & (1 << 3), 0, "VIN_UV bit");
+    assert_ne!(word & (1 << 2), 0, "TEMP bit");
+    assert_ne!(word & (1 << 1), 0, "CML bit");
+    assert_ne!(word & 1, 0, "MFR_SPECIFIC bit");
+}

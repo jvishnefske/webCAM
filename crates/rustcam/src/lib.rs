@@ -2081,4 +2081,91 @@ endsolid test"
         assert!(sketch_add_constraint_impl("equal_length", &four, 0.0, 0.0).is_ok());
         assert!(sketch_add_constraint_impl("symmetric", &four, 0.0, 0.0).is_ok());
     }
+
+    // ── Error path tests ─────────────────────────────────────────────
+
+    #[test]
+    fn test_process_stl_invalid_config_json() {
+        let result = process_stl_impl(minimal_ascii_stl(), "not valid json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_process_svg_invalid_config_json() {
+        let result = process_svg_impl(simple_svg(), "not valid json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_preview_stl_invalid_config_json() {
+        let result = preview_stl_impl(minimal_ascii_stl(), "not valid json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sim_moves_stl_invalid_config_json() {
+        let result = sim_moves_stl_impl(minimal_ascii_stl(), "not valid json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sim_moves_svg_invalid_config_json() {
+        let result = sim_moves_svg_impl(simple_svg(), "not valid json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_preview_svg_invalid_svg() {
+        let result = preview_svg_impl("<svg></svg>");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sketch_add_constraint_unknown_kind() {
+        sketch_reset();
+        let p1: serde_json::Value = serde_json::from_str(&sketch_add_point(0.0, 0.0)).unwrap();
+        let id1 = p1["id"].as_u64().unwrap() as u32;
+        let result = sketch_add_constraint_impl("unknown_constraint", &format!("[{id1}]"), 0.0, 0.0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown constraint"));
+    }
+
+    #[test]
+    fn test_sketch_add_constraint_invalid_ids_json() {
+        sketch_reset();
+        let result = sketch_add_constraint_impl("distance", "not json", 0.0, 0.0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_process_svg_invalid_svg_content() {
+        let result = process_svg_impl("<svg></svg>", "{}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_process_svg_laser_rejects_invalid_strategy() {
+        let config_json = r#"{"machine_type": "laser_cutter", "strategy": "zigzag"}"#;
+        let result = process_svg_impl(simple_svg(), config_json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_process_stl_invalid_stl_data() {
+        let result = process_stl_impl(b"not stl data", "{}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_laser_params_from_config_defaults() {
+        // Laser config with no optional fields
+        let config = CamConfig {
+            machine_type: "laser_cutter".into(),
+            ..CamConfig::default()
+        };
+        let lp = laser_params_from_config(&config).unwrap();
+        assert!((lp.power - 100.0).abs() < f64::EPSILON);
+        assert_eq!(lp.passes, 1);
+        assert!(!lp.air_assist);
+    }
 }
