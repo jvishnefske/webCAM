@@ -6,9 +6,11 @@
 
 pub mod concurrency;
 pub mod emit;
-pub mod partition;
 pub mod topo;
 pub mod types;
+
+/// Re-export deployment partition for backward compatibility.
+pub use deployment::partition;
 
 // Re-export target-registry types for backward compatibility within rustsim.
 pub use target_registry::binding;

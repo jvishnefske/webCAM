@@ -31,6 +31,7 @@ members = [
     "block-registry",
     "configurable-blocks",
     "target-registry",
+    "deployment",
 ]
 default-members = [
     "crates/rustcam",
@@ -46,6 +47,7 @@ default-members = [
     "block-registry",
     "configurable-blocks",
     "target-registry",
+    "deployment",
     "hil/native-server",
 ]
 

@@ -5,7 +5,6 @@ use std::fmt::Write;
 
 use crate::dataflow::block::BlockId;
 use crate::dataflow::codegen::concurrency::find_parallel_groups;
-use crate::dataflow::codegen::partition;
 use crate::dataflow::codegen::topo::topological_sort;
 use crate::dataflow::graph::{BlockSnapshot, GraphSnapshot};
 use target_registry::binding::TargetWithBinding;
@@ -40,6 +39,75 @@ fn to_graph_model_snapshot(snap: &GraphSnapshot) -> graph_model::GraphSnapshot {
                 to_port: c.to_port,
             })
             .collect(),
+    }
+}
+
+/// Convert a `graph_model::GraphSnapshot` (e.g. a partition sub-graph) back
+/// to a rustsim-local [`GraphSnapshot`], using the original snapshot's blocks
+/// to fill in `output_values`, `target`, and `custom_codegen`.
+///
+/// Bridge blocks (pubsub_sink/pubsub_source) that don't exist in the original
+/// snapshot get default values for those fields.
+fn from_graph_model_sub_snapshot(
+    gm_snap: &graph_model::GraphSnapshot,
+    original: &GraphSnapshot,
+    target_family: Option<TargetFamily>,
+) -> GraphSnapshot {
+    let orig_map: HashMap<u32, &BlockSnapshot> =
+        original.blocks.iter().map(|b| (b.id, b)).collect();
+
+    GraphSnapshot {
+        blocks: gm_snap
+            .blocks
+            .iter()
+            .map(|b| {
+                if let Some(orig) = orig_map.get(&b.id.0) {
+                    BlockSnapshot {
+                        id: b.id.0,
+                        block_type: b.block_type.clone(),
+                        name: b.name.clone(),
+                        inputs: b.inputs.clone(),
+                        outputs: b.outputs.clone(),
+                        config: b.config.clone(),
+                        output_values: orig.output_values.clone(),
+                        target: orig.target,
+                        custom_codegen: orig.custom_codegen.clone(),
+                        is_delay: b.is_delay,
+                    }
+                } else {
+                    // Bridge block — not in original snapshot
+                    BlockSnapshot {
+                        id: b.id.0,
+                        block_type: b.block_type.clone(),
+                        name: b.name.clone(),
+                        inputs: b.inputs.clone(),
+                        outputs: b.outputs.clone(),
+                        config: b.config.clone(),
+                        output_values: b
+                            .outputs
+                            .iter()
+                            .map(|_| None)
+                            .collect(),
+                        target: target_family,
+                        custom_codegen: None,
+                        is_delay: b.is_delay,
+                    }
+                }
+            })
+            .collect(),
+        channels: gm_snap
+            .channels
+            .iter()
+            .map(|c| crate::dataflow::channel::Channel {
+                id: crate::dataflow::channel::ChannelId(c.id.0),
+                from_block: crate::dataflow::block::BlockId(c.from_block.0),
+                from_port: c.from_port,
+                to_block: crate::dataflow::block::BlockId(c.to_block.0),
+                to_port: c.to_port,
+            })
+            .collect(),
+        tick_count: original.tick_count,
+        time: original.time,
     }
 }
 
@@ -1357,15 +1425,46 @@ pub fn generate_distributed_workspace(
     snap: &GraphSnapshot,
     config: &DistributedConfig,
 ) -> Result<DistributedWorkspace, String> {
+    // Build assignments map from block.target and convert to graph_model snapshot.
+    let assignments: HashMap<graph_model::BlockId, String> = snap
+        .blocks
+        .iter()
+        .filter_map(|b| {
+            b.target
+                .as_ref()
+                .map(|t| (graph_model::BlockId(b.id), format!("{t:?}").to_lowercase()))
+        })
+        .collect();
+    let gm_snap = to_graph_model_snapshot(snap);
+
     // 1. Partition the graph by target assignment.
     let partition_result =
-        partition::partition_graph(snap).map_err(|e| format!("partition error: {e:?}"))?;
+        deployment::partition::partition_graph(&gm_snap, &assignments)
+            .map_err(|e| format!("partition error: {e:?}"))?;
 
     let has_bridges = !partition_result.bridges.is_empty();
 
+    // Build a lookup from target string to TargetFamily for workspace keying.
+    let target_family_map: HashMap<String, TargetFamily> = snap
+        .blocks
+        .iter()
+        .filter_map(|b| {
+            b.target
+                .map(|t| (format!("{t:?}").to_lowercase(), t))
+        })
+        .collect();
+
     // 2. Generate one workspace per partition.
     let mut workspaces: HashMap<TargetFamily, GeneratedWorkspace> = HashMap::new();
-    for (target_family, sub_snap) in &partition_result.partitions {
+    for (target_str, sub_gm_snap) in &partition_result.partitions {
+        let target_family = target_family_map.get(target_str).ok_or_else(|| {
+            format!("unknown target string in partition: {target_str}")
+        })?;
+
+        // Convert partition sub-graph back to rustsim types.
+        let sub_snap =
+            from_graph_model_sub_snapshot(sub_gm_snap, snap, Some(*target_family));
+
         // Find the binding for this target.
         let twb = config
             .targets
@@ -1373,7 +1472,7 @@ pub fn generate_distributed_workspace(
             .find(|t| t.target == *target_family)
             .ok_or_else(|| format!("no binding for target {target_family:?}"))?;
 
-        let mut ws = generate_workspace(sub_snap, config.dt, std::slice::from_ref(twb))?;
+        let mut ws = generate_workspace(&sub_snap, config.dt, std::slice::from_ref(twb))?;
 
         // 3. If there are bridges, add pubsub dependency to logic Cargo.toml.
         if has_bridges {
@@ -1389,14 +1488,14 @@ pub fn generate_distributed_workspace(
         for bridge in &partition_result.bridges {
             for file in &mut ws.files {
                 if file.0 == "logic/src/lib.rs" {
-                    if bridge.source_target == *target_family {
+                    if bridge.source_target == *target_str {
                         // This partition is the sender -- emit pubsub_sink encode+send.
                         file.1.push_str(&format!(
                             "\n    // pubsub_sink: topic=\"{}\"\n    // pubsub::encode(&value); transport.send();\n",
                             bridge.topic
                         ));
                     }
-                    if bridge.sink_target == *target_family {
+                    if bridge.sink_target == *target_str {
                         // This partition is the receiver -- emit pubsub_source recv+decode.
                         file.1.push_str(&format!(
                             "\n    // pubsub_source: topic=\"{}\"\n    // let value = pubsub::decode(&transport.recv());\n",

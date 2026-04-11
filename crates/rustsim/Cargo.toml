@@ -24,6 +24,7 @@ dag-core = { path = "../../dag-core", default-features = false, features = ["std
 i2c-hil-sim = { path = "../../hil/i2c-hil-sim" }
 embedded-hal = "1.0"
 graph-model = { path = "../../graph-model" }
+deployment = { path = "../../deployment" }
 mlir-codegen = { path = "../../mlir-codegen", optional = true }
 target-registry = { path = "../../target-registry" }
 tsify-next = { version = "0.5", features = ["js"] }
