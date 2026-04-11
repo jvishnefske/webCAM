@@ -26,19 +26,27 @@ pub async fn ws_server_task(
 struct NullDfuWriter;
 
 impl hil_firmware_support::fw_update::DfuFlashWriter for NullDfuWriter {
-    fn erase_dfu(&mut self) -> Result<(), ()> {
-        Err(())
+    fn erase_dfu(&mut self) -> Result<(), hil_firmware_support::fw_update::DfuError> {
+        Err(hil_firmware_support::fw_update::DfuError::EraseFailed)
     }
-    fn write_dfu(&mut self, _offset: u32, _data: &[u8]) -> Result<(), ()> {
-        Err(())
+    fn write_dfu(
+        &mut self,
+        _offset: u32,
+        _data: &[u8],
+    ) -> Result<(), hil_firmware_support::fw_update::DfuError> {
+        Err(hil_firmware_support::fw_update::DfuError::WriteFailed)
     }
-    fn read_dfu(&mut self, _offset: u32, _buf: &mut [u8]) -> Result<(), ()> {
-        Err(())
+    fn read_dfu(
+        &mut self,
+        _offset: u32,
+        _buf: &mut [u8],
+    ) -> Result<(), hil_firmware_support::fw_update::DfuError> {
+        Err(hil_firmware_support::fw_update::DfuError::ReadFailed)
     }
-    fn mark_updated(&mut self) -> Result<(), ()> {
-        Err(())
+    fn mark_updated(&mut self) -> Result<(), hil_firmware_support::fw_update::DfuError> {
+        Err(hil_firmware_support::fw_update::DfuError::MarkFailed)
     }
-    fn mark_booted(&mut self) -> Result<(), ()> {
+    fn mark_booted(&mut self) -> Result<(), hil_firmware_support::fw_update::DfuError> {
         Ok(())
     }
     fn system_reset(&mut self) -> ! {

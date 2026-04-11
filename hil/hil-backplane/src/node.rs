@@ -171,6 +171,7 @@ mod imp {
         }
 
         /// Runs a blocking event loop, polling until an error occurs.
+        #[cfg(not(tarpaulin_include))]
         pub fn run(&mut self) -> Result<(), BackplaneError> {
             loop {
                 self.poll()?;
@@ -254,5 +255,45 @@ mod tests {
         // Publish twice -- should not panic (exercises next_seq and dispatch)
         node.publish(&Ping).unwrap();
         node.publish(&Ping).unwrap();
+    }
+
+    #[test]
+    fn node_register_handler_and_poll() {
+        use crate::message::BackplaneMessage;
+
+        #[derive(Debug)]
+        struct TestMsg;
+        impl BackplaneMessage for TestMsg {
+            const TYPE_ID: u32 = 0xBEEF;
+        }
+        impl<C> minicbor::Encode<C> for TestMsg {
+            fn encode<W: minicbor::encode::Write>(
+                &self,
+                e: &mut minicbor::Encoder<W>,
+                _ctx: &mut C,
+            ) -> Result<(), minicbor::encode::Error<W::Error>> {
+                e.u8(0)?;
+                Ok(())
+            }
+        }
+        impl<'b, C> minicbor::Decode<'b, C> for TestMsg {
+            fn decode(
+                d: &mut minicbor::Decoder<'b>,
+                _ctx: &mut C,
+            ) -> Result<Self, minicbor::decode::Error> {
+                d.u8()?;
+                Ok(TestMsg)
+            }
+        }
+
+        let transport = UdpTransport::with_defaults().expect("transport creation failed");
+        let mut node = Node::new(NodeId::new(2), transport);
+
+        // Register a handler -- exercises register_handler
+        node.register_handler::<TestMsg, _>(|_msg| Ok(None));
+
+        // Poll with no messages waiting -- should return false
+        let dispatched = node.poll().expect("poll should not error");
+        assert!(!dispatched);
     }
 }

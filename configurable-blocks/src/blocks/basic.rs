@@ -1600,4 +1600,433 @@ mod tests {
         assert!(types.contains(&"map_scale"), "missing map_scale");
         assert!(types.contains(&"lowpass"), "missing lowpass");
     }
+
+    // ===================================================================
+    // MapScaleBlock -- zero input range (in_min == in_max)
+    // ===================================================================
+
+    #[test]
+    fn test_map_scale_zero_input_range() {
+        let mut block = MapScaleBlock::default();
+        block.apply_config(&serde_json::json!({
+            "in_min": 5.0, "in_max": 5.0,
+            "out_min": 0.0, "out_max": 100.0,
+            "input_topic": "raw", "output_topic": "scaled"
+        }));
+        // When in_min == in_max, scale should be 0.0
+        let result = block.lower().unwrap();
+        let ps = MockPubSub {
+            values: BTreeMap::from([("raw".into(), 512.0)]),
+        };
+        let mut values = vec![0.0; result.dag.len()];
+        let eval = result.dag.evaluate(&NullChannels, &ps, &mut values);
+        // output = (512 - 5) * 0 + 0 = 0.0
+        assert_eq!(eval.publishes.len(), 1);
+        assert!((eval.publishes[0].1 - 0.0).abs() < 1e-10);
+    }
+
+    // ===================================================================
+    // LowPassBlock -- out-of-range alpha values
+    // ===================================================================
+
+    #[test]
+    fn test_lowpass_alpha_clamped_above() {
+        let mut block = LowPassBlock::default();
+        block.apply_config(&serde_json::json!({"alpha": 2.0}));
+        // alpha should be clamped to 1.0
+        assert_eq!(block.alpha, 1.0);
+    }
+
+    #[test]
+    fn test_lowpass_alpha_clamped_below() {
+        let mut block = LowPassBlock::default();
+        block.apply_config(&serde_json::json!({"alpha": -0.5}));
+        // alpha should be clamped to 0.0
+        assert_eq!(block.alpha, 0.0);
+    }
+
+    // ===================================================================
+    // AdcBlock -- full lifecycle
+    // ===================================================================
+
+    #[test]
+    fn test_adc_full_lifecycle() {
+        let mut block = AdcBlock::default();
+
+        // config_schema
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 1);
+        assert_eq!(schema[0].key, "channel_name");
+        assert_eq!(schema[0].kind, FieldKind::Text);
+
+        // apply_config
+        block.apply_config(&serde_json::json!({"channel_name": "adc1"}));
+        assert_eq!(block.channel_name, "adc1");
+
+        // declared_channels
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].name, "adc1");
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[0].kind, ChannelKind::Hardware);
+
+        // block_type, display_name, category
+        assert_eq!(block.block_type(), "adc");
+        assert_eq!(block.display_name(), "ADC Input");
+        assert_eq!(block.category(), BlockCategory::Io);
+
+        // config_json
+        let json = block.config_json();
+        assert_eq!(json["channel_name"], "adc1");
+
+        // lower
+        let result = block.lower().unwrap();
+        assert_eq!(result.dag.len(), 1); // single Input op
+    }
+
+    // ===================================================================
+    // SubtractBlock::lower -- verify DAG ops
+    // ===================================================================
+
+    #[test]
+    fn test_subtract_lower_dag_structure() {
+        let block = SubtractBlock::default();
+        let result = block.lower().unwrap();
+        // subscribe + subscribe + sub + publish = 4 nodes
+        assert_eq!(result.dag.len(), 4);
+        assert_eq!(result.ports.inputs.len(), 2);
+        assert_eq!(result.ports.inputs[0].0, "a");
+        assert_eq!(result.ports.inputs[1].0, "b");
+        assert_eq!(result.ports.outputs.len(), 1);
+        assert_eq!(result.ports.outputs[0].0, "out");
+    }
+
+    // ===================================================================
+    // NegateBlock::lower -- verify DAG ops
+    // ===================================================================
+
+    #[test]
+    fn test_negate_lower_dag_structure() {
+        let block = NegateBlock::default();
+        let result = block.lower().unwrap();
+        // subscribe + neg + publish = 3 nodes
+        assert_eq!(result.dag.len(), 3);
+        assert_eq!(result.ports.inputs.len(), 1);
+        assert_eq!(result.ports.inputs[0].0, "in");
+        assert_eq!(result.ports.outputs.len(), 1);
+        assert_eq!(result.ports.outputs[0].0, "out");
+    }
+
+    // ===================================================================
+    // SubtractBlock -- full trait method coverage
+    // ===================================================================
+
+    #[test]
+    fn test_subtract_all_trait_methods() {
+        let mut block = SubtractBlock::default();
+        assert_eq!(block.block_type(), "subtract");
+        assert_eq!(block.display_name(), "Subtract");
+        assert_eq!(block.category(), BlockCategory::Math);
+
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 3);
+        assert!(schema.iter().any(|f| f.key == "input_a_topic"));
+        assert!(schema.iter().any(|f| f.key == "input_b_topic"));
+        assert!(schema.iter().any(|f| f.key == "output_topic"));
+
+        let json = block.config_json();
+        assert_eq!(json["input_a_topic"], "sub/a");
+
+        block.apply_config(&serde_json::json!({"input_a_topic": "x", "input_b_topic": "y", "output_topic": "z"}));
+        assert_eq!(block.input_a_topic, "x");
+        assert_eq!(block.input_b_topic, "y");
+        assert_eq!(block.output_topic, "z");
+
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 3);
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[2].direction, ChannelDirection::Output);
+
+        let result = block.lower().unwrap();
+        assert_eq!(result.dag.len(), 4);
+    }
+
+    #[test]
+    fn test_subtract_apply_config_partial() {
+        let mut block = SubtractBlock::default();
+        block.apply_config(&serde_json::json!({"output_topic": "diff"}));
+        assert_eq!(block.output_topic, "diff");
+        assert_eq!(block.input_a_topic, "sub/a"); // unchanged
+    }
+
+    // ===================================================================
+    // NegateBlock -- full trait method coverage
+    // ===================================================================
+
+    #[test]
+    fn test_negate_all_trait_methods() {
+        let mut block = NegateBlock::default();
+        assert_eq!(block.block_type(), "negate");
+        assert_eq!(block.display_name(), "Negate");
+        assert_eq!(block.category(), BlockCategory::Math);
+
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 2);
+        assert!(schema.iter().any(|f| f.key == "input_topic"));
+        assert!(schema.iter().any(|f| f.key == "output_topic"));
+
+        let json = block.config_json();
+        assert_eq!(json["input_topic"], "neg/in");
+        assert_eq!(json["output_topic"], "neg/out");
+
+        block.apply_config(&serde_json::json!({"input_topic": "sig/in", "output_topic": "sig/out"}));
+        assert_eq!(block.input_topic, "sig/in");
+        assert_eq!(block.output_topic, "sig/out");
+
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[1].direction, ChannelDirection::Output);
+
+        let result = block.lower().unwrap();
+        assert_eq!(result.dag.len(), 3);
+    }
+
+    #[test]
+    fn test_negate_apply_config_partial() {
+        let mut block = NegateBlock::default();
+        block.apply_config(&serde_json::json!({"output_topic": "negated"}));
+        assert_eq!(block.output_topic, "negated");
+        assert_eq!(block.input_topic, "neg/in"); // unchanged
+    }
+
+    // ===================================================================
+    // MapScaleBlock -- full trait method coverage
+    // ===================================================================
+
+    #[test]
+    fn test_map_scale_all_trait_methods() {
+        let mut block = MapScaleBlock::default();
+        assert_eq!(block.block_type(), "map_scale");
+        assert_eq!(block.display_name(), "Map/Scale");
+        assert_eq!(block.category(), BlockCategory::Math);
+
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 6);
+        assert!(schema.iter().any(|f| f.key == "input_topic"));
+        assert!(schema.iter().any(|f| f.key == "output_topic"));
+        assert!(schema.iter().any(|f| f.key == "in_min"));
+        assert!(schema.iter().any(|f| f.key == "in_max"));
+        assert!(schema.iter().any(|f| f.key == "out_min"));
+        assert!(schema.iter().any(|f| f.key == "out_max"));
+
+        let json = block.config_json();
+        assert_eq!(json["input_topic"], "map/in");
+        assert_eq!(json["output_topic"], "map/out");
+        assert_eq!(json["in_min"], 0.0);
+        assert_eq!(json["in_max"], 1023.0);
+        assert_eq!(json["out_min"], 0.0);
+        assert_eq!(json["out_max"], 100.0);
+
+        block.apply_config(&serde_json::json!({
+            "input_topic": "a", "output_topic": "b",
+            "in_min": 0.0, "in_max": 5.0,
+            "out_min": -10.0, "out_max": 10.0
+        }));
+        assert_eq!(block.input_topic, "a");
+        assert_eq!(block.output_topic, "b");
+        assert_eq!(block.in_max, 5.0);
+        assert_eq!(block.out_min, -10.0);
+
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[1].direction, ChannelDirection::Output);
+
+        let result = block.lower().unwrap();
+        assert!(!result.dag.is_empty());
+    }
+
+    #[test]
+    fn test_map_scale_apply_config_partial() {
+        let mut block = MapScaleBlock::default();
+        block.apply_config(&serde_json::json!({"out_max": 200.0}));
+        assert_eq!(block.out_max, 200.0);
+        assert_eq!(block.in_min, 0.0); // unchanged
+    }
+
+    // ===================================================================
+    // LowPassBlock -- full trait method coverage
+    // ===================================================================
+
+    #[test]
+    fn test_lowpass_all_trait_methods() {
+        let mut block = LowPassBlock::default();
+        assert_eq!(block.block_type(), "lowpass");
+        assert_eq!(block.display_name(), "Low-Pass Filter");
+        assert_eq!(block.category(), BlockCategory::Math);
+
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 3);
+        assert!(schema.iter().any(|f| f.key == "input_topic"));
+        assert!(schema.iter().any(|f| f.key == "output_topic"));
+        assert!(schema.iter().any(|f| f.key == "alpha"));
+
+        let json = block.config_json();
+        assert_eq!(json["input_topic"], "lp/in");
+        assert_eq!(json["output_topic"], "lp/out");
+        assert_eq!(json["alpha"], 0.1);
+
+        block.apply_config(&serde_json::json!({"input_topic": "x", "output_topic": "y", "alpha": 0.5}));
+        assert_eq!(block.input_topic, "x");
+        assert_eq!(block.output_topic, "y");
+        assert_eq!(block.alpha, 0.5);
+
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 2);
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[1].direction, ChannelDirection::Output);
+
+        let result = block.lower().unwrap();
+        assert!(!result.dag.is_empty());
+    }
+
+    #[test]
+    fn test_lowpass_apply_config_partial() {
+        let mut block = LowPassBlock::default();
+        block.apply_config(&serde_json::json!({"alpha": 0.8}));
+        assert_eq!(block.alpha, 0.8);
+        assert_eq!(block.input_topic, "lp/in"); // unchanged
+    }
+
+    // ===================================================================
+    // AdcBlock -- full trait method coverage
+    // ===================================================================
+
+    #[test]
+    fn test_adc_all_trait_methods() {
+        let mut block = AdcBlock::default();
+        assert_eq!(block.block_type(), "adc");
+        assert_eq!(block.display_name(), "ADC Input");
+        assert_eq!(block.category(), BlockCategory::Io);
+
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 1);
+        assert!(schema.iter().any(|f| f.key == "channel_name"));
+
+        let json = block.config_json();
+        assert_eq!(json["channel_name"], "adc0");
+
+        block.apply_config(&serde_json::json!({"channel_name": "adc1"}));
+        assert_eq!(block.channel_name, "adc1");
+
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].name, "adc1");
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[0].kind, ChannelKind::Hardware);
+
+        let result = block.lower().unwrap();
+        assert!(!result.dag.is_empty());
+    }
+
+    #[test]
+    fn test_adc_apply_config_partial() {
+        let mut block = AdcBlock::default();
+        block.apply_config(&serde_json::json!({})); // empty update
+        assert_eq!(block.channel_name, "adc0"); // unchanged
+    }
+
+    // ===================================================================
+    // PwmBlock -- full trait method coverage
+    // ===================================================================
+
+    #[test]
+    fn test_pwm_all_trait_methods() {
+        let mut block = PwmBlock::default();
+        assert_eq!(block.block_type(), "pwm");
+        assert_eq!(block.display_name(), "PWM Output");
+        assert_eq!(block.category(), BlockCategory::Io);
+
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 1);
+        assert!(schema.iter().any(|f| f.key == "channel_name"));
+
+        let json = block.config_json();
+        assert_eq!(json["channel_name"], "pwm0");
+
+        block.apply_config(&serde_json::json!({"channel_name": "pwm1"}));
+        assert_eq!(block.channel_name, "pwm1");
+
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].name, "pwm1");
+        assert_eq!(channels[0].direction, ChannelDirection::Output);
+        assert_eq!(channels[0].kind, ChannelKind::Hardware);
+
+        let result = block.lower().unwrap();
+        assert!(!result.dag.is_empty());
+    }
+
+    #[test]
+    fn test_pwm_apply_config_partial() {
+        let mut block = PwmBlock::default();
+        block.apply_config(&serde_json::json!({})); // empty update
+        assert_eq!(block.channel_name, "pwm0"); // unchanged
+    }
+
+    // ===================================================================
+    // SubscribeBlock -- full trait method coverage
+    // ===================================================================
+
+    #[test]
+    fn test_subscribe_all_trait_methods_full() {
+        let mut block = SubscribeBlock::default();
+        assert_eq!(block.block_type(), "subscribe");
+        assert_eq!(block.display_name(), "Subscribe");
+        assert_eq!(block.category(), BlockCategory::PubSub);
+
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 1);
+        assert!(schema.iter().any(|f| f.key == "topic"));
+
+        let json = block.config_json();
+        assert_eq!(json["topic"], "sensor/value");
+
+        block.apply_config(&serde_json::json!({"topic": "new/topic"}));
+        assert_eq!(block.topic, "new/topic");
+
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[0].kind, ChannelKind::PubSub);
+    }
+
+    #[test]
+    fn test_subscribe_apply_config_partial() {
+        let mut block = SubscribeBlock::default();
+        block.apply_config(&serde_json::json!({}));
+        assert_eq!(block.topic, "sensor/value"); // unchanged
+    }
+
+    // ===================================================================
+    // PublishBlock -- extended trait method coverage
+    // ===================================================================
+
+    #[test]
+    fn test_publish_config_json_roundtrip() {
+        let mut block = PublishBlock::default();
+        block.apply_config(&serde_json::json!({"input_topic": "a", "output_topic": "b"}));
+        let json = block.config_json();
+        assert_eq!(json["input_topic"], "a");
+        assert_eq!(json["output_topic"], "b");
+    }
+
+    #[test]
+    fn test_publish_apply_config_partial_input_only() {
+        let mut block = PublishBlock::default();
+        block.apply_config(&serde_json::json!({"input_topic": "new_in"}));
+        assert_eq!(block.input_topic, "new_in");
+        assert_eq!(block.output_topic, "output/value"); // unchanged
+    }
 }

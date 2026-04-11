@@ -145,3 +145,29 @@ fn bus_error_debug() {
     assert!(debug.contains("NoDeviceAtAddress"));
     assert!(debug.contains("72")); // 0x48 = 72
 }
+
+#[test]
+fn device_set_contains_address_for_switch_on_bus() {
+    use i2c_hil_sim::devices::{I2cSwitchBuilder, Tmp1075};
+    use i2c_hil_sim::device_set::DeviceSet;
+
+    let switch = I2cSwitchBuilder::new(Address::new(0x70).unwrap())
+        .channel(Tmp1075::new(Address::new(0x48).unwrap()))
+        .build();
+
+    // Place the switch on a bus (I2cSwitch, ()) DeviceSet
+    let mut devices: (_, ()) = (switch, ());
+
+    // The switch's own address should be found
+    assert!(devices.contains_address(0x70));
+    // Downstream addresses are isolated and NOT found
+    assert!(!devices.contains_address(0x48));
+    // Nonexistent address is not found
+    assert!(!devices.contains_address(0x99));
+
+    // Exercise dispatch to switch's own address (control register)
+    let mut buf = [0u8; 1];
+    let mut ops = [Operation::Read(&mut buf)];
+    devices.dispatch(0x70, &mut ops).unwrap();
+    assert_eq!(buf[0], 0x00); // control register default
+}

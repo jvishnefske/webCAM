@@ -13,6 +13,7 @@ default = []
 mlir = ["mlir-codegen"]
 
 [dependencies]
+block-registry = { path = "../../block-registry", features = ["tsify"] }
 module-traits = { path = "../../module-traits", features = ["tsify"] }
 parser = { path = "../../parser" }
 wasm-bindgen = "0.2"
@@ -22,7 +23,11 @@ serde_json = "1"
 dag-core = { path = "../../dag-core", default-features = false, features = ["std"] }
 i2c-hil-sim = { path = "../../hil/i2c-hil-sim" }
 embedded-hal = "1.0"
+graph-model = { path = "../../graph-model" }
+deployment = { path = "../../deployment" }
 mlir-codegen = { path = "../../mlir-codegen", optional = true }
+target-registry = { path = "../../target-registry" }
+codegen-emit = { path = "../../codegen-emit" }
 tsify-next = { version = "0.5", features = ["js"] }
 serde-wasm-bindgen = "0.6"
 

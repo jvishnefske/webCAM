@@ -865,7 +865,6 @@ async fn deploy_to_mcu(cbor_bytes: &[u8]) -> Result<String, String> {
 }
 
 /// POST /api/tick to evaluate the deployed DAG on the MCU.
-#[allow(dead_code)]
 async fn tick_mcu() -> Result<String, String> {
     let window = web_sys::window().ok_or("no window")?;
 

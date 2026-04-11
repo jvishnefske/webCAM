@@ -54,6 +54,10 @@ pub const OP_SUBSCRIBE: &str = "func.call";
 pub const OP_PUBLISH: &str = "func.call";
 /// `scf.execute_region` — state machine uses structured control flow.
 pub const OP_STATE_MACHINE: &str = "scf.execute_region";
+/// `dataflow.delay` — register read (returns previous-tick value).
+pub const OP_DELAY: &str = "dataflow.delay";
+/// `dataflow.delay_store` — register write (stores value for next tick).
+pub const OP_DELAY_STORE: &str = "dataflow.delay_store";
 
 // -- MLIR type strings ------------------------------------------------------
 

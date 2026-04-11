@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/rustcam",
     "crates/rustsim",
+    "graph-model",
     "module-traits",
     "dag-core",
     "dag-runtime",
@@ -27,11 +28,16 @@ members = [
     "hil/combined-frontend",
     "hil/native-server",
     "mlir-codegen",
+    "block-registry",
     "configurable-blocks",
+    "target-registry",
+    "deployment",
+    "codegen-emit",
 ]
 default-members = [
     "crates/rustcam",
     "crates/rustsim",
+    "graph-model",
     "module-traits",
     "dag-core",
     "dag-runtime",
@@ -39,7 +45,11 @@ default-members = [
     "pubsub",
     "parser",
     "mlir-codegen",
+    "block-registry",
     "configurable-blocks",
+    "target-registry",
+    "deployment",
+    "codegen-emit",
     "hil/native-server",
 ]
 
@@ -48,6 +58,9 @@ edition = "2021"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }
+
 [workspace.lints.clippy]
 unwrap_in_result = "deny"
 expect_used = "warn"
@@ -55,7 +68,6 @@ panic = "warn"
 undocumented_unsafe_blocks = "deny"
 missing_panics_doc = "deny"
 unnecessary_safety_doc = "warn"
-result_unit_err = "allow"
 drop_non_drop = "allow"
 needless_question_mark = "warn"
 

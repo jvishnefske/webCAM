@@ -5,79 +5,21 @@
 //! `mlir_op` mappings so the lowerer can resolve block types to MLIR ops
 //! from the schema rather than hardcoding them.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 use module_traits::function_def::{builtin_function_defs, FunctionDef};
-use module_traits::value::PortKind;
-use serde_json::Value as JsonValue;
 
 use crate::dialect;
-use crate::state_machine;
+
+// Re-export canonical graph model types.
+pub use graph_model::{BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef, PortKind};
 
 /// Look up a [`FunctionDef`] by block type id.
 fn lookup_function_def(block_type: &str) -> Option<FunctionDef> {
     builtin_function_defs()
         .into_iter()
         .find(|d| d.id == block_type)
-}
-
-// ---------------------------------------------------------------------------
-// Public types mirroring the main crate's graph types.
-// These are deserialized from JSON so the mlir-codegen crate can stay
-// decoupled from the main rustcam crate.
-// ---------------------------------------------------------------------------
-
-/// Mirrors `BlockSnapshot` from the main crate.
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct BlockSnapshot {
-    pub id: u32,
-    pub block_type: String,
-    pub name: String,
-    pub inputs: Vec<PortDef>,
-    pub outputs: Vec<PortDef>,
-    #[serde(default)]
-    pub config: JsonValue,
-    #[serde(default)]
-    pub output_values: Vec<Option<JsonValue>>,
-    #[serde(default)]
-    pub custom_codegen: Option<String>,
-}
-
-/// Mirrors `PortDef` from module-traits.
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct PortDef {
-    pub name: String,
-    pub kind: PortKind,
-}
-
-/// Mirrors `Channel` from the main crate.
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct Channel {
-    pub id: ChannelId,
-    pub from_block: BlockId,
-    pub from_port: usize,
-    pub to_block: BlockId,
-    pub to_port: usize,
-}
-
-/// Mirrors `ChannelId`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
-pub struct ChannelId(pub u32);
-
-/// Mirrors `BlockId`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Deserialize)]
-pub struct BlockId(pub u32);
-
-/// Mirrors `GraphSnapshot`.
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct GraphSnapshot {
-    pub blocks: Vec<BlockSnapshot>,
-    pub channels: Vec<Channel>,
-    #[serde(default)]
-    pub tick_count: u64,
-    #[serde(default)]
-    pub time: f64,
 }
 
 // ---------------------------------------------------------------------------
@@ -94,7 +36,11 @@ fn is_skipped(bt: &str) -> bool {
 // Topological sort (inlined — same Kahn's algorithm as topo.rs)
 // ---------------------------------------------------------------------------
 
-fn topological_sort(block_ids: &[BlockId], channels: &[Channel]) -> Result<Vec<BlockId>, String> {
+fn topological_sort(
+    block_ids: &[BlockId],
+    channels: &[Channel],
+    delay_blocks: &HashSet<BlockId>,
+) -> Result<Vec<BlockId>, String> {
     use std::collections::VecDeque;
 
     let mut in_degree: HashMap<BlockId, usize> = block_ids.iter().map(|&id| (id, 0)).collect();
@@ -103,6 +49,9 @@ fn topological_sort(block_ids: &[BlockId], channels: &[Channel]) -> Result<Vec<B
 
     for ch in channels {
         if in_degree.contains_key(&ch.from_block) && in_degree.contains_key(&ch.to_block) {
+            if delay_blocks.contains(&ch.to_block) {
+                continue;
+            }
             *in_degree.entry(ch.to_block).or_insert(0) += 1;
             adj.entry(ch.from_block).or_default().push(ch.to_block);
         }
@@ -202,9 +151,13 @@ fn config_str<'a>(block: &'a BlockSnapshot, key: &str) -> &'a str {
 /// 2. A `func.func @tick(%state: memref<?xf64>)` function
 /// 3. Each block emitted as dataflow dialect ops in topological order
 pub fn lower_graph(snap: &GraphSnapshot) -> Result<String, String> {
-    let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let sorted = topological_sort(&block_ids, &snap.channels)?;
-    let block_map: HashMap<u32, &BlockSnapshot> = snap.blocks.iter().map(|b| (b.id, b)).collect();
+    let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| b.id).collect();
+    let delay_blocks: HashSet<BlockId> = snap.blocks.iter()
+        .filter(|b| b.is_delay)
+        .map(|b| b.id)
+        .collect();
+    let sorted = topological_sort(&block_ids, &snap.channels, &delay_blocks)?;
+    let block_map: HashMap<u32, &BlockSnapshot> = snap.blocks.iter().map(|b| (b.id.0, b)).collect();
 
     // Collect state slots: each non-skipped block output needs a state memref index.
     let mut state_slots: Vec<(u32, usize)> = Vec::new(); // (block_id, port_idx)
@@ -232,14 +185,6 @@ pub fn lower_graph(snap: &GraphSnapshot) -> Result<String, String> {
     writeln!(out).unwrap();
     writeln!(out, "module {{").unwrap();
     writeln!(out).unwrap();
-
-    // Emit state machine type declarations (before the tick function)
-    for &BlockId(id) in &sorted {
-        let block = block_map[&id];
-        if block.block_type == "state_machine" {
-            state_machine::emit_state_machine_type(&mut out, block)?;
-        }
-    }
 
     // Tick function
     writeln!(
@@ -289,7 +234,23 @@ pub fn lower_graph(snap: &GraphSnapshot) -> Result<String, String> {
             "tmc2209_stepper" => emit_stepper(&mut out, id, block, &inputs)?,
             "tmc2209_stallguard" => emit_stallguard(&mut out, id, block)?,
             "state_machine" => {
-                state_machine::emit_state_machine_tick(&mut out, id, block, &inputs)?
+                // Emit as pure function call (state machine is now stateless)
+                let n_out = block.outputs.len();
+                let result_names: Vec<String> = (0..n_out).map(|p| dialect::ssa_name(id, p)).collect();
+                let result_name_str = result_names.join(", ");
+                let result_types: Vec<&str> = (0..n_out).map(|_| "f64").collect();
+                let result_type_str = result_types.join(", ");
+                let args = inputs.join(", ");
+                writeln!(out, "    {result_name_str} = func.call @block_{id}({args}) : ({result_type_str}) -> ({result_type_str})").unwrap();
+            }
+            "register" => {
+                let ssa = dialect::ssa_name(id, 0);
+                let initial = block.config.get("initial_value")
+                    .and_then(|v| v.as_f64()).unwrap_or(0.0);
+                writeln!(out, "    {ssa} = dataflow.delay {initial} : f64").unwrap();
+                if let Some(input) = inputs.first() {
+                    writeln!(out, "    dataflow.delay_store {input}, {ssa} : f64").unwrap();
+                }
             }
             "pubsub_sink" => emit_pubsub_sink(&mut out, id, block, &inputs)?,
             "pubsub_source" => emit_pubsub_source(&mut out, id, block)?,
@@ -756,9 +717,13 @@ fn resolve_inputs_ir(
 /// Walks blocks in topological order and emits IR ops using the [`IrBuilder`].
 /// This is the typed replacement for [`lower_graph()`] (which produces string MLIR).
 pub fn lower_graph_ir(snap: &GraphSnapshot) -> Result<IrModule, String> {
-    let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let sorted = topological_sort(&block_ids, &snap.channels)?;
-    let block_map: HashMap<u32, &BlockSnapshot> = snap.blocks.iter().map(|b| (b.id, b)).collect();
+    let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| b.id).collect();
+    let delay_blocks: HashSet<BlockId> = snap.blocks.iter()
+        .filter(|b| b.is_delay)
+        .map(|b| b.id)
+        .collect();
+    let sorted = topological_sort(&block_ids, &snap.channels, &delay_blocks)?;
+    let block_map: HashMap<u32, &BlockSnapshot> = snap.blocks.iter().map(|b| (b.id.0, b)).collect();
 
     let mut builder = IrBuilder::new();
     builder.begin_func("tick", &[], &[]);
@@ -923,9 +888,9 @@ pub fn lower_graph_ir(snap: &GraphSnapshot) -> Result<IrModule, String> {
 mod tests {
     use super::*;
 
-    fn make_block(id: u32, block_type: &str, config: JsonValue) -> BlockSnapshot {
+    fn make_block(id: u32, block_type: &str, config: serde_json::Value) -> BlockSnapshot {
         BlockSnapshot {
-            id,
+            id: BlockId(id),
             block_type: block_type.to_string(),
             name: format!("test_{block_type}_{id}"),
             inputs: vec![],
@@ -934,8 +899,7 @@ mod tests {
                 kind: PortKind::Float,
             }],
             config,
-            output_values: vec![],
-            custom_codegen: None,
+            is_delay: false,
         }
     }
 
@@ -958,8 +922,6 @@ mod tests {
                 serde_json::json!({"value": 42.0}),
             )],
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("arith.constant"));
@@ -984,8 +946,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("arith.mulf %v1_p0"));
@@ -1016,8 +976,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("arith.addf %v1_p0, %v2_p0"));
@@ -1045,8 +1003,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("func.call @adc_read"));
@@ -1077,8 +1033,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let result = lower_graph(&snap);
         assert!(result.is_err());
@@ -1094,8 +1048,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("arith.constant"));
@@ -1129,8 +1081,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("func.call @subscribe"));
@@ -1162,8 +1112,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(
@@ -1193,8 +1141,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(
@@ -1217,8 +1163,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(
@@ -1249,8 +1193,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(
@@ -1281,8 +1223,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         // The constant block 1 produces %v1_p0
@@ -1324,8 +1264,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("func.call @gpio_read"), "got:\n{mlir}");
@@ -1354,8 +1292,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("func.call @uart_rx"), "got:\n{mlir}");
@@ -1382,8 +1318,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("func.call @encoder_read"), "got:\n{mlir}");
@@ -1418,8 +1352,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("func.call @display_write"), "got:\n{mlir}");
@@ -1449,8 +1381,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("func.call @stepper_move"), "got:\n{mlir}");
@@ -1482,8 +1412,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("func.call @stallguard_read"), "got:\n{mlir}");
@@ -1511,8 +1439,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         assert!(
@@ -1529,8 +1455,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let result = lower_graph(&snap);
         assert!(result.is_err());
@@ -1564,8 +1488,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let mlir = lower_graph(&snap).unwrap();
         // First gain uses the constant's output
@@ -1598,8 +1520,6 @@ mod tests {
                 serde_json::json!({"value": 42.0}),
             )],
             channels: vec![],
-            tick_count: 0,
-            time: 0.0,
         };
         let module = lower_graph_ir(&snap).unwrap();
         assert_eq!(module.funcs.len(), 1, "should have 1 function");
@@ -1632,8 +1552,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let module = lower_graph_ir(&snap).unwrap();
         let ops = &module.funcs[0].ops;
@@ -1692,8 +1610,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let module = lower_graph_ir(&snap).unwrap();
         let ops = &module.funcs[0].ops;
@@ -1743,8 +1659,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let module = lower_graph_ir(&snap).unwrap();
         let ops = &module.funcs[0].ops;
@@ -1790,8 +1704,6 @@ mod tests {
         let snap = GraphSnapshot {
             blocks,
             channels,
-            tick_count: 0,
-            time: 0.0,
         };
         let result = lower_graph_ir(&snap);
         assert!(result.is_err());
@@ -1821,7 +1733,7 @@ mod tests {
             make_channel(2, 2, 0, 4, 1),
             make_channel(3, 3, 0, 4, 2),
         ];
-        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot { blocks, channels };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("arith.cmpf"), "expected cmpf for select guard, got:\n{mlir}");
         assert!(mlir.contains("arith.select"), "expected arith.select, got:\n{mlir}");
@@ -1843,7 +1755,7 @@ mod tests {
             },
         ];
         let channels = vec![make_channel(1, 1, 0, 2, 0)];
-        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot { blocks, channels };
         let mlir = lower_graph(&snap).unwrap();
         assert!(
             mlir.contains("func.call @channel_read_adc0"),
@@ -1867,7 +1779,7 @@ mod tests {
             },
         ];
         let channels = vec![make_channel(1, 1, 0, 2, 0)];
-        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot { blocks, channels };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("arith.constant 4"), "expected gain factor 4, got:\n{mlir}");
         assert!(mlir.contains("arith.mulf %v1_p0"), "expected mulf using constant output, got:\n{mlir}");
@@ -1885,7 +1797,7 @@ mod tests {
             },
         ];
         let channels = vec![make_channel(1, 1, 0, 2, 0)];
-        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot { blocks, channels };
         let mlir = lower_graph(&snap).unwrap();
         assert!(mlir.contains("-10"), "expected min bound -10, got:\n{mlir}");
         assert!(mlir.contains("arith.minimumf"), "expected minimumf for clamp, got:\n{mlir}");
@@ -1913,7 +1825,7 @@ mod tests {
             make_channel(2, 2, 0, 4, 1),
             make_channel(3, 3, 0, 4, 2),
         ];
-        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot { blocks, channels };
         let module = lower_graph_ir(&snap).unwrap();
         // 4 constants (zero + 3 block constants) + 1 select = at least 5 ops
         assert!(module.funcs[0].ops.len() >= 5, "expected at least 5 ops");
@@ -1935,9 +1847,371 @@ mod tests {
             },
         ];
         let channels = vec![make_channel(1, 1, 0, 2, 0)];
-        let snap = GraphSnapshot { blocks, channels, tick_count: 0, time: 0.0 };
+        let snap = GraphSnapshot { blocks, channels };
         let module = lower_graph_ir(&snap).unwrap();
         // zero const + subscribe(channel_read) + publish(channel_write) = 3 ops
         assert!(module.funcs[0].ops.len() >= 3);
+    }
+
+    // ── Typed IR lowering: additional block type tests ────────────
+
+    #[test]
+    fn test_lower_ir_subtract() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 10.0})),
+            make_block(2, "constant", serde_json::json!({"value": 3.0})),
+            {
+                let mut b = make_block(3, "subtract", serde_json::json!({}));
+                b.inputs = vec![
+                    PortDef { name: "a".to_string(), kind: PortKind::Float },
+                    PortDef { name: "b".to_string(), kind: PortKind::Float },
+                ];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 3, 0), make_channel(2, 2, 0, 3, 1)];
+        let snap = GraphSnapshot { blocks, channels };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{ArithOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Arith(ArithOp::Subf)),
+            "expected subf op in IR"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_multiply() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 4.0})),
+            make_block(2, "constant", serde_json::json!({"value": 5.0})),
+            {
+                let mut b = make_block(3, "multiply", serde_json::json!({}));
+                b.inputs = vec![
+                    PortDef { name: "a".to_string(), kind: PortKind::Float },
+                    PortDef { name: "b".to_string(), kind: PortKind::Float },
+                ];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 3, 0), make_channel(2, 2, 0, 3, 1)];
+        let snap = GraphSnapshot { blocks, channels };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{ArithOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Arith(ArithOp::Mulf)),
+            "expected mulf op for multiply block"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_clamp() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 150.0})),
+            {
+                let mut b = make_block(2, "clamp", serde_json::json!({"min": 0.0, "max": 100.0}));
+                b.inputs = vec![PortDef { name: "in".to_string(), kind: PortKind::Float }];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::Clamp)),
+            "expected clamp op in IR"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_gpio_in() {
+        let blocks = vec![{
+            let mut b = make_block(1, "gpio_in", serde_json::json!({"pin": 5}));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::GpioRead)),
+            "expected gpio_read op for gpio_in block"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_gpio_out() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            {
+                let mut b = make_block(2, "gpio_out", serde_json::json!({"pin": 7}));
+                b.inputs = vec![PortDef { name: "value".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::GpioWrite)),
+            "expected gpio_write op for gpio_out block"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_uart_rx() {
+        let blocks = vec![{
+            let mut b = make_block(1, "uart_rx", serde_json::json!({"port": 2}));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::UartRx)),
+            "expected uart_rx op in IR"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_uart_tx() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 99.0})),
+            {
+                let mut b = make_block(2, "uart_tx", serde_json::json!({"port": 3}));
+                b.inputs = vec![PortDef { name: "data".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::UartTx)),
+            "expected uart_tx op in IR"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_encoder() {
+        let blocks = vec![{
+            let mut b = make_block(1, "encoder", serde_json::json!({"channel": 0}));
+            b.inputs = vec![];
+            b.outputs = vec![
+                PortDef { name: "position".to_string(), kind: PortKind::Float },
+                PortDef { name: "velocity".to_string(), kind: PortKind::Float },
+            ];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::EncoderRead)),
+            "expected encoder_read op in IR"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_udp_source() {
+        let blocks = vec![{
+            let mut b = make_block(1, "udp_source", serde_json::json!({}));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        // udp_source emits a constant(0.0) stub
+        use crate::ir::{ArithOp, IrOpKind};
+        // Should have at least 2 constants (zero + stub)
+        let constant_count = ops.iter()
+            .filter(|op| op.kind == IrOpKind::Arith(ArithOp::Constant))
+            .count();
+        assert!(constant_count >= 2, "expected at least 2 constants for udp_source stub, got {constant_count}");
+    }
+
+    #[test]
+    fn test_lower_ir_udp_sink() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            {
+                let mut b = make_block(2, "udp_sink", serde_json::json!({}));
+                b.inputs = vec![PortDef { name: "in".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        // udp_sink should succeed (it's a no-op skip)
+        let module = lower_graph_ir(&snap).unwrap();
+        assert!(!module.funcs.is_empty());
+    }
+
+    #[test]
+    fn test_lower_ir_unsupported_block_type() {
+        let blocks = vec![make_block(1, "totally_unknown", serde_json::json!({}))];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let result = lower_graph_ir(&snap);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unsupported"));
+    }
+
+    // ── Text MLIR lowering: multiply block ──────────────────────────
+
+    #[test]
+    fn lower_multiply_block() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 3.0})),
+            make_block(2, "constant", serde_json::json!({"value": 7.0})),
+            {
+                let mut b = make_block(3, "multiply", serde_json::json!({}));
+                b.inputs = vec![
+                    PortDef { name: "a".to_string(), kind: PortKind::Float },
+                    PortDef { name: "b".to_string(), kind: PortKind::Float },
+                ];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 3, 0), make_channel(2, 2, 0, 3, 1)];
+        let snap = GraphSnapshot { blocks, channels };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("arith.mulf %v1_p0, %v2_p0"), "expected mulf, got:\n{mlir}");
+    }
+
+    // ── Text MLIR lowering: state_machine block ─────────────────────
+
+    #[test]
+    fn lower_state_machine_block() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            {
+                let mut b = make_block(2, "state_machine", serde_json::json!({}));
+                b.inputs = vec![
+                    PortDef { name: "trigger".to_string(), kind: PortKind::Float },
+                ];
+                b.outputs = vec![
+                    PortDef { name: "state".to_string(), kind: PortKind::Float },
+                    PortDef { name: "active".to_string(), kind: PortKind::Float },
+                ];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("func.call @block_2"), "expected func.call @block_2, got:\n{mlir}");
+    }
+
+    // ── Text MLIR lowering: register (delay) block ──────────────────
+
+    #[test]
+    fn lower_register_block() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 5.0})),
+            {
+                let mut b = make_block(2, "register", serde_json::json!({"initial_value": 0.0}));
+                b.inputs = vec![
+                    PortDef { name: "in".to_string(), kind: PortKind::Float },
+                ];
+                b.is_delay = true;
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("dataflow.delay"), "expected dataflow.delay, got:\n{mlir}");
+    }
+
+    // ── Text MLIR lowering: channel_read with empty channel name ────
+
+    #[test]
+    fn lower_channel_read_empty_name() {
+        let blocks = vec![{
+            let mut b = make_block(1, "channel_read", serde_json::json!({}));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let mlir = lower_graph(&snap).unwrap();
+        // Falls back to "ch_1"
+        assert!(mlir.contains("func.call @channel_read_ch_1"), "expected fallback name ch_1, got:\n{mlir}");
+    }
+
+    // ── Text MLIR lowering: channel_write with empty channel name ───
+
+    #[test]
+    fn lower_channel_write_empty_name() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            {
+                let mut b = make_block(2, "channel_write", serde_json::json!({}));
+                b.inputs = vec![PortDef { name: "value".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("func.call @channel_write_ch_2"), "expected fallback name ch_2, got:\n{mlir}");
+    }
+
+    // ── Text MLIR lowering: pubsub_sink with empty topic ────────────
+
+    #[test]
+    fn lower_pubsub_sink_empty_topic() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            {
+                let mut b = make_block(2, "pubsub_sink", serde_json::json!({}));
+                b.inputs = vec![PortDef { name: "value".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("func.call @publish_unknown"), "expected fallback topic 'unknown', got:\n{mlir}");
+    }
+
+    // ── Text MLIR lowering: pubsub_source with empty topic ──────────
+
+    #[test]
+    fn lower_pubsub_source_empty_topic() {
+        let blocks = vec![{
+            let mut b = make_block(1, "pubsub_source", serde_json::json!({}));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let mlir = lower_graph(&snap).unwrap();
+        assert!(mlir.contains("func.call @subscribe_unknown"), "expected fallback topic 'unknown', got:\n{mlir}");
+    }
+
+    // ── Config helpers coverage ─────────────────────────────────────
+
+    #[test]
+    fn config_helpers_missing_keys() {
+        let block = make_block(1, "constant", serde_json::json!({}));
+        assert_eq!(config_float(&block, "missing"), 0.0);
+        assert_eq!(config_u64(&block, "missing"), 0);
+        assert_eq!(config_str(&block, "missing"), "");
     }
 }

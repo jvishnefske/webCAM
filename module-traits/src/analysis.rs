@@ -20,6 +20,7 @@ pub trait AnalysisModel {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used, clippy::panic)]
 mod tests {
     use super::{AnalysisMetadata, AnalysisModel};
     use alloc::string::String;

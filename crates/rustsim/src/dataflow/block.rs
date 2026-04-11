@@ -9,7 +9,7 @@ use tsify_next::Tsify;
 // Re-export core types from module-traits.
 pub use module_traits::{
     AnalysisMetadata, AnalysisModel, Codegen, FieldType, MessageData, MessageField, MessageSchema,
-    Module, PortDef, PortKind, SimModel, SimPeripherals, Tick, Value,
+    Module, PeripheralError, PortDef, PortKind, SimModel, SimPeripherals, Tick, Value,
 };
 
 /// Opaque block identifier.

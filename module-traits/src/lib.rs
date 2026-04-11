@@ -21,6 +21,7 @@ pub mod function_def;
 pub mod hardware;
 pub mod inventory;
 pub mod module;
+pub mod registry;
 pub mod sim;
 pub mod tick;
 pub mod value;
@@ -31,6 +32,7 @@ pub use function_def::{
     FuncPortDef, FunctionDef, FunctionOp, ParamDef, ParamKind, builtin_function_defs,
 };
 pub use module::Module;
-pub use sim::{SimModel, SimPeripherals};
+pub use sim::{PeripheralError, SimModel, SimPeripherals};
 pub use tick::Tick;
+pub use registry::{BlockRegistry, BlockTypeInfo, TargetInfo, TargetRegistry};
 pub use value::{FieldType, MessageData, MessageField, MessageSchema, PortDef, PortKind, Value};

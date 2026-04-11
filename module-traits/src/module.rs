@@ -48,6 +48,15 @@ pub trait Module {
     fn as_analysis(&self) -> Option<&dyn AnalysisModel> {
         None
     }
+
+    /// Whether this block is a delay element (z⁻¹).
+    ///
+    /// Delay blocks break feedback cycles in the dataflow graph. Their output
+    /// at tick N equals their input at tick N-1. The topological sort excludes
+    /// incoming edges to delay blocks so that cycles through them are allowed.
+    fn is_delay(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]
@@ -272,5 +281,31 @@ mod tests {
         let block = MinimalBlock;
         assert!(block.input_ports().is_empty());
         assert!(block.output_ports().is_empty());
+    }
+
+    // 15. Default is_delay() returns false
+    #[test]
+    fn test_module_default_is_delay() {
+        let block = MinimalBlock;
+        assert!(!block.is_delay());
+    }
+
+    // 16. GainBlock default is_delay() returns false
+    #[test]
+    fn test_module_gain_is_delay() {
+        let block = GainBlock { factor: 1.0 };
+        assert!(!block.is_delay());
+    }
+
+    // 17. MixerBlock defaults: config_json, as_tick, as_sim_model, as_codegen, as_analysis, is_delay
+    #[test]
+    fn test_module_mixer_defaults() {
+        let mut block = MixerBlock;
+        assert_eq!(block.config_json(), "{}");
+        assert!(block.as_tick().is_none());
+        assert!(block.as_sim_model().is_none());
+        assert!(block.as_codegen().is_none());
+        assert!(block.as_analysis().is_none());
+        assert!(!block.is_delay());
     }
 }

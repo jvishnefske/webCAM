@@ -543,4 +543,149 @@ mod tests {
             Ok(_) => panic!("expected an error for unknown block type"),
         }
     }
+
+    // ── offset_op coverage for various Op variants ──────────────────────
+
+    #[test]
+    fn test_offset_op_div() {
+        let op = Op::Div(2, 3);
+        let shifted = offset_op(&op, 10);
+        assert_eq!(shifted, Op::Div(12, 13));
+    }
+
+    #[test]
+    fn test_offset_op_pow() {
+        let op = Op::Pow(1, 4);
+        let shifted = offset_op(&op, 5);
+        assert_eq!(shifted, Op::Pow(6, 9));
+    }
+
+    #[test]
+    fn test_offset_op_input() {
+        let op = Op::Input("sensor".into());
+        let shifted = offset_op(&op, 100);
+        assert_eq!(shifted, Op::Input("sensor".into()));
+    }
+
+    #[test]
+    fn test_offset_op_output() {
+        let op = Op::Output("out".into(), 3);
+        let shifted = offset_op(&op, 10);
+        assert_eq!(shifted, Op::Output("out".into(), 13));
+    }
+
+    #[test]
+    fn test_offset_op_const() {
+        let op = Op::Const(42.0);
+        let shifted = offset_op(&op, 99);
+        assert_eq!(shifted, Op::Const(42.0));
+    }
+
+    #[test]
+    fn test_offset_op_subscribe() {
+        let op = Op::Subscribe("topic".into());
+        let shifted = offset_op(&op, 50);
+        assert_eq!(shifted, Op::Subscribe("topic".into()));
+    }
+
+    #[test]
+    fn test_offset_op_add() {
+        let op = Op::Add(1, 2);
+        let shifted = offset_op(&op, 10);
+        assert_eq!(shifted, Op::Add(11, 12));
+    }
+
+    #[test]
+    fn test_offset_op_mul() {
+        let op = Op::Mul(0, 3);
+        let shifted = offset_op(&op, 5);
+        assert_eq!(shifted, Op::Mul(5, 8));
+    }
+
+    #[test]
+    fn test_offset_op_sub() {
+        let op = Op::Sub(2, 0);
+        let shifted = offset_op(&op, 7);
+        assert_eq!(shifted, Op::Sub(9, 7));
+    }
+
+    #[test]
+    fn test_offset_op_neg() {
+        let op = Op::Neg(3);
+        let shifted = offset_op(&op, 10);
+        assert_eq!(shifted, Op::Neg(13));
+    }
+
+    #[test]
+    fn test_offset_op_relu() {
+        let op = Op::Relu(5);
+        let shifted = offset_op(&op, 2);
+        assert_eq!(shifted, Op::Relu(7));
+    }
+
+    #[test]
+    fn test_offset_op_publish() {
+        let op = Op::Publish("out".into(), 3);
+        let shifted = offset_op(&op, 10);
+        assert_eq!(shifted, Op::Publish("out".into(), 13));
+    }
+
+    // ── lower_block_set_per_node with unassigned blocks ─────────────────
+
+    #[test]
+    fn test_lower_block_set_per_node_unassigned_goes_to_default() {
+        let profile = DeploymentProfile::new("no_assignments");
+        // No node_assignments set -- blocks should go to "_default"
+        let blocks: Vec<(String, serde_json::Value)> = vec![
+            ("constant".into(), serde_json::json!({"value": 1.0})),
+        ];
+        let node_dags = lower_block_set_per_node(&blocks, &profile).expect("should succeed");
+        assert!(
+            node_dags.contains_key("_default"),
+            "unassigned blocks should go to _default"
+        );
+        assert!(!node_dags.get("_default").unwrap().is_empty());
+    }
+
+    // ── lower_to_il_text with a hardware channel ────────────────────────
+
+    #[test]
+    fn test_lower_to_il_text_with_hardware_channel() {
+        // ADC block has a Hardware-kind channel
+        let adc = crate::blocks::basic::AdcBlock::default();
+        let text = lower_to_il_text(&adc).expect("lower failed");
+        assert!(text.contains("block @adc"), "should contain block type");
+        assert!(text.contains("hw"), "should contain hw label for hardware channel");
+        assert!(text.contains("adc0"), "should contain channel name");
+    }
+
+    #[test]
+    fn test_lower_to_il_text_with_pwm() {
+        // PWM block has a Hardware-kind output channel
+        let pwm = crate::blocks::basic::PwmBlock::default();
+        let text = lower_to_il_text(&pwm).expect("lower failed");
+        assert!(text.contains("block @pwm"), "should contain block type");
+        assert!(text.contains("hw"), "should contain hw label for hardware channel");
+        assert!(text.contains("pwm0"), "should contain channel name");
+    }
+
+    #[test]
+    fn test_lower_block_set_per_node_unknown_block_type() {
+        let profile = DeploymentProfile::new("bench");
+        let blocks: Vec<(String, serde_json::Value)> = vec![
+            ("nonexistent_block_xyz".into(), serde_json::json!({})),
+        ];
+        let result = lower_block_set_per_node(&blocks, &profile);
+        match result {
+            Err(e) => assert!(e.contains("unknown block type"), "unexpected error: {e}"),
+            Ok(_) => panic!("expected an error for unknown block type"),
+        }
+    }
+
+    #[test]
+    fn test_lower_block_set_per_node_empty() {
+        let profile = DeploymentProfile::new("bench");
+        let node_dags = lower_block_set_per_node(&[], &profile).expect("should succeed");
+        assert!(node_dags.is_empty());
+    }
 }

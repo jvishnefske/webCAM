@@ -326,6 +326,40 @@ mod tests {
         assert_eq!(normalize(&req), (20, 3, 10, 2));
     }
 
+    // ── Display impl tests ───────────────────────────────────────
+
+    #[test]
+    fn display_all_error_variants() {
+        let same_side = ConnectionError::SameSide;
+        assert!(same_side.to_string().contains("same side"));
+
+        let self_conn = ConnectionError::SelfConnection;
+        assert!(self_conn.to_string().contains("itself"));
+
+        let dup = ConnectionError::Duplicate;
+        assert!(dup.to_string().contains("already exists"));
+
+        let inv_src = ConnectionError::InvalidSourcePort {
+            block_id: 1,
+            port: 5,
+            max_ports: 2,
+        };
+        let msg = inv_src.to_string();
+        assert!(msg.contains("1"));
+        assert!(msg.contains("5"));
+        assert!(msg.contains("2"));
+
+        let inv_tgt = ConnectionError::InvalidTargetPort {
+            block_id: 3,
+            port: 10,
+            max_ports: 4,
+        };
+        let msg = inv_tgt.to_string();
+        assert!(msg.contains("3"));
+        assert!(msg.contains("10"));
+        assert!(msg.contains("4"));
+    }
+
     // ── Property-based tests ─────────────────────────────────────
 
     mod prop {

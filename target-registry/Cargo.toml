@@ -1,0 +1,15 @@
+[package]
+name = "target-registry"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Target definitions, MCU metadata, and per-target code generators"
+
+[dependencies]
+module-traits = { path = "../module-traits" }
+graph-model = { path = "../graph-model" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lints]
+workspace = true

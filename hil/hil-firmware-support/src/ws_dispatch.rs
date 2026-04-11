@@ -4,11 +4,39 @@
 //! so board binaries only need to implement the trait for their
 //! specific bus topology.
 
+use crate::fw_update::EncodeError;
+
+/// Error type for I2C bus set operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BusSetError {
+    /// Bus index is out of range.
+    InvalidBus,
+    /// No device found at the specified address.
+    DeviceNotFound,
+    /// I2C transaction failed (NAK or bus error).
+    TransactionFailed,
+}
+
+/// Error type for WebSocket CBOR request dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchError {
+    /// CBOR decoding of the request failed.
+    MalformedRequest,
+    /// CBOR encoding of the response failed.
+    Encode(EncodeError),
+}
+
+impl From<EncodeError> for DispatchError {
+    fn from(e: EncodeError) -> Self {
+        DispatchError::Encode(e)
+    }
+}
+
 /// Trait abstracting a set of I2C buses for WebSocket dispatch.
 ///
 /// Board binaries implement this to wire up their specific bus types.
-/// Methods return `Result<(), ()>` to avoid coupling this crate to
-/// any specific I2C error type.
+/// Methods return `Result<(), BusSetError>` to provide structured error
+/// information for I2C bus operations.
 pub trait I2cBusSet {
     /// Reads bytes from an I2C device register on the specified bus.
     ///
@@ -17,8 +45,10 @@ pub trait I2cBusSet {
     ///
     /// # Errors
     ///
-    /// Returns `()` if the bus index is invalid or the I2C transaction fails.
-    fn i2c_read(&mut self, bus: u8, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), ()>;
+    /// Returns [`BusSetError::InvalidBus`] if the bus index is out of range,
+    /// or [`BusSetError::TransactionFailed`] if the I2C transaction fails.
+    fn i2c_read(&mut self, bus: u8, addr: u8, reg: u8, buf: &mut [u8])
+        -> Result<(), BusSetError>;
 
     /// Writes bytes to an I2C device on the specified bus.
     ///
@@ -27,8 +57,9 @@ pub trait I2cBusSet {
     ///
     /// # Errors
     ///
-    /// Returns `()` if the bus index is invalid or the I2C transaction fails.
-    fn i2c_write(&mut self, bus: u8, addr: u8, data: &[u8]) -> Result<(), ()>;
+    /// Returns [`BusSetError::InvalidBus`] if the bus index is out of range,
+    /// or [`BusSetError::TransactionFailed`] if the I2C transaction fails.
+    fn i2c_write(&mut self, bus: u8, addr: u8, data: &[u8]) -> Result<(), BusSetError>;
 
     /// Returns the number of active buses.
     fn bus_count(&self) -> u8;
@@ -53,46 +84,59 @@ pub trait I2cBusSet {
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if the bus does not support runtime configuration
-    /// or the operation fails (bus full, duplicate address, etc.).
+    /// Returns [`BusSetError::InvalidBus`] if the bus does not support
+    /// runtime configuration or the bus index is out of range.
+    /// Returns [`BusSetError::DeviceNotFound`] if the address is invalid.
+    /// Returns [`BusSetError::TransactionFailed`] if the bus is full or
+    /// a device with the same address already exists.
     fn add_device(
         &mut self,
         _bus: u8,
         _addr: u8,
         _name: &[u8],
         _registers: &[u8],
-    ) -> Result<(), ()> {
-        Err(())
+    ) -> Result<(), BusSetError> {
+        Err(BusSetError::InvalidBus)
     }
 
     /// Removes a runtime device from the specified bus.
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if the bus does not support runtime configuration
-    /// or the device was not found.
-    fn remove_device(&mut self, _bus: u8, _addr: u8) -> Result<(), ()> {
-        Err(())
+    /// Returns [`BusSetError::InvalidBus`] if the bus does not support
+    /// runtime configuration or the bus index is out of range.
+    /// Returns [`BusSetError::DeviceNotFound`] if no device with the
+    /// given address exists on the bus.
+    fn remove_device(&mut self, _bus: u8, _addr: u8) -> Result<(), BusSetError> {
+        Err(BusSetError::InvalidBus)
     }
 
     /// Sets register contents on a device.
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if the bus does not support runtime configuration
-    /// or the device was not found.
-    fn set_registers(&mut self, _bus: u8, _addr: u8, _offset: u8, _data: &[u8]) -> Result<(), ()> {
-        Err(())
+    /// Returns [`BusSetError::InvalidBus`] if the bus does not support
+    /// runtime configuration or the bus index is out of range.
+    /// Returns [`BusSetError::DeviceNotFound`] if no device with the
+    /// given address exists on the bus.
+    fn set_registers(
+        &mut self,
+        _bus: u8,
+        _addr: u8,
+        _offset: u8,
+        _data: &[u8],
+    ) -> Result<(), BusSetError> {
+        Err(BusSetError::InvalidBus)
     }
 
     /// Sets the number of active buses.
     ///
     /// # Errors
     ///
-    /// Returns `Err(())` if the bus set does not support runtime configuration
-    /// or the count exceeds the maximum.
-    fn set_bus_count(&mut self, _count: u8) -> Result<(), ()> {
-        Err(())
+    /// Returns [`BusSetError::InvalidBus`] if the bus set does not support
+    /// runtime configuration or the count exceeds the maximum.
+    fn set_bus_count(&mut self, _count: u8) -> Result<(), BusSetError> {
+        Err(BusSetError::InvalidBus)
     }
 
     /// Clears all runtime configuration, removing all devices from all buses.
@@ -106,17 +150,17 @@ pub trait I2cBusSet {
 ///
 /// # Errors
 ///
-/// Returns `()` if the buffer is too small.
-pub fn encode_error(buf: &mut [u8], message: &str) -> Result<usize, ()> {
+/// Returns [`EncodeError::BufferTooSmall`] if the buffer is too small.
+pub fn encode_error(buf: &mut [u8], message: &str) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(2).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(255).map_err(|_| ())?;
-    enc.u32(1).map_err(|_| ())?;
-    enc.str(message).map_err(|_| ())?;
+    enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(255).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.str(message).map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -130,17 +174,17 @@ pub fn encode_error(buf: &mut [u8], message: &str) -> Result<usize, ()> {
 ///
 /// # Errors
 ///
-/// Returns `()` if the buffer is too small.
-pub fn encode_i2c_data(buf: &mut [u8], data: &[u8]) -> Result<usize, ()> {
+/// Returns [`EncodeError::BufferTooSmall`] if the buffer is too small.
+pub fn encode_i2c_data(buf: &mut [u8], data: &[u8]) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(2).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(1).map_err(|_| ())?;
-    enc.u32(1).map_err(|_| ())?;
-    enc.bytes(data).map_err(|_| ())?;
+    enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.bytes(data).map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -154,15 +198,15 @@ pub fn encode_i2c_data(buf: &mut [u8], data: &[u8]) -> Result<usize, ()> {
 ///
 /// # Errors
 ///
-/// Returns `()` if the buffer is too small.
-pub fn encode_write_ok(buf: &mut [u8]) -> Result<usize, ()> {
+/// Returns [`EncodeError::BufferTooSmall`] if the buffer is too small.
+pub fn encode_write_ok(buf: &mut [u8]) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(1).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(2).map_err(|_| ())?;
+    enc.map(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(2).map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -176,15 +220,15 @@ pub fn encode_write_ok(buf: &mut [u8]) -> Result<usize, ()> {
 ///
 /// # Errors
 ///
-/// Returns `()` if the buffer is too small.
-pub fn encode_tag_ok(buf: &mut [u8], tag: u32) -> Result<usize, ()> {
+/// Returns [`EncodeError::BufferTooSmall`] if the buffer is too small.
+pub fn encode_tag_ok(buf: &mut [u8], tag: u32) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(1).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(tag).map_err(|_| ())?;
+    enc.map(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(tag).map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -198,39 +242,39 @@ pub fn encode_tag_ok(buf: &mut [u8], tag: u32) -> Result<usize, ()> {
 ///
 /// # Errors
 ///
-/// Returns `()` if the buffer is too small for the encoded response.
-pub fn encode_bus_list(buf: &mut [u8], inventory: &[(u8, &[(u8, &str)])]) -> Result<usize, ()> {
+/// Returns [`EncodeError::BufferTooSmall`] if the buffer is too small for the encoded response.
+pub fn encode_bus_list(buf: &mut [u8], inventory: &[(u8, &[(u8, &str)])]) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
-    enc.map(2).map_err(|_| ())?;
+    enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
     // Key 0: tag = 3 (BusList)
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(3).map_err(|_| ())?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(3).map_err(|_| EncodeError::BufferTooSmall)?;
     // Key 1: array of bus entries
-    enc.u32(1).map_err(|_| ())?;
-    enc.array(inventory.len() as u64).map_err(|_| ())?;
+    enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.array(inventory.len() as u64).map_err(|_| EncodeError::BufferTooSmall)?;
 
     let mut bus_i = 0;
     while bus_i < inventory.len() {
         let (bus_idx, devices) = inventory[bus_i];
-        enc.map(2).map_err(|_| ())?;
+        enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
         // Key 0: bus index
-        enc.u32(0).map_err(|_| ())?;
-        enc.u8(bus_idx).map_err(|_| ())?;
+        enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.u8(bus_idx).map_err(|_| EncodeError::BufferTooSmall)?;
         // Key 1: device array
-        enc.u32(1).map_err(|_| ())?;
-        enc.array(devices.len() as u64).map_err(|_| ())?;
+        enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.array(devices.len() as u64).map_err(|_| EncodeError::BufferTooSmall)?;
 
         let mut dev_i = 0;
         while dev_i < devices.len() {
             let (addr, name) = devices[dev_i];
-            enc.map(2).map_err(|_| ())?;
-            enc.u32(0).map_err(|_| ())?;
-            enc.u8(addr).map_err(|_| ())?;
-            enc.u32(1).map_err(|_| ())?;
-            enc.str(name).map_err(|_| ())?;
+            enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
+            enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+            enc.u8(addr).map_err(|_| EncodeError::BufferTooSmall)?;
+            enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+            enc.str(name).map_err(|_| EncodeError::BufferTooSmall)?;
             dev_i += 1;
         }
         bus_i += 1;
@@ -248,37 +292,37 @@ pub fn encode_bus_list(buf: &mut [u8], inventory: &[(u8, &[(u8, &str)])]) -> Res
 ///
 /// # Errors
 ///
-/// Returns `()` if the buffer is too small.
-fn encode_bus_list_dynamic<B: I2cBusSet>(buses: &B, buf: &mut [u8]) -> Result<usize, ()> {
+/// Returns [`EncodeError::BufferTooSmall`] if the buffer is too small.
+fn encode_bus_list_dynamic<B: I2cBusSet>(buses: &B, buf: &mut [u8]) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
     let count = buses.bus_count();
-    enc.map(2).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(3).map_err(|_| ())?;
-    enc.u32(1).map_err(|_| ())?;
-    enc.array(count as u64).map_err(|_| ())?;
+    enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(3).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.array(count as u64).map_err(|_| EncodeError::BufferTooSmall)?;
 
     let mut bus_i = 0u8;
     while bus_i < count {
         let dev_count = buses.device_count(bus_i);
-        enc.map(2).map_err(|_| ())?;
-        enc.u32(0).map_err(|_| ())?;
-        enc.u8(bus_i).map_err(|_| ())?;
-        enc.u32(1).map_err(|_| ())?;
-        enc.array(dev_count as u64).map_err(|_| ())?;
+        enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.u8(bus_i).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.array(dev_count as u64).map_err(|_| EncodeError::BufferTooSmall)?;
 
         let mut dev_i = 0u8;
         while dev_i < dev_count {
             if let Some((addr, name)) = buses.device_info(bus_i, dev_i) {
-                enc.map(2).map_err(|_| ())?;
-                enc.u32(0).map_err(|_| ())?;
-                enc.u8(addr).map_err(|_| ())?;
-                enc.u32(1).map_err(|_| ())?;
+                enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
+                enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+                enc.u8(addr).map_err(|_| EncodeError::BufferTooSmall)?;
+                enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
                 let name_str = core::str::from_utf8(name).unwrap_or("?");
-                enc.str(name_str).map_err(|_| ())?;
+                enc.str(name_str).map_err(|_| EncodeError::BufferTooSmall)?;
             }
             dev_i += 1;
         }
@@ -297,37 +341,37 @@ fn encode_bus_list_dynamic<B: I2cBusSet>(buses: &B, buf: &mut [u8]) -> Result<us
 ///
 /// # Errors
 ///
-/// Returns `()` if the buffer is too small.
-fn encode_config<B: I2cBusSet>(buses: &B, buf: &mut [u8]) -> Result<usize, ()> {
+/// Returns [`EncodeError::BufferTooSmall`] if the buffer is too small.
+fn encode_config<B: I2cBusSet>(buses: &B, buf: &mut [u8]) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
 
     let count = buses.bus_count();
-    enc.map(2).map_err(|_| ())?;
-    enc.u32(0).map_err(|_| ())?;
-    enc.u32(35).map_err(|_| ())?;
-    enc.u32(1).map_err(|_| ())?;
-    enc.array(count as u64).map_err(|_| ())?;
+    enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(35).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.array(count as u64).map_err(|_| EncodeError::BufferTooSmall)?;
 
     let mut bus_i = 0u8;
     while bus_i < count {
         let dev_count = buses.device_count(bus_i);
-        enc.map(2).map_err(|_| ())?;
-        enc.u32(0).map_err(|_| ())?;
-        enc.u8(bus_i).map_err(|_| ())?;
-        enc.u32(1).map_err(|_| ())?;
-        enc.array(dev_count as u64).map_err(|_| ())?;
+        enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.u8(bus_i).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.array(dev_count as u64).map_err(|_| EncodeError::BufferTooSmall)?;
 
         let mut dev_i = 0u8;
         while dev_i < dev_count {
             if let Some((addr, name)) = buses.device_info(bus_i, dev_i) {
-                enc.map(2).map_err(|_| ())?;
-                enc.u32(0).map_err(|_| ())?;
-                enc.u8(addr).map_err(|_| ())?;
-                enc.u32(1).map_err(|_| ())?;
+                enc.map(2).map_err(|_| EncodeError::BufferTooSmall)?;
+                enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
+                enc.u8(addr).map_err(|_| EncodeError::BufferTooSmall)?;
+                enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
                 let name_str = core::str::from_utf8(name).unwrap_or("?");
-                enc.str(name_str).map_err(|_| ())?;
+                enc.str(name_str).map_err(|_| EncodeError::BufferTooSmall)?;
             }
             dev_i += 1;
         }
@@ -362,123 +406,124 @@ fn encode_config<B: I2cBusSet>(buses: &B, buf: &mut [u8]) -> Result<usize, ()> {
 ///
 /// # Errors
 ///
-/// Returns `()` if CBOR decoding fails or the response buffer is too
-/// small. I2C transaction errors are reported as Error responses rather
+/// Returns [`DispatchError::MalformedRequest`] if CBOR decoding fails, or
+/// [`DispatchError::Encode`] if the response buffer is too small.
+/// I2C transaction errors are reported as Error responses rather
 /// than function-level errors.
 pub fn handle_request<B: I2cBusSet>(
     buses: &mut B,
     request: &[u8],
     resp_buf: &mut [u8],
-) -> Result<usize, ()> {
+) -> Result<usize, DispatchError> {
     let mut dec = minicbor::Decoder::new(request);
-    let _map_len = dec.map().map_err(|_| ())?;
+    let _map_len = dec.map().map_err(|_| DispatchError::MalformedRequest)?;
 
     // Read tag from key 0
-    let _key0 = dec.u32().map_err(|_| ())?;
-    let tag = dec.u32().map_err(|_| ())?;
+    let _key0 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+    let tag = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
 
     match tag {
         // I2cRead: {0:1, 1:bus, 2:addr, 3:reg, 4:len}
         1 => {
-            let _k1 = dec.u32().map_err(|_| ())?;
-            let bus = dec.u8().map_err(|_| ())?;
-            let _k2 = dec.u32().map_err(|_| ())?;
-            let addr = dec.u8().map_err(|_| ())?;
-            let _k3 = dec.u32().map_err(|_| ())?;
-            let reg = dec.u8().map_err(|_| ())?;
-            let _k4 = dec.u32().map_err(|_| ())?;
-            let len = dec.u8().map_err(|_| ())?;
+            let _k1 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let bus = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
+            let _k2 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let addr = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
+            let _k3 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let reg = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
+            let _k4 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let len = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
 
             // Cap read length to a reasonable maximum
             let read_len = if len > 128 { 128 } else { len as usize };
             let mut read_buf = [0u8; 128];
 
             match buses.i2c_read(bus, addr, reg, &mut read_buf[..read_len]) {
-                Ok(()) => encode_i2c_data(resp_buf, &read_buf[..read_len]),
-                Err(()) => encode_error(resp_buf, "i2c read failed"),
+                Ok(()) => Ok(encode_i2c_data(resp_buf, &read_buf[..read_len])?),
+                Err(_) => Ok(encode_error(resp_buf, "i2c read failed")?),
             }
         }
         // I2cWrite: {0:2, 1:bus, 2:addr, 3:data}
         2 => {
-            let _k1 = dec.u32().map_err(|_| ())?;
-            let bus = dec.u8().map_err(|_| ())?;
-            let _k2 = dec.u32().map_err(|_| ())?;
-            let addr = dec.u8().map_err(|_| ())?;
-            let _k3 = dec.u32().map_err(|_| ())?;
-            let data = dec.bytes().map_err(|_| ())?;
+            let _k1 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let bus = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
+            let _k2 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let addr = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
+            let _k3 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let data = dec.bytes().map_err(|_| DispatchError::MalformedRequest)?;
 
             match buses.i2c_write(bus, addr, data) {
-                Ok(()) => encode_write_ok(resp_buf),
-                Err(()) => encode_error(resp_buf, "i2c write failed"),
+                Ok(()) => Ok(encode_write_ok(resp_buf)?),
+                Err(_) => Ok(encode_error(resp_buf, "i2c write failed")?),
             }
         }
         // ListBuses: {0:3}
-        3 => encode_bus_list_dynamic(buses, resp_buf),
+        3 => Ok(encode_bus_list_dynamic(buses, resp_buf)?),
         // RebootBootsel: {0:12}
-        12 => encode_error(resp_buf, "reboot not supported in sim"),
+        12 => Ok(encode_error(resp_buf, "reboot not supported in sim")?),
         // AddDevice: {0:30, 1:bus, 2:addr, 3:"name", 4:h'registers'}
         30 => {
-            let _k1 = dec.u32().map_err(|_| ())?;
-            let bus = dec.u8().map_err(|_| ())?;
-            let _k2 = dec.u32().map_err(|_| ())?;
-            let addr = dec.u8().map_err(|_| ())?;
-            let _k3 = dec.u32().map_err(|_| ())?;
-            let name = dec.str().map_err(|_| ())?;
-            let _k4 = dec.u32().map_err(|_| ())?;
-            let registers = dec.bytes().map_err(|_| ())?;
+            let _k1 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let bus = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
+            let _k2 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let addr = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
+            let _k3 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let name = dec.str().map_err(|_| DispatchError::MalformedRequest)?;
+            let _k4 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let registers = dec.bytes().map_err(|_| DispatchError::MalformedRequest)?;
 
             match buses.add_device(bus, addr, name.as_bytes(), registers) {
-                Ok(()) => encode_tag_ok(resp_buf, 30),
-                Err(()) => encode_error(resp_buf, "add device failed"),
+                Ok(()) => Ok(encode_tag_ok(resp_buf, 30)?),
+                Err(_) => Ok(encode_error(resp_buf, "add device failed")?),
             }
         }
         // RemoveDevice: {0:31, 1:bus, 2:addr}
         31 => {
-            let _k1 = dec.u32().map_err(|_| ())?;
-            let bus = dec.u8().map_err(|_| ())?;
-            let _k2 = dec.u32().map_err(|_| ())?;
-            let addr = dec.u8().map_err(|_| ())?;
+            let _k1 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let bus = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
+            let _k2 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let addr = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
 
             match buses.remove_device(bus, addr) {
-                Ok(()) => encode_tag_ok(resp_buf, 31),
-                Err(()) => encode_error(resp_buf, "remove device failed"),
+                Ok(()) => Ok(encode_tag_ok(resp_buf, 31)?),
+                Err(_) => Ok(encode_error(resp_buf, "remove device failed")?),
             }
         }
         // SetRegisters: {0:32, 1:bus, 2:addr, 3:offset, 4:h'data'}
         32 => {
-            let _k1 = dec.u32().map_err(|_| ())?;
-            let bus = dec.u8().map_err(|_| ())?;
-            let _k2 = dec.u32().map_err(|_| ())?;
-            let addr = dec.u8().map_err(|_| ())?;
-            let _k3 = dec.u32().map_err(|_| ())?;
-            let offset = dec.u8().map_err(|_| ())?;
-            let _k4 = dec.u32().map_err(|_| ())?;
-            let data = dec.bytes().map_err(|_| ())?;
+            let _k1 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let bus = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
+            let _k2 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let addr = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
+            let _k3 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let offset = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
+            let _k4 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let data = dec.bytes().map_err(|_| DispatchError::MalformedRequest)?;
 
             match buses.set_registers(bus, addr, offset, data) {
-                Ok(()) => encode_tag_ok(resp_buf, 32),
-                Err(()) => encode_error(resp_buf, "set registers failed"),
+                Ok(()) => Ok(encode_tag_ok(resp_buf, 32)?),
+                Err(_) => Ok(encode_error(resp_buf, "set registers failed")?),
             }
         }
         // SetBusCount: {0:33, 1:count}
         33 => {
-            let _k1 = dec.u32().map_err(|_| ())?;
-            let count = dec.u8().map_err(|_| ())?;
+            let _k1 = dec.u32().map_err(|_| DispatchError::MalformedRequest)?;
+            let count = dec.u8().map_err(|_| DispatchError::MalformedRequest)?;
 
             match buses.set_bus_count(count) {
-                Ok(()) => encode_tag_ok(resp_buf, 33),
-                Err(()) => encode_error(resp_buf, "set bus count failed"),
+                Ok(()) => Ok(encode_tag_ok(resp_buf, 33)?),
+                Err(_) => Ok(encode_error(resp_buf, "set bus count failed")?),
             }
         }
         // ClearAll: {0:34}
         34 => {
             buses.clear_all();
-            encode_tag_ok(resp_buf, 34)
+            Ok(encode_tag_ok(resp_buf, 34)?)
         }
         // GetConfig: {0:35}
-        35 => encode_config(buses, resp_buf),
+        35 => Ok(encode_config(buses, resp_buf)?),
         // Unknown tag
-        _ => encode_error(resp_buf, "unknown request tag"),
+        _ => Ok(encode_error(resp_buf, "unknown request tag")?),
     }
 }
 
@@ -491,9 +536,9 @@ mod tests {
     }
 
     impl I2cBusSet for MockBusSet {
-        fn i2c_read(&mut self, _bus: u8, _addr: u8, _reg: u8, buf: &mut [u8]) -> Result<(), ()> {
+        fn i2c_read(&mut self, _bus: u8, _addr: u8, _reg: u8, buf: &mut [u8]) -> Result<(), BusSetError> {
             if self.fail_reads {
-                return Err(());
+                return Err(BusSetError::TransactionFailed);
             }
             let mut i = 0;
             while i < buf.len() {
@@ -503,7 +548,7 @@ mod tests {
             Ok(())
         }
 
-        fn i2c_write(&mut self, _bus: u8, _addr: u8, _data: &[u8]) -> Result<(), ()> {
+        fn i2c_write(&mut self, _bus: u8, _addr: u8, _data: &[u8]) -> Result<(), BusSetError> {
             Ok(())
         }
 
@@ -869,5 +914,12 @@ mod tests {
         let mut buf = [0u8; 256];
         let n = encode_bus_list_dynamic(&buses, &mut buf).unwrap();
         assert_eq!(decode_tag(&buf[..n]), 3);
+    }
+
+    #[test]
+    fn test_default_device_registers_returns_none() {
+        let buses = MockBusSet { fail_reads: false };
+        // MockBusSet uses the default device_registers impl which returns None
+        assert!(buses.device_registers(0, 0x48).is_none());
     }
 }
