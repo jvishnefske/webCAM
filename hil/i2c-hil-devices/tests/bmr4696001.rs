@@ -109,6 +109,18 @@ fn telemetry_injection() {
 }
 
 #[test]
+fn telemetry_temperature_1() {
+    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_read_temperature_1(0xDEAD);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    let mut buf = [0u8; 2];
+    bus.write_read(ADDR, &[0x8D], &mut buf).unwrap();
+    assert_eq!(u16::from_le_bytes(buf), 0xDEAD);
+}
+
+#[test]
 fn telemetry_temperature_3() {
     let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
     let mut engine = PmBusEngine::new(dev);
@@ -381,6 +393,18 @@ fn status_mfr_specific_setter() {
 // --- Individual computed STATUS_BYTE bit tests ---
 
 #[test]
+fn computed_status_byte_temperature() {
+    let mut dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    dev.set_status_temperature(0x01);
+    let mut bus = SimBusBuilder::new()
+        .with_device(PmBusEngine::new(dev))
+        .build();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x78], &mut buf).unwrap();
+    assert_ne!(buf[0] & (1 << 2), 0, "TEMPERATURE bit should be set");
+}
+
+#[test]
 fn computed_status_byte_vin_uv() {
     let mut dev = Bmr4696001::new(Address::new(ADDR).unwrap());
     dev.set_status_input(0x10);
@@ -465,4 +489,102 @@ fn computed_status_word_mfr_aggregation() {
         0,
         "STATUS_MFR should set STATUS_WORD bit 12"
     );
+}
+
+// --- STATUS_BYTE W1C cascade: all individual paths ---
+
+#[test]
+fn status_byte_w1c_cascade_input() {
+    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_input(0xFF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    bus.write(ADDR, &[0x78, 1 << 3]).unwrap();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7C], &mut buf).unwrap();
+    assert_eq!(buf[0] & 0x10, 0, "STATUS_INPUT bit 4 should be cleared");
+}
+
+#[test]
+fn status_byte_w1c_cascade_temperature() {
+    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_temperature(0xFF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    bus.write(ADDR, &[0x78, 1 << 2]).unwrap();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7D], &mut buf).unwrap();
+    assert_eq!(buf[0], 0x00, "STATUS_TEMPERATURE should be cleared");
+}
+
+#[test]
+fn status_byte_w1c_cascade_cml() {
+    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_cml(0xFF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    bus.write(ADDR, &[0x78, 1 << 1]).unwrap();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7E], &mut buf).unwrap();
+    assert_eq!(buf[0], 0x00, "STATUS_CML should be cleared");
+}
+
+#[test]
+fn status_byte_w1c_cascade_mfr() {
+    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_mfr_specific(0xFF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    bus.write(ADDR, &[0x78, 1]).unwrap();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x80], &mut buf).unwrap();
+    assert_eq!(buf[0], 0x00, "STATUS_MFR should be cleared");
+}
+
+// --- STATUS_WORD W1C cascade: high byte individual paths ---
+
+#[test]
+fn status_word_w1c_cascade_iout() {
+    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_iout(0xFF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    // high byte 0x40 = clear IOUT
+    bus.write(ADDR, &[0x79, 0x00, 0x40]).unwrap();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7B], &mut buf).unwrap();
+    assert_eq!(buf[0], 0x00, "STATUS_IOUT should be cleared");
+}
+
+#[test]
+fn status_word_w1c_cascade_input() {
+    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_input(0xFF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    // high byte 0x20 = clear INPUT
+    bus.write(ADDR, &[0x79, 0x00, 0x20]).unwrap();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x7C], &mut buf).unwrap();
+    assert_eq!(buf[0], 0x00, "STATUS_INPUT should be cleared");
+}
+
+#[test]
+fn status_word_w1c_cascade_mfr() {
+    let dev = Bmr4696001::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_mfr_specific(0xFF);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    // high byte 0x10 = clear MFR
+    bus.write(ADDR, &[0x79, 0x00, 0x10]).unwrap();
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x80], &mut buf).unwrap();
+    assert_eq!(buf[0], 0x00, "STATUS_MFR should be cleared");
 }

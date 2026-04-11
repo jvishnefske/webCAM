@@ -266,6 +266,18 @@ fn status_vout_w1c() {
 // --- Computed STATUS_BYTE with injected faults ---
 
 #[test]
+fn computed_status_byte_input_bit() {
+    let dev = Tps546b24a::new(Address::new(ADDR).unwrap());
+    let mut engine = PmBusEngine::new(dev);
+    engine.device_mut().set_status_input(0x10);
+    let mut bus = SimBusBuilder::new().with_device(engine).build();
+
+    let mut buf = [0u8; 1];
+    bus.write_read(ADDR, &[0x78], &mut buf).unwrap();
+    assert_ne!(buf[0] & (1 << 3), 0, "INPUT should set STATUS_BYTE bit 3");
+}
+
+#[test]
 fn computed_status_byte_iout_bit() {
     let dev = Tps546b24a::new(Address::new(ADDR).unwrap());
     let mut engine = PmBusEngine::new(dev);
