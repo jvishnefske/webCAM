@@ -32,6 +32,7 @@ members = [
     "configurable-blocks",
     "target-registry",
     "deployment",
+    "codegen-emit",
 ]
 default-members = [
     "crates/rustcam",
@@ -48,6 +49,7 @@ default-members = [
     "configurable-blocks",
     "target-registry",
     "deployment",
+    "codegen-emit",
     "hil/native-server",
 ]
 

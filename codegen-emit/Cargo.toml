@@ -1,0 +1,23 @@
+[package]
+name = "codegen-emit"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+description = "Rust workspace code generation from dataflow graph snapshots"
+
+[features]
+mlir = ["mlir-codegen"]
+
+[dependencies]
+graph-model = { path = "../graph-model" }
+module-traits = { path = "../module-traits" }
+target-registry = { path = "../target-registry" }
+deployment = { path = "../deployment" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+mlir-codegen = { path = "../mlir-codegen", optional = true }
+
+# Note: Workspace lints are intentionally not inherited here.
+# The emit.rs code was extracted from rustsim (which also doesn't use workspace
+# lints) and freely uses `writeln!(...).unwrap()` on String buffers in functions
+# returning Result. These are infallible but would trip `unwrap_in_result`.

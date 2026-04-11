@@ -1,6 +1,6 @@
 //! Map dataflow port kinds to Rust type strings.
 
-use crate::dataflow::block::PortKind;
+use graph_model::PortKind;
 
 /// Return the Rust type name corresponding to a port kind.
 pub fn rust_type(kind: &PortKind) -> &'static str {

@@ -5,8 +5,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::dataflow::block::BlockId;
-use crate::dataflow::channel::Channel;
+use graph_model::{BlockId, Channel};
 
 /// A group of blocks that form a connected component in the dataflow graph.
 /// All blocks in a group must execute sequentially (they share data),
@@ -95,7 +94,7 @@ pub fn find_parallel_groups(
             .collect();
 
         let sorted_blocks =
-            super::topo::topological_sort(&component_block_ids, &component_channels, &HashSet::new())?;
+            crate::topo::topological_sort(&component_block_ids, &component_channels, &HashSet::new())?;
 
         groups.push(ParallelGroup {
             blocks: sorted_blocks,
@@ -112,7 +111,7 @@ pub fn find_parallel_groups(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataflow::channel::ChannelId;
+    use graph_model::ChannelId;
 
     fn ch(id: u32, from: u32, from_port: usize, to: u32, to_port: usize) -> Channel {
         Channel {

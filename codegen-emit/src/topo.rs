@@ -2,15 +2,14 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use crate::dataflow::block::BlockId;
-use crate::dataflow::channel::Channel;
+use graph_model::{BlockId, Channel};
 
 /// Topologically sort block IDs based on channel dependencies.
 ///
 /// Blocks with no incoming edges (sources) appear first. Returns `Err` if a
 /// cycle is detected.
 ///
-/// `delay_blocks` contains IDs of blocks that act as z⁻¹ delay elements
+/// `delay_blocks` contains IDs of blocks that act as z^-1 delay elements
 /// (e.g. Register blocks). Edges feeding INTO these blocks are excluded from
 /// dependency analysis, allowing feedback loops through delay elements.
 pub fn topological_sort(
@@ -26,7 +25,7 @@ pub fn topological_sort(
     for ch in channels {
         // Only count edges between blocks that are in the input set.
         if in_degree.contains_key(&ch.from_block) && in_degree.contains_key(&ch.to_block) {
-            // Skip edges INTO delay blocks — these are back-edges that break
+            // Skip edges INTO delay blocks -- these are back-edges that break
             // feedback cycles. The delay block outputs the previous tick's value.
             if delay_blocks.contains(&ch.to_block) {
                 continue;
@@ -83,7 +82,7 @@ pub fn topological_sort(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::dataflow::channel::ChannelId;
+    use graph_model::ChannelId;
 
     fn ch(id: u32, from: u32, from_port: usize, to: u32, to_port: usize) -> Channel {
         Channel {
@@ -161,7 +160,7 @@ mod tests {
 
     #[test]
     fn delay_block_breaks_cycle() {
-        // Register(3) -> SM(1) -> Gain(2) -> Register(3) — cycle through delay block
+        // Register(3) -> SM(1) -> Gain(2) -> Register(3) -- cycle through delay block
         let ids = vec![BlockId(1), BlockId(2), BlockId(3)];
         let channels = vec![
             ch(1, 3, 0, 1, 0), // Register -> SM

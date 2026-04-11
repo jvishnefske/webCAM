@@ -27,6 +27,7 @@ graph-model = { path = "../../graph-model" }
 deployment = { path = "../../deployment" }
 mlir-codegen = { path = "../../mlir-codegen", optional = true }
 target-registry = { path = "../../target-registry" }
+codegen-emit = { path = "../../codegen-emit" }
 tsify-next = { version = "0.5", features = ["js"] }
 serde-wasm-bindgen = "0.6"
 
