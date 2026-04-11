@@ -75,19 +75,6 @@ impl Tick for PlotBlock {
     }
 }
 
-#[allow(dead_code)]
-pub(crate) fn register(reg: &mut Vec<crate::registry::BlockRegistration>) {
-    reg.push(crate::registry::BlockRegistration {
-        block_type: "plot",
-        display_name: "Plot",
-        category: "Sinks",
-        create_from_json: |json| {
-            let cfg: PlotConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
-            Ok(Box::new(PlotBlock::from_config(cfg)))
-        },
-    });
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

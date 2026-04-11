@@ -916,4 +916,150 @@ mod tests {
             "expected Ok for valid multi-board profile"
         );
     }
+
+    // ── to_manifest with empty boards (inferred path) ──────────────────
+
+    #[test]
+    fn to_manifest_empty_boards_infers_from_assignments() {
+        let mut profile = DeploymentProfile::new("inferred");
+        // No boards added, but we have node_assignments
+        profile.assign_block(0, "inferred_node");
+
+        let manifest = profile.to_manifest(100.0);
+
+        // Should infer one board from the node_assignments
+        assert_eq!(manifest.topology.nodes.len(), 1);
+        assert_eq!(manifest.topology.nodes[0].id, "inferred_node");
+        // Inferred boards default to "Host" MCU family
+        assert_eq!(manifest.topology.nodes[0].mcu_family, "Host");
+        // Should have a task for the inferred node
+        assert_eq!(manifest.tasks.len(), 1);
+        assert_eq!(manifest.tasks[0].node, "inferred_node");
+    }
+
+    #[test]
+    fn to_manifest_empty_boards_infers_from_peripheral_assignments() {
+        let mut profile = DeploymentProfile::new("inferred_peripherals");
+        // No boards, no node_assignments, but peripheral_assignments reference a node
+        let binding = make_binding(0, "adc0", "periph_node", vec!["PA0"]);
+        profile.peripheral_assignments.push(binding);
+
+        let manifest = profile.to_manifest(50.0);
+
+        // Should infer the board from peripheral_assignments
+        assert_eq!(manifest.topology.nodes.len(), 1);
+        assert_eq!(manifest.topology.nodes[0].id, "periph_node");
+        assert_eq!(manifest.topology.nodes[0].mcu_family, "Host");
+    }
+
+    // ── to_manifest with Esp32c3 (RiscV32IMC) ─────────────────────────
+
+    #[test]
+    fn to_manifest_esp32c3_riscv32imc_target() {
+        let mut profile = DeploymentProfile::new("esp_test");
+        profile.add_board("esp_node", "Esp32c3");
+        profile.assign_block(0, "esp_node");
+
+        let manifest = profile.to_manifest(100.0);
+
+        assert_eq!(manifest.topology.nodes.len(), 1);
+        let node = &manifest.topology.nodes[0];
+        assert_eq!(node.id, "esp_node");
+        assert_eq!(node.mcu_family, "Esp32c3");
+        assert_eq!(
+            node.rust_target.as_deref(),
+            Some("riscv32imc-unknown-none-elf")
+        );
+    }
+
+    // ── to_manifest with Stm32g0b1 (CortexM0Plus) ─────────────────────
+
+    #[test]
+    fn to_manifest_stm32g0b1_cortex_m0_target() {
+        let mut profile = DeploymentProfile::new("g0_test");
+        profile.add_board("g0_node", "Stm32g0b1");
+        profile.assign_block(0, "g0_node");
+
+        let manifest = profile.to_manifest(100.0);
+
+        assert_eq!(manifest.topology.nodes.len(), 1);
+        let node = &manifest.topology.nodes[0];
+        assert_eq!(node.mcu_family, "Stm32g0b1");
+        assert_eq!(
+            node.rust_target.as_deref(),
+            Some("thumbv6m-none-eabi")
+        );
+    }
+
+    // ── ValidationError::Display ───────────────────────────────────────
+
+    #[test]
+    fn validation_error_display_missing_board_binding() {
+        let err = ValidationError::MissingBoardBinding {
+            block_id: 3,
+            channel_name: "adc0".into(),
+            block_type: "adc".into(),
+            node_id: "board_b".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("block 3"), "should contain block_id");
+        assert!(msg.contains("adc0"), "should contain channel_name");
+        assert!(msg.contains("adc"), "should contain block_type");
+        assert!(msg.contains("board_b"), "should contain node_id");
+    }
+
+    #[test]
+    fn validation_error_display_missing_peripheral_binding() {
+        let err = ValidationError::MissingPeripheralBinding {
+            channel_name: "pwm0".into(),
+            block_type: "pwm".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("pwm0"), "should contain channel_name");
+        assert!(msg.contains("pwm"), "should contain block_type");
+    }
+
+    #[test]
+    fn validation_error_display_unknown_mcu() {
+        let err = ValidationError::UnknownMcu {
+            family: "FakeChip9000".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("FakeChip9000"), "should contain MCU family");
+    }
+
+    #[test]
+    fn validation_error_display_pin_conflict() {
+        let err = ValidationError::PinConflict {
+            pin: "PA0".into(),
+            node: "motor_ctrl".into(),
+            binding_a: "0/adc0".into(),
+            binding_b: "1/adc1".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("PA0"), "should contain pin");
+        assert!(msg.contains("motor_ctrl"), "should contain node");
+        assert!(msg.contains("0/adc0"), "should contain binding_a");
+        assert!(msg.contains("1/adc1"), "should contain binding_b");
+    }
+
+    #[test]
+    fn validation_error_display_unknown_board() {
+        let err = ValidationError::UnknownBoard {
+            block_id: 7,
+            node_id: "nonexistent".into(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("7"), "should contain block_id");
+        assert!(msg.contains("nonexistent"), "should contain node_id");
+    }
+
+    #[test]
+    fn validation_error_is_std_error() {
+        let err = ValidationError::UnknownMcu {
+            family: "test".into(),
+        };
+        // Verify it implements std::error::Error
+        let _: &dyn std::error::Error = &err;
+    }
 }

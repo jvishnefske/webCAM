@@ -233,4 +233,20 @@ mod tests {
         assert!(code.contains("Register"));
         assert!(code.contains("7"));
     }
+
+    #[test]
+    fn register_config_json_roundtrip() {
+        let reg = make_register(42.5);
+        let json = reg.config_json();
+        let parsed: RegisterConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.initial_value, 42.5);
+    }
+
+    #[test]
+    fn register_default_config() {
+        let cfg = RegisterConfig::default();
+        assert_eq!(cfg.initial_value, 0.0);
+        let reg = RegisterBlock::new(cfg);
+        assert_eq!(reg.config.initial_value, 0.0);
+    }
 }
