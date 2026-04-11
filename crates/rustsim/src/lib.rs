@@ -35,33 +35,65 @@ pub fn dataflow_destroy(graph_id: u32) {
     DATAFLOW_SCHEDULERS.with(|s| s.borrow_mut().remove(&graph_id));
 }
 
+/// Add a block to a graph (testable helper). Returns block id.
+pub fn add_block_impl(
+    graph_id: u32,
+    block_type: &str,
+    config_json: &str,
+) -> Result<u32, String> {
+    let block = dataflow::blocks::create_block(block_type, config_json)?;
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| "graph not found".to_string())?;
+        let id = graph.add_block(block);
+        Ok(id.0)
+    })
+}
+
 /// Add a block to a graph. Returns block id.
 pub fn dataflow_add_block(
     graph_id: u32,
     block_type: &str,
     config_json: &str,
 ) -> Result<u32, JsValue> {
-    let block = dataflow::blocks::create_block(block_type, config_json)
-        .map_err(|e| JsValue::from_str(&e))?;
+    add_block_impl(graph_id, block_type, config_json)
+        .map_err(|e| JsValue::from_str(&e))
+}
+
+/// Remove a block from a graph (testable helper).
+pub fn remove_block_impl(graph_id: u32, block_id: u32) -> Result<(), String> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
         let graph = graphs
             .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let id = graph.add_block(block);
-        Ok(id.0)
+            .ok_or_else(|| "graph not found".to_string())?;
+        graph.remove_block(dataflow::BlockId(block_id));
+        Ok(())
     })
 }
 
 /// Remove a block from a graph.
 pub fn dataflow_remove_block(graph_id: u32, block_id: u32) -> Result<(), JsValue> {
+    remove_block_impl(graph_id, block_id)
+        .map_err(|e| JsValue::from_str(&e))
+}
+
+/// Update a block's config (testable helper).
+pub fn update_block_impl(
+    graph_id: u32,
+    block_id: u32,
+    block_type: &str,
+    config_json: &str,
+) -> Result<(), String> {
+    let block = dataflow::blocks::create_block(block_type, config_json)?;
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
         let graph = graphs
             .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        graph.remove_block(dataflow::BlockId(block_id));
-        Ok(())
+            .ok_or_else(|| "graph not found".to_string())?;
+        graph.replace_block(dataflow::BlockId(block_id), block)
     })
 }
 
@@ -72,16 +104,30 @@ pub fn dataflow_update_block(
     block_type: &str,
     config_json: &str,
 ) -> Result<(), JsValue> {
-    let block = dataflow::blocks::create_block(block_type, config_json)
-        .map_err(|e| JsValue::from_str(&e))?;
+    update_block_impl(graph_id, block_id, block_type, config_json)
+        .map_err(|e| JsValue::from_str(&e))
+}
+
+/// Connect an output port to an input port (testable helper). Returns channel id.
+pub fn connect_impl(
+    graph_id: u32,
+    from_block: u32,
+    from_port: u32,
+    to_block: u32,
+    to_port: u32,
+) -> Result<u32, String> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
         let graph = graphs
             .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        graph
-            .replace_block(dataflow::BlockId(block_id), block)
-            .map_err(|e| JsValue::from_str(&e))
+            .ok_or_else(|| "graph not found".to_string())?;
+        let ch = graph.connect(
+            dataflow::BlockId(from_block),
+            from_port as usize,
+            dataflow::BlockId(to_block),
+            to_port as usize,
+        )?;
+        Ok(ch.0)
     })
 }
 
@@ -93,32 +139,47 @@ pub fn dataflow_connect(
     to_block: u32,
     to_port: u32,
 ) -> Result<u32, JsValue> {
+    connect_impl(graph_id, from_block, from_port, to_block, to_port)
+        .map_err(|e| JsValue::from_str(&e))
+}
+
+/// Disconnect a channel (testable helper).
+pub fn disconnect_impl(graph_id: u32, channel_id: u32) -> Result<(), String> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
         let graph = graphs
             .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let ch = graph
-            .connect(
-                dataflow::BlockId(from_block),
-                from_port as usize,
-                dataflow::BlockId(to_block),
-                to_port as usize,
-            )
-            .map_err(|e| JsValue::from_str(&e))?;
-        Ok(ch.0)
+            .ok_or_else(|| "graph not found".to_string())?;
+        graph.disconnect(dataflow::ChannelId(channel_id));
+        Ok(())
     })
 }
 
 /// Disconnect a channel.
 pub fn dataflow_disconnect(graph_id: u32, channel_id: u32) -> Result<(), JsValue> {
+    disconnect_impl(graph_id, channel_id)
+        .map_err(|e| JsValue::from_str(&e))
+}
+
+/// Advance the graph by wall-clock elapsed seconds (testable helper).
+/// Returns snapshot as JSON.
+pub fn advance_impl(graph_id: u32, elapsed: f64) -> Result<serde_json::Value, String> {
     DATAFLOW_GRAPHS.with(|g| {
-        let mut graphs = g.borrow_mut();
-        let graph = graphs
-            .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        graph.disconnect(dataflow::ChannelId(channel_id));
-        Ok(())
+        DATAFLOW_SCHEDULERS.with(|s| {
+            let mut graphs = g.borrow_mut();
+            let mut schedulers = s.borrow_mut();
+            let graph = graphs
+                .get_mut(&graph_id)
+                .ok_or_else(|| "graph not found".to_string())?;
+            let sched = schedulers
+                .get_mut(&graph_id)
+                .ok_or_else(|| "scheduler not found".to_string())?;
+            let ticks = sched.advance(elapsed);
+            graph.run(ticks, sched.dt);
+            let snap = graph.snapshot();
+            serde_json::to_value(&snap)
+                .map_err(|e| e.to_string())
+        })
     })
 }
 
@@ -144,6 +205,21 @@ pub fn dataflow_advance(graph_id: u32, elapsed: f64) -> Result<JsValue, JsValue>
     })
 }
 
+/// Run a fixed number of ticks (testable helper).
+/// Returns snapshot as JSON.
+pub fn run_impl(graph_id: u32, steps: u32, dt: f64) -> Result<serde_json::Value, String> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| "graph not found".to_string())?;
+        graph.run(steps as u64, dt);
+        let snap = graph.snapshot();
+        serde_json::to_value(&snap)
+            .map_err(|e| e.to_string())
+    })
+}
+
 /// Run a fixed number of ticks (non-realtime batch mode).
 /// Returns snapshot as a typed JS object.
 pub fn dataflow_run(graph_id: u32, steps: u32, dt: f64) -> Result<JsValue, JsValue> {
@@ -159,15 +235,34 @@ pub fn dataflow_run(graph_id: u32, steps: u32, dt: f64) -> Result<JsValue, JsVal
     })
 }
 
-/// Set the simulation speed multiplier.
-pub fn dataflow_set_speed(graph_id: u32, speed: f64) -> Result<(), JsValue> {
+/// Set the simulation speed multiplier (testable helper).
+pub fn set_speed_impl(graph_id: u32, speed: f64) -> Result<(), String> {
     DATAFLOW_SCHEDULERS.with(|s| {
         let mut schedulers = s.borrow_mut();
         let sched = schedulers
             .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("scheduler not found"))?;
+            .ok_or_else(|| "scheduler not found".to_string())?;
         sched.speed = speed;
         Ok(())
+    })
+}
+
+/// Set the simulation speed multiplier.
+pub fn dataflow_set_speed(graph_id: u32, speed: f64) -> Result<(), JsValue> {
+    set_speed_impl(graph_id, speed)
+        .map_err(|e| JsValue::from_str(&e))
+}
+
+/// Get a snapshot of the graph without ticking (testable helper).
+pub fn snapshot_impl(graph_id: u32) -> Result<serde_json::Value, String> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let graphs = g.borrow();
+        let graph = graphs
+            .get(&graph_id)
+            .ok_or_else(|| "graph not found".to_string())?;
+        let snap = graph.snapshot();
+        serde_json::to_value(&snap)
+            .map_err(|e| e.to_string())
     })
 }
 
@@ -184,9 +279,14 @@ pub fn dataflow_snapshot(graph_id: u32) -> Result<JsValue, JsValue> {
     })
 }
 
+/// List available block types (testable helper).
+pub fn block_types_impl() -> Vec<dataflow::blocks::BlockTypeInfo> {
+    dataflow::blocks::available_block_types()
+}
+
 /// List available block types as a typed JS array.
 pub fn dataflow_block_types() -> JsValue {
-    let types = dataflow::blocks::available_block_types();
+    let types = block_types_impl();
     serde_wasm_bindgen::to_value(&types).unwrap_or(JsValue::NULL)
 }
 
@@ -267,19 +367,39 @@ pub fn mcu_peripherals(family: &str) -> Result<JsValue, JsValue> {
         .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
-/// Generate a standalone Rust crate from a dataflow graph.
-/// Returns JSON: `{ "files": [["path", "content"], ...] }` or error.
-pub fn dataflow_codegen(graph_id: u32, dt: f64) -> Result<String, JsValue> {
+/// Generate a standalone Rust crate from a dataflow graph (testable helper).
+pub fn codegen_impl(graph_id: u32, dt: f64) -> Result<String, String> {
     DATAFLOW_GRAPHS.with(|g| {
         let graphs = g.borrow();
         let graph = graphs
             .get(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+            .ok_or_else(|| "graph not found".to_string())?;
         let snap = graph.snapshot().to_codegen_snapshot();
-        let generated =
-            dataflow::codegen::generate_rust(&snap, dt).map_err(|e| JsValue::from_str(&e))?;
+        let generated = dataflow::codegen::generate_rust(&snap, dt)?;
         let files_json: Vec<(String, String)> = generated.files;
-        serde_json::to_string(&files_json).map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_json::to_string(&files_json).map_err(|e| e.to_string())
+    })
+}
+
+/// Generate a standalone Rust crate from a dataflow graph.
+/// Returns JSON: `{ "files": [["path", "content"], ...] }` or error.
+pub fn dataflow_codegen(graph_id: u32, dt: f64) -> Result<String, JsValue> {
+    codegen_impl(graph_id, dt).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Generate a multi-target workspace from a dataflow graph (testable helper).
+pub fn codegen_multi_impl(graph_id: u32, dt: f64, targets_json: &str) -> Result<String, String> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let graphs = g.borrow();
+        let graph = graphs
+            .get(&graph_id)
+            .ok_or_else(|| "graph not found".to_string())?;
+        let snap = graph.snapshot().to_codegen_snapshot();
+        let targets: Vec<dataflow::codegen::binding::TargetWithBinding> =
+            serde_json::from_str(targets_json)
+                .map_err(|e| format!("invalid targets JSON: {e}"))?;
+        let ws = dataflow::codegen::generate_workspace(&snap, dt, &targets)?;
+        serde_json::to_string(&ws.files).map_err(|e| e.to_string())
     })
 }
 
@@ -292,29 +412,16 @@ pub fn dataflow_codegen_multi(
     dt: f64,
     targets_json: &str,
 ) -> Result<String, JsValue> {
-    DATAFLOW_GRAPHS.with(|g| {
-        let graphs = g.borrow();
-        let graph = graphs
-            .get(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let snap = graph.snapshot().to_codegen_snapshot();
-        let targets: Vec<dataflow::codegen::binding::TargetWithBinding> =
-            serde_json::from_str(targets_json)
-                .map_err(|e| JsValue::from_str(&format!("invalid targets JSON: {e}")))?;
-        let ws = dataflow::codegen::generate_workspace(&snap, dt, &targets)
-            .map_err(|e| JsValue::from_str(&e))?;
-        serde_json::to_string(&ws.files).map_err(|e| JsValue::from_str(&e.to_string()))
-    })
+    codegen_multi_impl(graph_id, dt, targets_json).map_err(|e| JsValue::from_str(&e))
 }
 
-/// Enable or disable simulation mode for a graph.
-/// When enabled, peripheral blocks use SimModel dispatch with simulated peripherals.
-pub fn dataflow_set_simulation_mode(graph_id: u32, enabled: bool) -> Result<(), JsValue> {
+/// Enable or disable simulation mode (testable helper).
+pub fn set_simulation_mode_impl(graph_id: u32, enabled: bool) -> Result<(), String> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
         let graph = graphs
             .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+            .ok_or_else(|| "graph not found".to_string())?;
         graph.set_simulation_mode(enabled);
         if enabled && !graph.has_sim_peripherals() {
             graph.set_sim_peripherals(dataflow::sim_peripherals::WasmSimPeripherals::new());
@@ -323,13 +430,19 @@ pub fn dataflow_set_simulation_mode(graph_id: u32, enabled: bool) -> Result<(), 
     })
 }
 
-/// Set a simulated ADC channel voltage.
-pub fn dataflow_set_sim_adc(graph_id: u32, channel: u8, voltage: f64) -> Result<(), JsValue> {
+/// Enable or disable simulation mode for a graph.
+/// When enabled, peripheral blocks use SimModel dispatch with simulated peripherals.
+pub fn dataflow_set_simulation_mode(graph_id: u32, enabled: bool) -> Result<(), JsValue> {
+    set_simulation_mode_impl(graph_id, enabled).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Set a simulated ADC channel voltage (testable helper).
+pub fn set_sim_adc_impl(graph_id: u32, channel: u8, voltage: f64) -> Result<(), String> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
         let graph = graphs
             .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+            .ok_or_else(|| "graph not found".to_string())?;
         graph.with_sim_peripherals(|p| {
             p.set_adc_voltage(channel, voltage);
         });
@@ -337,18 +450,41 @@ pub fn dataflow_set_sim_adc(graph_id: u32, channel: u8, voltage: f64) -> Result<
     })
 }
 
-/// Read the last PWM duty written by a simulated PWM block.
-pub fn dataflow_get_sim_pwm(graph_id: u32, channel: u8) -> Result<f64, JsValue> {
+/// Set a simulated ADC channel voltage.
+pub fn dataflow_set_sim_adc(graph_id: u32, channel: u8, voltage: f64) -> Result<(), JsValue> {
+    set_sim_adc_impl(graph_id, channel, voltage).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Read the last PWM duty written by a simulated PWM block (testable helper).
+pub fn get_sim_pwm_impl(graph_id: u32, channel: u8) -> Result<f64, String> {
     DATAFLOW_GRAPHS.with(|g| {
         let graphs = g.borrow();
         let graph = graphs
             .get(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
+            .ok_or_else(|| "graph not found".to_string())?;
         Ok(graph.get_sim_pwm(channel))
     })
 }
 
+/// Read the last PWM duty written by a simulated PWM block.
+pub fn dataflow_get_sim_pwm(graph_id: u32, channel: u8) -> Result<f64, JsValue> {
+    get_sim_pwm_impl(graph_id, channel).map_err(|e| JsValue::from_str(&e))
+}
+
 // ── I2C simulation WASM API ─────────────────────────────────────────
+
+/// Add a simulated I2C device (testable helper).
+pub fn add_i2c_device_impl(graph_id: u32, bus: u8, addr: u8, name: &str) -> Result<(), String> {
+    DATAFLOW_GRAPHS.with(|g| {
+        let mut graphs = g.borrow_mut();
+        let graph = graphs
+            .get_mut(&graph_id)
+            .ok_or_else(|| "graph not found".to_string())?;
+        let sim = graph.sim_peripherals_mut()?;
+        sim.add_i2c_device(bus, addr, name);
+        Ok(())
+    })
+}
 
 /// Add a simulated I2C device on the given bus at the given 7-bit address.
 pub fn dataflow_add_i2c_device(
@@ -357,35 +493,49 @@ pub fn dataflow_add_i2c_device(
     addr: u8,
     name: &str,
 ) -> Result<(), JsValue> {
+    add_i2c_device_impl(graph_id, bus, addr, name).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Remove a simulated I2C device (testable helper).
+pub fn remove_i2c_device_impl(graph_id: u32, bus: u8, addr: u8) -> Result<(), String> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
         let graph = graphs
             .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let sim = graph
-            .sim_peripherals_mut()
-            .map_err(|e| JsValue::from_str(&e))?;
-        sim.add_i2c_device(bus, addr, name);
+            .ok_or_else(|| "graph not found".to_string())?;
+        let sim = graph.sim_peripherals_mut()?;
+        sim.remove_i2c_device(bus, addr);
         Ok(())
     })
 }
 
 /// Remove a simulated I2C device.
 pub fn dataflow_remove_i2c_device(graph_id: u32, bus: u8, addr: u8) -> Result<(), JsValue> {
+    remove_i2c_device_impl(graph_id, bus, addr).map_err(|e| JsValue::from_str(&e))
+}
+
+// ── Serial simulation WASM API ──────────────────────────────────────
+
+/// Configure a simulated serial port (testable helper).
+pub fn configure_serial_impl(
+    graph_id: u32,
+    port: u8,
+    baud: u32,
+    data_bits: u8,
+    parity: u8,
+    stop_bits: u8,
+) -> Result<(), String> {
+    let parity = dataflow::sim_peripherals::Parity::from_u8(parity)?;
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
         let graph = graphs
             .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let sim = graph
-            .sim_peripherals_mut()
-            .map_err(|e| JsValue::from_str(&e))?;
-        sim.remove_i2c_device(bus, addr);
+            .ok_or_else(|| "graph not found".to_string())?;
+        let sim = graph.sim_peripherals_mut()?;
+        sim.configure_serial(port, baud, data_bits, parity, stop_bits);
         Ok(())
     })
 }
-
-// ── Serial simulation WASM API ──────────────────────────────────────
 
 /// Configure a simulated serial port. Parity: 0=None, 1=Odd, 2=Even.
 pub fn dataflow_configure_serial(
@@ -396,36 +546,28 @@ pub fn dataflow_configure_serial(
     parity: u8,
     stop_bits: u8,
 ) -> Result<(), JsValue> {
-    let parity = dataflow::sim_peripherals::Parity::from_u8(parity)
-        .map_err(|e| JsValue::from_str(&e))?;
-    DATAFLOW_GRAPHS.with(|g| {
-        let mut graphs = g.borrow_mut();
-        let graph = graphs
-            .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let sim = graph
-            .sim_peripherals_mut()
-            .map_err(|e| JsValue::from_str(&e))?;
-        sim.configure_serial(port, baud, data_bits, parity, stop_bits);
-        Ok(())
-    })
+    configure_serial_impl(graph_id, port, baud, data_bits, parity, stop_bits)
+        .map_err(|e| JsValue::from_str(&e))
 }
 
 // ── TCP socket simulation WASM API ──────────────────────────────────
 
-/// Inject data into a simulated TCP receive buffer.
-pub fn dataflow_tcp_inject(graph_id: u32, socket_id: u8, data: &[u8]) -> Result<(), JsValue> {
+/// Inject data into a simulated TCP receive buffer (testable helper).
+pub fn tcp_inject_impl(graph_id: u32, socket_id: u8, data: &[u8]) -> Result<(), String> {
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
         let graph = graphs
             .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let sim = graph
-            .sim_peripherals_mut()
-            .map_err(|e| JsValue::from_str(&e))?;
+            .ok_or_else(|| "graph not found".to_string())?;
+        let sim = graph.sim_peripherals_mut()?;
         sim.inject_tcp_data(socket_id, data);
         Ok(())
     })
+}
+
+/// Inject data into a simulated TCP receive buffer.
+pub fn dataflow_tcp_inject(graph_id: u32, socket_id: u8, data: &[u8]) -> Result<(), JsValue> {
+    tcp_inject_impl(graph_id, socket_id, data).map_err(|e| JsValue::from_str(&e))
 }
 
 // ── Control Panel WASM API ─────────────────────────────────────
@@ -467,10 +609,10 @@ pub fn panel_destroy(panel_id: u32) {
     });
 }
 
-/// Deserialize a PanelModel from JSON, store it, and return its id.
-pub fn panel_load(json: &str) -> Result<u32, JsValue> {
+/// Load a panel from JSON (testable helper).
+pub fn panel_load_impl(json: &str) -> Result<u32, String> {
     let panel: dataflow::panel::PanelModel =
-        serde_json::from_str(json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_json::from_str(json).map_err(|e| e.to_string())?;
     PANEL_NEXT_ID.with(|next| {
         let id = *next.borrow();
         *next.borrow_mut() = id + 1;
@@ -483,38 +625,81 @@ pub fn panel_load(json: &str) -> Result<u32, JsValue> {
     })
 }
 
-/// Serialize a panel to JSON.
-pub fn panel_save(panel_id: u32) -> Result<String, JsValue> {
+/// Deserialize a PanelModel from JSON, store it, and return its id.
+pub fn panel_load(json: &str) -> Result<u32, JsValue> {
+    panel_load_impl(json).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Serialize a panel to JSON (testable helper).
+pub fn panel_save_impl(panel_id: u32) -> Result<String, String> {
     PANELS.with(|p| {
         let panels = p.borrow();
         let panel = panels
             .get(&panel_id)
-            .ok_or_else(|| JsValue::from_str("panel not found"))?;
-        serde_json::to_string(panel).map_err(|e| JsValue::from_str(&e.to_string()))
+            .ok_or_else(|| "panel not found".to_string())?;
+        serde_json::to_string(panel).map_err(|e| e.to_string())
+    })
+}
+
+/// Serialize a panel to JSON.
+pub fn panel_save(panel_id: u32) -> Result<String, JsValue> {
+    panel_save_impl(panel_id).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Add a widget to a panel (testable helper).
+pub fn panel_add_widget_impl(panel_id: u32, config_json: &str) -> Result<u32, String> {
+    let widget: dataflow::panel::Widget =
+        serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+    PANELS.with(|p| {
+        let mut panels = p.borrow_mut();
+        let panel = panels
+            .get_mut(&panel_id)
+            .ok_or_else(|| "panel not found".to_string())?;
+        Ok(panel.add_widget(widget))
     })
 }
 
 /// Add a widget to a panel from JSON config.
 pub fn panel_add_widget(panel_id: u32, config_json: &str) -> Result<u32, JsValue> {
-    let widget: dataflow::panel::Widget =
-        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+    panel_add_widget_impl(panel_id, config_json).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Remove a widget from a panel (testable helper).
+pub fn panel_remove_widget_impl(panel_id: u32, widget_id: u32) -> Result<bool, String> {
     PANELS.with(|p| {
         let mut panels = p.borrow_mut();
         let panel = panels
             .get_mut(&panel_id)
-            .ok_or_else(|| JsValue::from_str("panel not found"))?;
-        Ok(panel.add_widget(widget))
+            .ok_or_else(|| "panel not found".to_string())?;
+        Ok(panel.remove_widget(widget_id))
     })
 }
 
 /// Remove a widget from a panel.
 pub fn panel_remove_widget(panel_id: u32, widget_id: u32) -> Result<bool, JsValue> {
+    panel_remove_widget_impl(panel_id, widget_id).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Update a widget's config (testable helper).
+pub fn panel_update_widget_impl(
+    panel_id: u32,
+    widget_id: u32,
+    config_json: &str,
+) -> Result<(), String> {
+    let new: dataflow::panel::Widget =
+        serde_json::from_str(config_json).map_err(|e| e.to_string())?;
     PANELS.with(|p| {
         let mut panels = p.borrow_mut();
         let panel = panels
             .get_mut(&panel_id)
-            .ok_or_else(|| JsValue::from_str("panel not found"))?;
-        Ok(panel.remove_widget(widget_id))
+            .ok_or_else(|| "panel not found".to_string())?;
+        let widget = panel
+            .get_widget_mut(widget_id)
+            .ok_or_else(|| "widget not found".to_string())?;
+        let preserved_id = widget.id;
+        *widget = new;
+        widget.id = preserved_id;
+        Ok(())
     })
 }
 
@@ -524,21 +709,13 @@ pub fn panel_update_widget(
     widget_id: u32,
     config_json: &str,
 ) -> Result<(), JsValue> {
-    let new: dataflow::panel::Widget =
-        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    PANELS.with(|p| {
-        let mut panels = p.borrow_mut();
-        let panel = panels
-            .get_mut(&panel_id)
-            .ok_or_else(|| JsValue::from_str("panel not found"))?;
-        let widget = panel
-            .get_widget_mut(widget_id)
-            .ok_or_else(|| JsValue::from_str("widget not found"))?;
-        let preserved_id = widget.id;
-        *widget = new;
-        widget.id = preserved_id;
-        Ok(())
-    })
+    panel_update_widget_impl(panel_id, widget_id, config_json)
+        .map_err(|e| JsValue::from_str(&e))
+}
+
+/// JSON snapshot of the full panel (testable helper).
+pub fn panel_snapshot_impl(panel_id: u32) -> Result<String, String> {
+    panel_save_impl(panel_id)
 }
 
 /// JSON snapshot of the full panel.
@@ -546,65 +723,85 @@ pub fn panel_snapshot(panel_id: u32) -> Result<String, JsValue> {
     panel_save(panel_id)
 }
 
-/// Set a topic value from widget interaction.
-pub fn panel_set_topic(panel_id: u32, topic: &str, value: f64) -> Result<(), JsValue> {
+/// Set a topic value (testable helper).
+pub fn panel_set_topic_impl(panel_id: u32, topic: &str, value: f64) -> Result<(), String> {
     PANEL_RUNTIMES.with(|r| {
         let mut runtimes = r.borrow_mut();
         let rt = runtimes
             .get_mut(&panel_id)
-            .ok_or_else(|| JsValue::from_str("panel runtime not found"))?;
+            .ok_or_else(|| "panel runtime not found".to_string())?;
         rt.set_value(topic, value);
         Ok(())
     })
 }
 
-/// Get all current topic values as JSON.
-pub fn panel_get_values(panel_id: u32) -> Result<String, JsValue> {
+/// Set a topic value from widget interaction.
+pub fn panel_set_topic(panel_id: u32, topic: &str, value: f64) -> Result<(), JsValue> {
+    panel_set_topic_impl(panel_id, topic, value).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Get all current topic values as JSON (testable helper).
+pub fn panel_get_values_impl(panel_id: u32) -> Result<String, String> {
     PANEL_RUNTIMES.with(|r| {
         let runtimes = r.borrow();
         let rt = runtimes
             .get(&panel_id)
-            .ok_or_else(|| JsValue::from_str("panel runtime not found"))?;
-        serde_json::to_string(rt.values()).map_err(|e| JsValue::from_str(&e.to_string()))
+            .ok_or_else(|| "panel runtime not found".to_string())?;
+        serde_json::to_string(rt.values()).map_err(|e| e.to_string())
     })
 }
 
-/// Merge external values into input topics.
-pub fn panel_merge_values(panel_id: u32, values_json: &str) -> Result<(), JsValue> {
+/// Get all current topic values as JSON.
+pub fn panel_get_values(panel_id: u32) -> Result<String, JsValue> {
+    panel_get_values_impl(panel_id).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Merge external values into input topics (testable helper).
+pub fn panel_merge_values_impl(panel_id: u32, values_json: &str) -> Result<(), String> {
     let external: std::collections::HashMap<String, f64> =
-        serde_json::from_str(values_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_json::from_str(values_json).map_err(|e| e.to_string())?;
     PANELS.with(|p| {
         let panels = p.borrow();
         let panel = panels
             .get(&panel_id)
-            .ok_or_else(|| JsValue::from_str("panel not found"))?;
+            .ok_or_else(|| "panel not found".to_string())?;
         PANEL_RUNTIMES.with(|r| {
             let mut runtimes = r.borrow_mut();
             let rt = runtimes
                 .get_mut(&panel_id)
-                .ok_or_else(|| JsValue::from_str("panel runtime not found"))?;
+                .ok_or_else(|| "panel runtime not found".to_string())?;
             rt.merge_input_values(panel, &external);
             Ok(())
         })
     })
 }
 
-/// Collect output topic values.
-pub fn panel_collect_outputs(panel_id: u32) -> Result<String, JsValue> {
+/// Merge external values into input topics.
+pub fn panel_merge_values(panel_id: u32, values_json: &str) -> Result<(), JsValue> {
+    panel_merge_values_impl(panel_id, values_json).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Collect output topic values (testable helper).
+pub fn panel_collect_outputs_impl(panel_id: u32) -> Result<String, String> {
     PANELS.with(|p| {
         let panels = p.borrow();
         let panel = panels
             .get(&panel_id)
-            .ok_or_else(|| JsValue::from_str("panel not found"))?;
+            .ok_or_else(|| "panel not found".to_string())?;
         PANEL_RUNTIMES.with(|r| {
             let runtimes = r.borrow();
             let rt = runtimes
                 .get(&panel_id)
-                .ok_or_else(|| JsValue::from_str("panel runtime not found"))?;
+                .ok_or_else(|| "panel runtime not found".to_string())?;
             let outputs = rt.collect_output_values(panel);
-            serde_json::to_string(&outputs).map_err(|e| JsValue::from_str(&e.to_string()))
+            serde_json::to_string(&outputs).map_err(|e| e.to_string())
         })
     })
+}
+
+/// Collect output topic values.
+pub fn panel_collect_outputs(panel_id: u32) -> Result<String, JsValue> {
+    panel_collect_outputs_impl(panel_id).map_err(|e| JsValue::from_str(&e))
 }
 
 #[cfg(test)]
@@ -1394,5 +1591,619 @@ mod tests {
             assert!(result.unwrap_err().contains("block not found"));
         });
         dataflow_destroy(gid);
+    }
+
+    // ── Part 4: _impl helper tests (success + error paths) ────────────
+
+    #[test]
+    fn test_add_block_impl_success() {
+        let gid = dataflow_new(0.01);
+        let bid = add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        assert!(bid > 0);
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_add_block_impl_invalid_type() {
+        let gid = dataflow_new(0.01);
+        let result = add_block_impl(gid, "nonexistent_block_type", "{}");
+        assert!(result.is_err());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_add_block_impl_graph_not_found() {
+        let result = add_block_impl(99999, "constant", r#"{"value":1.0}"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_remove_block_impl_success() {
+        let gid = dataflow_new(0.01);
+        let bid = add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        remove_block_impl(gid, bid).unwrap();
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_remove_block_impl_graph_not_found() {
+        let result = remove_block_impl(99999, 1);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_update_block_impl_success() {
+        let gid = dataflow_new(0.01);
+        let bid = add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        update_block_impl(gid, bid, "constant", r#"{"value":2.0}"#).unwrap();
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_update_block_impl_invalid_type() {
+        let gid = dataflow_new(0.01);
+        let bid = add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let result = update_block_impl(gid, bid, "nonexistent", "{}");
+        assert!(result.is_err());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_update_block_impl_graph_not_found() {
+        let result = update_block_impl(99999, 1, "constant", r#"{"value":1.0}"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_update_block_impl_block_not_found() {
+        let gid = dataflow_new(0.01);
+        let result = update_block_impl(gid, 999, "constant", r#"{"value":1.0}"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("block not found"));
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_connect_impl_success() {
+        let gid = dataflow_new(0.01);
+        let src = add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let dst = add_block_impl(gid, "gain", r#"{"gain":2.0}"#).unwrap();
+        let ch = connect_impl(gid, src, 0, dst, 0).unwrap();
+        assert!(ch > 0);
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_connect_impl_graph_not_found() {
+        let result = connect_impl(99999, 1, 0, 2, 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_connect_impl_invalid_port() {
+        let gid = dataflow_new(0.01);
+        let src = add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let dst = add_block_impl(gid, "gain", r#"{"gain":2.0}"#).unwrap();
+        let result = connect_impl(gid, src, 99, dst, 0);
+        assert!(result.is_err());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_disconnect_impl_success() {
+        let gid = dataflow_new(0.01);
+        let src = add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let dst = add_block_impl(gid, "gain", r#"{"gain":2.0}"#).unwrap();
+        let ch = connect_impl(gid, src, 0, dst, 0).unwrap();
+        disconnect_impl(gid, ch).unwrap();
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_disconnect_impl_graph_not_found() {
+        let result = disconnect_impl(99999, 1);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_advance_impl_success() {
+        let gid = dataflow_new(0.01);
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let snap = advance_impl(gid, 0.05).unwrap();
+        assert!(snap.is_object());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_advance_impl_graph_not_found() {
+        let result = advance_impl(99999, 0.05);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_run_impl_success() {
+        let gid = dataflow_new(0.01);
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let snap = run_impl(gid, 10, 0.01).unwrap();
+        assert!(snap.is_object());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_run_impl_graph_not_found() {
+        let result = run_impl(99999, 10, 0.01);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_set_speed_impl_success() {
+        let gid = dataflow_new(0.01);
+        set_speed_impl(gid, 3.0).unwrap();
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_set_speed_impl_not_found() {
+        let result = set_speed_impl(99999, 1.0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("scheduler not found"));
+    }
+
+    #[test]
+    fn test_snapshot_impl_success() {
+        let gid = dataflow_new(0.01);
+        add_block_impl(gid, "constant", r#"{"value":5.0}"#).unwrap();
+        let snap = snapshot_impl(gid).unwrap();
+        assert!(snap.is_object());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_snapshot_impl_graph_not_found() {
+        let result = snapshot_impl(99999);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_block_types_impl() {
+        let types = block_types_impl();
+        assert!(!types.is_empty());
+    }
+
+    #[test]
+    fn test_codegen_impl_success() {
+        let gid = dataflow_new(0.01);
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let result = codegen_impl(gid, 0.01).unwrap();
+        assert!(result.contains("main.rs") || result.contains("Cargo.toml"));
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_codegen_impl_graph_not_found() {
+        let result = codegen_impl(99999, 0.01);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_codegen_multi_impl_success() {
+        let gid = dataflow_new(0.01);
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let targets = r#"[{"target":"Host","binding":{"target":"Host","pins":[]}}]"#;
+        let result = codegen_multi_impl(gid, 0.01, targets).unwrap();
+        assert!(!result.is_empty());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_codegen_multi_impl_graph_not_found() {
+        let result = codegen_multi_impl(99999, 0.01, "[]");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_codegen_multi_impl_invalid_json() {
+        let gid = dataflow_new(0.01);
+        add_block_impl(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        let result = codegen_multi_impl(gid, 0.01, "not valid json");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid targets JSON"));
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_set_simulation_mode_impl_success() {
+        let gid = dataflow_new(0.01);
+        set_simulation_mode_impl(gid, true).unwrap();
+        set_simulation_mode_impl(gid, false).unwrap();
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_set_simulation_mode_impl_not_found() {
+        let result = set_simulation_mode_impl(99999, true);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_set_sim_adc_impl_success() {
+        let gid = dataflow_new(0.01);
+        set_simulation_mode_impl(gid, true).unwrap();
+        set_sim_adc_impl(gid, 0, 3.3).unwrap();
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_set_sim_adc_impl_graph_not_found() {
+        let result = set_sim_adc_impl(99999, 0, 1.0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_get_sim_pwm_impl_success() {
+        let gid = dataflow_new(0.01);
+        set_simulation_mode_impl(gid, true).unwrap();
+        let duty = get_sim_pwm_impl(gid, 0).unwrap();
+        assert!((duty - 0.0).abs() < f64::EPSILON);
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_get_sim_pwm_impl_graph_not_found() {
+        let result = get_sim_pwm_impl(99999, 0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_add_i2c_device_impl_success() {
+        let gid = dataflow_new(0.01);
+        set_simulation_mode_impl(gid, true).unwrap();
+        add_i2c_device_impl(gid, 0, 0x48, "TMP1075").unwrap();
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_add_i2c_device_impl_graph_not_found() {
+        let result = add_i2c_device_impl(99999, 0, 0x48, "dev");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_add_i2c_device_impl_no_sim_mode() {
+        let gid = dataflow_new(0.01);
+        let result = add_i2c_device_impl(gid, 0, 0x48, "dev");
+        assert!(result.is_err()); // sim peripherals not enabled
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_remove_i2c_device_impl_graph_not_found() {
+        let result = remove_i2c_device_impl(99999, 0, 0x48);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_remove_i2c_device_impl_no_sim_mode() {
+        let gid = dataflow_new(0.01);
+        let result = remove_i2c_device_impl(gid, 0, 0x48);
+        assert!(result.is_err()); // sim peripherals not enabled
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_configure_serial_impl_success() {
+        let gid = dataflow_new(0.01);
+        set_simulation_mode_impl(gid, true).unwrap();
+        configure_serial_impl(gid, 0, 9600, 8, 0, 1).unwrap();
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_configure_serial_impl_graph_not_found() {
+        let result = configure_serial_impl(99999, 0, 9600, 8, 0, 1);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_configure_serial_impl_invalid_parity() {
+        let gid = dataflow_new(0.01);
+        set_simulation_mode_impl(gid, true).unwrap();
+        let result = configure_serial_impl(gid, 0, 9600, 8, 3, 1);
+        assert!(result.is_err()); // parity 3 is invalid
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_configure_serial_impl_no_sim_mode() {
+        let gid = dataflow_new(0.01);
+        let result = configure_serial_impl(gid, 0, 9600, 8, 0, 1);
+        assert!(result.is_err()); // sim peripherals not enabled
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_tcp_inject_impl_success() {
+        let gid = dataflow_new(0.01);
+        set_simulation_mode_impl(gid, true).unwrap();
+        DATAFLOW_GRAPHS.with(|g| {
+            let mut graphs = g.borrow_mut();
+            let graph = graphs.get_mut(&gid).unwrap();
+            let sim = graph.sim_peripherals_mut().unwrap();
+            sim.tcp_connect(0, "127.0.0.1", 8080).unwrap();
+        });
+        tcp_inject_impl(gid, 0, &[1, 2, 3]).unwrap();
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_tcp_inject_impl_graph_not_found() {
+        let result = tcp_inject_impl(99999, 0, &[1]);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("graph not found"));
+    }
+
+    #[test]
+    fn test_tcp_inject_impl_no_sim_mode() {
+        let gid = dataflow_new(0.01);
+        let result = tcp_inject_impl(gid, 0, &[1]);
+        assert!(result.is_err()); // sim peripherals not enabled
+        dataflow_destroy(gid);
+    }
+
+    // ── Part 5: Panel _impl helper tests ──────────────────────────────
+
+    #[test]
+    fn test_panel_load_impl_success() {
+        let id = panel_new("Load Test");
+        let json = panel_save_impl(id).unwrap();
+        let id2 = panel_load_impl(&json).unwrap();
+        assert!(id2 > 0);
+        panel_destroy(id);
+        panel_destroy(id2);
+    }
+
+    #[test]
+    fn test_panel_load_impl_invalid_json() {
+        let result = panel_load_impl("not valid json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_panel_save_impl_success() {
+        let id = panel_new("Save Test");
+        let json = panel_save_impl(id).unwrap();
+        assert!(json.contains("Save Test"));
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_save_impl_not_found() {
+        let result = panel_save_impl(99999);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel not found"));
+    }
+
+    #[test]
+    fn test_panel_add_widget_impl_success() {
+        let id = panel_new("Widget Add Impl");
+        let widget_json = r#"{
+            "id": 0,
+            "kind": {"type": "Toggle"},
+            "label": "Switch",
+            "position": {"x": 0.0, "y": 0.0},
+            "size": {"width": 50.0, "height": 50.0},
+            "channels": []
+        }"#;
+        let wid = panel_add_widget_impl(id, widget_json).unwrap();
+        assert!(wid > 0);
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_add_widget_impl_invalid_json() {
+        let id = panel_new("Widget Bad JSON");
+        let result = panel_add_widget_impl(id, "not json");
+        assert!(result.is_err());
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_add_widget_impl_panel_not_found() {
+        let result = panel_add_widget_impl(99999, r#"{"id":0,"kind":{"type":"Toggle"},"label":"W","position":{"x":0,"y":0},"size":{"width":50,"height":50},"channels":[]}"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel not found"));
+    }
+
+    #[test]
+    fn test_panel_remove_widget_impl_success() {
+        let id = panel_new("Remove Widget Impl");
+        let widget_json = r#"{
+            "id": 0,
+            "kind": {"type": "Toggle"},
+            "label": "Switch",
+            "position": {"x": 0.0, "y": 0.0},
+            "size": {"width": 50.0, "height": 50.0},
+            "channels": []
+        }"#;
+        let wid = panel_add_widget_impl(id, widget_json).unwrap();
+        let removed = panel_remove_widget_impl(id, wid).unwrap();
+        assert!(removed);
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_remove_widget_impl_panel_not_found() {
+        let result = panel_remove_widget_impl(99999, 1);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel not found"));
+    }
+
+    #[test]
+    fn test_panel_update_widget_impl_success() {
+        let id = panel_new("Update Widget Impl");
+        let widget_json = r#"{
+            "id": 0,
+            "kind": {"type": "Toggle"},
+            "label": "Switch",
+            "position": {"x": 0.0, "y": 0.0},
+            "size": {"width": 50.0, "height": 50.0},
+            "channels": []
+        }"#;
+        let wid = panel_add_widget_impl(id, widget_json).unwrap();
+        let update_json = r#"{
+            "id": 0,
+            "kind": {"type": "Toggle"},
+            "label": "Updated",
+            "position": {"x": 0.0, "y": 0.0},
+            "size": {"width": 50.0, "height": 50.0},
+            "channels": []
+        }"#;
+        panel_update_widget_impl(id, wid, update_json).unwrap();
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_update_widget_impl_invalid_json() {
+        let id = panel_new("Update Bad JSON");
+        let result = panel_update_widget_impl(id, 1, "not json");
+        assert!(result.is_err());
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_update_widget_impl_panel_not_found() {
+        let result = panel_update_widget_impl(99999, 1, r#"{"id":0,"kind":{"type":"Toggle"},"label":"W","position":{"x":0,"y":0},"size":{"width":50,"height":50},"channels":[]}"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel not found"));
+    }
+
+    #[test]
+    fn test_panel_update_widget_impl_widget_not_found() {
+        let id = panel_new("Update Widget Not Found");
+        let result = panel_update_widget_impl(id, 9999, r#"{"id":0,"kind":{"type":"Toggle"},"label":"W","position":{"x":0,"y":0},"size":{"width":50,"height":50},"channels":[]}"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("widget not found"));
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_snapshot_impl_success() {
+        let id = panel_new("Snapshot Impl");
+        let snap = panel_snapshot_impl(id).unwrap();
+        assert!(snap.contains("Snapshot Impl"));
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_snapshot_impl_not_found() {
+        let result = panel_snapshot_impl(99999);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel not found"));
+    }
+
+    #[test]
+    fn test_panel_set_topic_impl_success() {
+        let id = panel_new("Topic Impl");
+        panel_set_topic_impl(id, "motor/speed", 42.0).unwrap();
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_set_topic_impl_not_found() {
+        let result = panel_set_topic_impl(99999, "x", 1.0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel runtime not found"));
+    }
+
+    #[test]
+    fn test_panel_get_values_impl_success() {
+        let id = panel_new("Values Impl");
+        panel_set_topic_impl(id, "a", 1.0).unwrap();
+        let vals = panel_get_values_impl(id).unwrap();
+        assert!(vals.contains("1"));
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_get_values_impl_not_found() {
+        let result = panel_get_values_impl(99999);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel runtime not found"));
+    }
+
+    #[test]
+    fn test_panel_merge_values_impl_success() {
+        let id = panel_new("Merge Impl");
+        let widget_json = r#"{
+            "id": 0,
+            "kind": {"type": "Gauge", "min": 0.0, "max": 100.0},
+            "label": "Temp",
+            "position": {"x": 0.0, "y": 0.0},
+            "size": {"width": 100.0, "height": 40.0},
+            "channels": [
+                {"topic": "sensor/temp", "direction": "Input", "port_kind": "Float"}
+            ]
+        }"#;
+        panel_add_widget_impl(id, widget_json).unwrap();
+        panel_merge_values_impl(id, r#"{"sensor/temp": 25.5}"#).unwrap();
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_merge_values_impl_invalid_json() {
+        let id = panel_new("Merge Bad JSON");
+        let result = panel_merge_values_impl(id, "not json");
+        assert!(result.is_err());
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_merge_values_impl_panel_not_found() {
+        let result = panel_merge_values_impl(99999, r#"{"a": 1.0}"#);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel not found"));
+    }
+
+    #[test]
+    fn test_panel_collect_outputs_impl_success() {
+        let id = panel_new("Output Impl");
+        let widget_json = r#"{
+            "id": 0,
+            "kind": {"type": "Slider", "min": 0.0, "max": 100.0, "step": 1.0},
+            "label": "Throttle",
+            "position": {"x": 0.0, "y": 0.0},
+            "size": {"width": 200.0, "height": 40.0},
+            "channels": [
+                {"topic": "motor/throttle", "direction": "Output", "port_kind": "Float"}
+            ]
+        }"#;
+        panel_add_widget_impl(id, widget_json).unwrap();
+        panel_set_topic_impl(id, "motor/throttle", 75.0).unwrap();
+        let outputs = panel_collect_outputs_impl(id).unwrap();
+        assert!(outputs.contains("motor/throttle"));
+        panel_destroy(id);
+    }
+
+    #[test]
+    fn test_panel_collect_outputs_impl_panel_not_found() {
+        let result = panel_collect_outputs_impl(99999);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("panel not found"));
     }
 }

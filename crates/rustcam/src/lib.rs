@@ -245,17 +245,15 @@ pub fn default_config(machine_type: &str) -> String {
 
 // ── WASM entry points ────────────────────────────────────────────────
 
-/// Process an STL file (binary bytes) and return G-code.
-pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
+/// Process an STL file (testable helper).
+pub fn process_stl_impl(data: &[u8], config_json: &str) -> Result<String, String> {
     let config: CamConfig =
-        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_json::from_str(config_json).map_err(|e| e.to_string())?;
 
     let profile = profile_from_config(&config);
-    profile
-        .validate_strategy(&config.strategy)
-        .map_err(|e| JsValue::from_str(&e))?;
+    profile.validate_strategy(&config.strategy)?;
 
-    let mesh = stl::parse_stl(data).map_err(|e| JsValue::from_str(&e))?;
+    let mesh = stl::parse_stl(data)?;
 
     let cut_params = CutParams {
         tool: tool_from_config(&config),
@@ -280,7 +278,6 @@ pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
 
     let toolpaths: Vec<Toolpath> = match config.strategy.as_str() {
         "pocket" => {
-            // Slice then pocket each layer
             let layers = slicer::slice_mesh(&mesh, config.step_down);
             let strategy = PocketStrategy;
             let mut all = Vec::new();
@@ -292,7 +289,6 @@ pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
             all
         }
         "slice" => {
-            // Contour-follow each slice layer
             let layers = slicer::slice_mesh(&mesh, config.step_down);
             let strategy = ContourStrategy;
             let mut all = Vec::new();
@@ -304,14 +300,12 @@ pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
             all
         }
         "zigzag" => {
-            // 3D surface zigzag raster
             let strategy = ZigzagSurfaceStrategy;
             let surface_params =
                 SurfaceParams::new(&mesh, cut_params, scan_direction_from_config(&config));
             strategy.generate_surface(&surface_params)
         }
         "perimeter" => {
-            // Perimeter-follow each slice layer
             let layers = slicer::slice_mesh(&mesh, config.step_down);
             let strategy = PerimeterStrategy;
             let mut all = Vec::new();
@@ -323,7 +317,6 @@ pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
             all
         }
         _ => {
-            // "contour" — slice then contour each layer
             let layers = slicer::slice_mesh(&mesh, config.step_down);
             let strategy = ContourStrategy;
             let mut all = Vec::new();
@@ -333,7 +326,6 @@ pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
                 all.extend(strategy.generate(contours, &p));
             }
             if all.is_empty() {
-                // Fallback: treat bottom face as a single contour
                 let contours =
                     slicer::slice_at_z(&mesh, mesh.bounds.as_ref().map_or(0.0, |b| b.min.z + 0.01));
                 all.extend(strategy.generate(&contours, &cut_params));
@@ -351,17 +343,20 @@ pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
     ))
 }
 
-/// Process an SVG string and return G-code.
-pub fn process_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue> {
+/// Process an STL file (binary bytes) and return G-code.
+pub fn process_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
+    process_stl_impl(data, config_json).map_err(|e| JsValue::from_str(&e))
+}
+
+/// Process an SVG string (testable helper).
+pub fn process_svg_impl(svg_text: &str, config_json: &str) -> Result<String, String> {
     let config: CamConfig =
-        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_json::from_str(config_json).map_err(|e| e.to_string())?;
 
     let profile = profile_from_config(&config);
-    profile
-        .validate_strategy(&config.strategy)
-        .map_err(|e| JsValue::from_str(&e))?;
+    profile.validate_strategy(&config.strategy)?;
 
-    let polylines = svg::parse_svg(svg_text).map_err(|e| JsValue::from_str(&e))?;
+    let polylines = svg::parse_svg(svg_text)?;
 
     let cut_params = CutParams {
         tool: tool_from_config(&config),
@@ -386,14 +381,12 @@ pub fn process_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue>
 
     let strategy = strategy_from_config(&config);
 
-    // Laser strategies run single pass at Z=0
     let is_laser = profile.machine_type == MachineType::LaserCutter;
     let mut all_toolpaths = Vec::new();
 
     if is_laser {
         all_toolpaths.extend(strategy.generate(&polylines, &cut_params));
     } else {
-        // For 2-D SVG, step down from 0 to cut_depth
         let mut z = 0.0;
         while z > config.cut_depth - 0.001 {
             z -= config.step_down;
@@ -416,6 +409,11 @@ pub fn process_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue>
         &profile,
         laser.as_ref(),
     ))
+}
+
+/// Process an SVG string and return G-code.
+pub fn process_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue> {
+    process_svg_impl(svg_text, config_json).map_err(|e| JsValue::from_str(&e))
 }
 
 /// Helper: call a JS progress callback with (completed, total).
@@ -576,57 +574,77 @@ pub fn process_svg_progress(
     Ok(emit_gcode(&all_toolpaths, &gcode_params))
 }
 
-/// Return toolpath data as JSON (for the 2-D preview canvas).
-/// Returns toolpath moves with Z coordinates for 3D visualization.
-pub fn preview_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
+/// STL preview (testable helper).
+pub fn preview_stl_impl(data: &[u8], config_json: &str) -> Result<String, String> {
     let config: CamConfig =
-        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let mesh = stl::parse_stl(data).map_err(|e| JsValue::from_str(&e))?;
+        serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+    let mesh = stl::parse_stl(data)?;
     let toolpaths = build_toolpaths_stl(&mesh, &config);
 
-    // Convert toolpaths to preview format with Z coordinates
     let mut preview_paths: Vec<Vec<[f64; 3]>> = Vec::new();
     for tp in &toolpaths {
         let path: Vec<[f64; 3]> = tp
             .moves
             .iter()
-            .filter(|m| !m.rapid) // Only show cutting moves
+            .filter(|m| !m.rapid)
             .map(|m| [m.x, m.y, m.z])
             .collect();
         if !path.is_empty() {
             preview_paths.push(path);
         }
     }
-    serde_json::to_string(&preview_paths).map_err(|e| JsValue::from_str(&e.to_string()))
+    serde_json::to_string(&preview_paths).map_err(|e| e.to_string())
 }
 
-/// Return toolpath data from SVG as JSON (for the 2-D preview canvas).
-pub fn preview_svg(svg_text: &str) -> Result<String, JsValue> {
-    let polylines = svg::parse_svg(svg_text).map_err(|e| JsValue::from_str(&e))?;
+/// Return toolpath data as JSON (for the 2-D preview canvas).
+/// Returns toolpath moves with Z coordinates for 3D visualization.
+pub fn preview_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
+    preview_stl_impl(data, config_json).map_err(|e| JsValue::from_str(&e))
+}
+
+/// SVG preview (testable helper).
+pub fn preview_svg_impl(svg_text: &str) -> Result<String, String> {
+    let polylines = svg::parse_svg(svg_text)?;
     let preview_paths: Vec<Vec<[f64; 2]>> = polylines
         .iter()
         .map(|pl| pl.points.iter().map(|p| [p.x, p.y]).collect())
         .collect();
-    serde_json::to_string(&preview_paths).map_err(|e| JsValue::from_str(&e.to_string()))
+    serde_json::to_string(&preview_paths).map_err(|e| e.to_string())
+}
+
+/// Return toolpath data from SVG as JSON (for the 2-D preview canvas).
+pub fn preview_svg(svg_text: &str) -> Result<String, JsValue> {
+    preview_svg_impl(svg_text).map_err(|e| JsValue::from_str(&e))
 }
 
 // ── Simulation data ──────────────────────────────────────────────────
 
+/// STL sim moves (testable helper).
+pub fn sim_moves_stl_impl(data: &[u8], config_json: &str) -> Result<String, String> {
+    let config: CamConfig =
+        serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+    let mesh = stl::parse_stl(data)?;
+    let toolpaths = build_toolpaths_stl(&mesh, &config);
+    flatten_moves_impl(&toolpaths)
+}
+
 /// Return flat move list as JSON for the tool simulation.
 /// Each move: `{ x, y, z, rapid }`.
 pub fn sim_moves_stl(data: &[u8], config_json: &str) -> Result<String, JsValue> {
-    let config: CamConfig =
-        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let mesh = stl::parse_stl(data).map_err(|e| JsValue::from_str(&e))?;
-    let toolpaths = build_toolpaths_stl(&mesh, &config);
-    flatten_moves(&toolpaths)
+    sim_moves_stl_impl(data, config_json).map_err(|e| JsValue::from_str(&e))
 }
-pub fn sim_moves_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue> {
+
+/// SVG sim moves (testable helper).
+pub fn sim_moves_svg_impl(svg_text: &str, config_json: &str) -> Result<String, String> {
     let config: CamConfig =
-        serde_json::from_str(config_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    let polylines = svg::parse_svg(svg_text).map_err(|e| JsValue::from_str(&e))?;
+        serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+    let polylines = svg::parse_svg(svg_text)?;
     let toolpaths = build_toolpaths_svg(&polylines, &config);
-    flatten_moves(&toolpaths)
+    flatten_moves_impl(&toolpaths)
+}
+
+pub fn sim_moves_svg(svg_text: &str, config_json: &str) -> Result<String, JsValue> {
+    sim_moves_svg_impl(svg_text, config_json).map_err(|e| JsValue::from_str(&e))
 }
 
 fn build_toolpaths_stl(mesh: &geometry::Mesh, config: &CamConfig) -> Vec<Toolpath> {
@@ -708,10 +726,16 @@ fn build_toolpaths_svg(polylines: &[geometry::Polyline], config: &CamConfig) -> 
     all
 }
 
-fn flatten_moves(toolpaths: &[Toolpath]) -> Result<String, JsValue> {
+/// Flatten moves to JSON (testable helper).
+fn flatten_moves_impl(toolpaths: &[Toolpath]) -> Result<String, String> {
     let moves: Vec<&geometry::ToolpathMove> =
         toolpaths.iter().flat_map(|tp| tp.moves.iter()).collect();
-    serde_json::to_string(&moves).map_err(|e| JsValue::from_str(&e.to_string()))
+    serde_json::to_string(&moves).map_err(|e| e.to_string())
+}
+
+#[allow(dead_code)]
+fn flatten_moves(toolpaths: &[Toolpath]) -> Result<String, JsValue> {
+    flatten_moves_impl(toolpaths).map_err(|e| JsValue::from_str(&e))
 }
 
 // ── Sketch Actor WASM API ────────────────────────────────────────────
@@ -761,23 +785,15 @@ pub fn sketch_set_fixed(id: u32, fixed: bool) {
     });
 }
 
-/// Add a constraint. `kind` is one of: "coincident", "distance",
-/// "horizontal", "vertical", "fixed", "angle", "radius",
-/// "perpendicular", "parallel", "midpoint", "equal_length", "symmetric".
-///
-/// `ids` is a JSON array of point ids, `value` is the numeric parameter
-/// (distance, angle, radius, x, y — depends on constraint type).
-/// For "fixed", pass `value` as x and `value2` as y.
-///
-/// Returns JSON `{"id": <u32>}`.
-pub fn sketch_add_constraint(
+/// Add a constraint (testable helper).
+pub fn sketch_add_constraint_impl(
     kind: &str,
     ids_json: &str,
     value: f64,
     value2: f64,
-) -> Result<String, JsValue> {
+) -> Result<String, String> {
     let ids: Vec<u32> =
-        serde_json::from_str(ids_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_json::from_str(ids_json).map_err(|e| e.to_string())?;
 
     let constraint = match kind {
         "coincident" if ids.len() >= 2 => sketch_actor::Constraint::Coincident(ids[0], ids[1]),
@@ -803,9 +819,9 @@ pub fn sketch_add_constraint(
             sketch_actor::Constraint::Symmetric(ids[0], ids[1], ids[2], ids[3])
         }
         _ => {
-            return Err(JsValue::from_str(&format!(
+            return Err(format!(
                 "Unknown constraint '{kind}' or wrong number of ids"
-            )));
+            ));
         }
     };
 
@@ -815,6 +831,17 @@ pub fn sketch_add_constraint(
     })
 }
 
+/// Add a constraint.
+pub fn sketch_add_constraint(
+    kind: &str,
+    ids_json: &str,
+    value: f64,
+    value2: f64,
+) -> Result<String, JsValue> {
+    sketch_add_constraint_impl(kind, ids_json, value, value2)
+        .map_err(|e| JsValue::from_str(&e))
+}
+
 /// Remove a constraint by id.
 pub fn sketch_remove_constraint(id: u32) {
     SKETCH.with(|s| {
@@ -822,33 +849,46 @@ pub fn sketch_remove_constraint(id: u32) {
     });
 }
 
-/// Run the constraint solver and return a full snapshot as JSON.
-/// The snapshot includes points, constraints, DOF, solve status,
-/// and per-point coloring status.
-pub fn sketch_solve() -> Result<String, JsValue> {
+/// Solve (testable helper).
+pub fn sketch_solve_impl() -> Result<String, String> {
     SKETCH.with(|s| {
         let mut actor = s.borrow_mut();
         actor.solve(200);
         let snap = actor.snapshot();
-        serde_json::to_string(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
+        serde_json::to_string(&snap).map_err(|e| e.to_string())
+    })
+}
+
+/// Run the constraint solver and return a full snapshot as JSON.
+pub fn sketch_solve() -> Result<String, JsValue> {
+    sketch_solve_impl().map_err(|e| JsValue::from_str(&e))
+}
+
+/// Pump (testable helper).
+pub fn sketch_pump_impl() -> Result<String, String> {
+    SKETCH.with(|s| {
+        let mut actor = s.borrow_mut();
+        let (_last_id, snap) = actor.pump();
+        serde_json::to_string(&snap).map_err(|e| e.to_string())
     })
 }
 
 /// Process queued messages and return snapshot JSON.
 pub fn sketch_pump() -> Result<String, JsValue> {
+    sketch_pump_impl().map_err(|e| JsValue::from_str(&e))
+}
+
+/// Snapshot (testable helper).
+pub fn sketch_snapshot_impl() -> Result<String, String> {
     SKETCH.with(|s| {
-        let mut actor = s.borrow_mut();
-        let (_last_id, snap) = actor.pump();
-        serde_json::to_string(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
+        let snap = s.borrow().snapshot();
+        serde_json::to_string(&snap).map_err(|e| e.to_string())
     })
 }
 
 /// Get current snapshot without solving (read-only query).
 pub fn sketch_snapshot() -> Result<String, JsValue> {
-    SKETCH.with(|s| {
-        let snap = s.borrow().snapshot();
-        serde_json::to_string(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
-    })
+    sketch_snapshot_impl().map_err(|e| JsValue::from_str(&e))
 }
 
 #[cfg(test)]
@@ -1438,10 +1478,9 @@ endsolid test"
         assert!(result.is_ok());
     }
 
-    // Note: error-path tests for process_stl (invalid JSON, invalid STL, rejected
-    // strategies) cannot run in native mode because JsValue::from_str is not
-    // implemented on non-wasm32 targets. The underlying parsing and validation
-    // logic is tested in stl::tests, svg::tests, and machine::tests.
+    // Note: error-path tests for the JsValue wrappers cannot run in native mode
+    // because JsValue::from_str is only available on wasm32 targets. However,
+    // the _impl helpers (returning Result<T, String>) are fully testable here.
 
     #[test]
     fn test_process_stl_custom_params_in_gcode() {
@@ -2071,5 +2110,218 @@ endsolid test"
         };
         // Should not panic; defaults to ContourStrategy
         let _strategy = strategy_from_config(&config);
+    }
+
+    // ── _impl helper error-path tests ──────────────────────────────────
+
+    #[test]
+    fn test_process_stl_impl_success() {
+        let result = process_stl_impl(minimal_ascii_stl(), "{}");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_stl_impl_invalid_json() {
+        let result = process_stl_impl(minimal_ascii_stl(), "not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_process_stl_impl_invalid_stl() {
+        let result = process_stl_impl(b"not a valid stl", "{}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_process_stl_impl_rejected_strategy() {
+        let config_json = r#"{"machine_type": "laser_cutter", "strategy": "zigzag"}"#;
+        let result = process_stl_impl(minimal_ascii_stl(), config_json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_process_svg_impl_success() {
+        let result = process_svg_impl(simple_svg(), r#"{"strategy":"contour"}"#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_process_svg_impl_invalid_json() {
+        let result = process_svg_impl(simple_svg(), "not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_process_svg_impl_invalid_svg() {
+        let result = process_svg_impl("not svg data", "{}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_process_svg_impl_rejected_strategy() {
+        let config_json = r#"{"machine_type": "laser_cutter", "strategy": "zigzag"}"#;
+        let result = process_svg_impl(simple_svg(), config_json);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_preview_stl_impl_success() {
+        let result = preview_stl_impl(minimal_ascii_stl(), "{}");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_preview_stl_impl_invalid_json() {
+        let result = preview_stl_impl(minimal_ascii_stl(), "not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_preview_stl_impl_invalid_stl() {
+        let result = preview_stl_impl(b"not stl", "{}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_preview_svg_impl_success() {
+        let result = preview_svg_impl(simple_svg());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_preview_svg_impl_invalid_svg() {
+        let result = preview_svg_impl("not svg");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sim_moves_stl_impl_success() {
+        let result = sim_moves_stl_impl(minimal_ascii_stl(), "{}");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_sim_moves_stl_impl_invalid_json() {
+        let result = sim_moves_stl_impl(minimal_ascii_stl(), "not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sim_moves_stl_impl_invalid_stl() {
+        let result = sim_moves_stl_impl(b"not stl", "{}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sim_moves_svg_impl_success() {
+        let result = sim_moves_svg_impl(simple_svg(), r#"{"strategy":"contour"}"#);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_sim_moves_svg_impl_invalid_json() {
+        let result = sim_moves_svg_impl(simple_svg(), "not json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sim_moves_svg_impl_invalid_svg() {
+        let result = sim_moves_svg_impl("not svg", "{}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_flatten_moves_impl_empty() {
+        let result = flatten_moves_impl(&[]);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "[]");
+    }
+
+    #[test]
+    fn test_sketch_add_constraint_impl_success() {
+        sketch_reset();
+        let p1: serde_json::Value = serde_json::from_str(&sketch_add_point(0.0, 0.0)).unwrap();
+        let p2: serde_json::Value = serde_json::from_str(&sketch_add_point(10.0, 0.0)).unwrap();
+        let id1 = p1["id"].as_u64().unwrap() as u32;
+        let id2 = p2["id"].as_u64().unwrap() as u32;
+        let ids_json = format!("[{id1},{id2}]");
+        let result = sketch_add_constraint_impl("distance", &ids_json, 10.0, 0.0);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_sketch_add_constraint_impl_invalid_ids_json() {
+        sketch_reset();
+        let result = sketch_add_constraint_impl("distance", "not json", 10.0, 0.0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sketch_add_constraint_impl_unknown_kind() {
+        sketch_reset();
+        let result = sketch_add_constraint_impl("unknown_kind", "[1,2]", 10.0, 0.0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown constraint"));
+    }
+
+    #[test]
+    fn test_sketch_add_constraint_impl_too_few_ids() {
+        sketch_reset();
+        let result = sketch_add_constraint_impl("perpendicular", "[1,2]", 0.0, 0.0);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("wrong number of ids"));
+    }
+
+    #[test]
+    fn test_sketch_solve_impl() {
+        sketch_reset();
+        sketch_add_point(0.0, 0.0);
+        let snap = sketch_solve_impl().unwrap();
+        assert!(snap.contains("points"));
+    }
+
+    #[test]
+    fn test_sketch_pump_impl() {
+        sketch_reset();
+        sketch_add_point(1.0, 2.0);
+        let snap = sketch_pump_impl().unwrap();
+        assert!(snap.contains("points"));
+    }
+
+    #[test]
+    fn test_sketch_snapshot_impl() {
+        sketch_reset();
+        let snap = sketch_snapshot_impl().unwrap();
+        assert!(snap.contains("points"));
+    }
+
+    // ── All constraint kinds via _impl ─────────────────────────────────
+
+    #[test]
+    fn test_sketch_constraint_all_kinds_impl() {
+        sketch_reset();
+        // Create enough points for all constraints
+        let mut ids = Vec::new();
+        for i in 0..5 {
+            let r: serde_json::Value =
+                serde_json::from_str(&sketch_add_point(i as f64 * 10.0, 0.0)).unwrap();
+            ids.push(r["id"].as_u64().unwrap() as u32);
+        }
+
+        let two = format!("[{},{}]", ids[0], ids[1]);
+        let three = format!("[{},{},{}]", ids[0], ids[1], ids[2]);
+        let four = format!("[{},{},{},{}]", ids[0], ids[1], ids[2], ids[3]);
+
+        assert!(sketch_add_constraint_impl("coincident", &two, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("horizontal", &two, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("vertical", &two, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("fixed", &format!("[{}]", ids[0]), 5.0, 10.0).is_ok());
+        assert!(sketch_add_constraint_impl("angle", &two, 45.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("radius", &two, 5.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("perpendicular", &four, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("parallel", &four, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("midpoint", &three, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("equal_length", &four, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint_impl("symmetric", &four, 0.0, 0.0).is_ok());
     }
 }
