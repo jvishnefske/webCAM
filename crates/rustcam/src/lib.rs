@@ -1850,4 +1850,141 @@ endsolid test"
         assert_eq!(config.perimeter_passes, 3);
         assert_eq!(config.scan_direction, "y");
     }
+
+    // ── Error-path coverage: sketch_add_constraint ──────────────────
+
+    #[test]
+    fn test_sketch_add_constraint_unknown_kind() {
+        sketch_reset();
+        sketch_add_point(0.0, 0.0);
+        let result = sketch_add_constraint("nonexistent", "[0]", 0.0, 0.0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sketch_add_constraint_too_few_ids() {
+        sketch_reset();
+        let p1: serde_json::Value = serde_json::from_str(&sketch_add_point(0.0, 0.0)).unwrap();
+        let id1 = p1["id"].as_u64().unwrap() as u32;
+        // "distance" needs 2 ids, pass only 1
+        let result = sketch_add_constraint("distance", &format!("[{id1}]"), 10.0, 0.0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sketch_add_constraint_invalid_json() {
+        sketch_reset();
+        let result = sketch_add_constraint("distance", "not valid json", 10.0, 0.0);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sketch_add_constraint_all_kinds() {
+        sketch_reset();
+        let p1: serde_json::Value = serde_json::from_str(&sketch_add_point(0.0, 0.0)).unwrap();
+        let p2: serde_json::Value = serde_json::from_str(&sketch_add_point(10.0, 0.0)).unwrap();
+        let p3: serde_json::Value = serde_json::from_str(&sketch_add_point(5.0, 5.0)).unwrap();
+        let p4: serde_json::Value = serde_json::from_str(&sketch_add_point(10.0, 10.0)).unwrap();
+        let id1 = p1["id"].as_u64().unwrap() as u32;
+        let id2 = p2["id"].as_u64().unwrap() as u32;
+        let id3 = p3["id"].as_u64().unwrap() as u32;
+        let id4 = p4["id"].as_u64().unwrap() as u32;
+
+        // 2-point constraint kinds
+        let two_ids = format!("[{id1},{id2}]");
+        assert!(sketch_add_constraint("coincident", &two_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint("horizontal", &two_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint("vertical", &two_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint("angle", &two_ids, 45.0, 0.0).is_ok());
+        assert!(sketch_add_constraint("radius", &two_ids, 5.0, 0.0).is_ok());
+
+        // 1-point constraint kind
+        let one_id = format!("[{id1}]");
+        assert!(sketch_add_constraint("fixed", &one_id, 1.0, 2.0).is_ok());
+
+        // 3-point constraint kind
+        let three_ids = format!("[{id1},{id2},{id3}]");
+        assert!(sketch_add_constraint("midpoint", &three_ids, 0.0, 0.0).is_ok());
+
+        // 4-point constraint kinds
+        let four_ids = format!("[{id1},{id2},{id3},{id4}]");
+        assert!(sketch_add_constraint("perpendicular", &four_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint("parallel", &four_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint("equal_length", &four_ids, 0.0, 0.0).is_ok());
+        assert!(sketch_add_constraint("symmetric", &four_ids, 0.0, 0.0).is_ok());
+    }
+
+    #[test]
+    fn test_sketch_set_fixed_nonexistent_point() {
+        sketch_reset();
+        // Should not panic when setting fixed on a nonexistent point
+        sketch_set_fixed(9999, true);
+    }
+
+    // ── Internal helper coverage ────────────────────────────────────
+
+    #[test]
+    fn test_tool_from_config_end_mill_with_corner_radius() {
+        let config = CamConfig {
+            tool_type: "end_mill".into(),
+            corner_radius: 0.5,
+            ..CamConfig::default()
+        };
+        let tool = tool_from_config(&config);
+        assert_eq!(tool.tool_type, tool::ToolType::EndMill);
+        assert!((tool.corner_radius - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_tool_from_config_face_mill_no_effective_diameter() {
+        // When effective_diameter is None, should use tool_diameter
+        let config = CamConfig {
+            tool_type: "face_mill".into(),
+            tool_diameter: 50.0,
+            effective_diameter: None,
+            ..CamConfig::default()
+        };
+        let tool = tool_from_config(&config);
+        assert!((tool.effective_diameter() - 50.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_laser_params_defaults() {
+        // Laser config without optional fields should use defaults
+        let config = CamConfig {
+            machine_type: "laser_cutter".into(),
+            laser_power: None,
+            passes: None,
+            air_assist: None,
+            ..CamConfig::default()
+        };
+        let lp = laser_params_from_config(&config).unwrap();
+        assert!((lp.power - 100.0).abs() < f64::EPSILON);
+        assert_eq!(lp.passes, 1);
+        assert!(!lp.air_assist);
+    }
+
+    #[test]
+    fn test_build_toolpaths_stl_contour_fallback() {
+        // Build a mesh that won't produce any slices at default step_down
+        // to exercise the empty-toolpath fallback path
+        let mesh = stl::parse_stl(minimal_ascii_stl()).unwrap();
+        let config = CamConfig {
+            strategy: "contour".into(),
+            step_down: 100.0, // very large step, may result in empty layers
+            ..CamConfig::default()
+        };
+        // Should not panic, exercises the fallback path
+        let _paths = build_toolpaths_stl(&mesh, &config);
+    }
+
+    #[test]
+    fn test_camconfig_serialize_roundtrip() {
+        let config = CamConfig::default();
+        let json = serde_json::to_string(&config).unwrap();
+        let config2: CamConfig = serde_json::from_str(&json).unwrap();
+        assert!((config.tool_diameter - config2.tool_diameter).abs() < f64::EPSILON);
+        assert_eq!(config.strategy, config2.strategy);
+        assert_eq!(config.machine_type, config2.machine_type);
+    }
 }
