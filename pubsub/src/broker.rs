@@ -642,4 +642,12 @@ mod tests {
         let be: BrokerError = te.into();
         assert_eq!(be, BrokerError::TransportError(TransportError::BusError));
     }
+
+    #[test]
+    fn noop_handler_does_not_panic() {
+        // Exercise the noop_handler function body (used as the default
+        // initializer for subscription slots but never invoked in normal
+        // operation).
+        super::noop_handler(LOCAL, TOPIC_TEMP, &[1, 2, 3]);
+    }
 }

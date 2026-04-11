@@ -435,6 +435,32 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_op_indefinite_length_error() {
+        // CBOR indefinite-length array start (0x9F) followed by a u8 tag and float,
+        // then indefinite break (0xFF).  Op::decode requires a definite-length array.
+        let bytes = &[0x9F, 0x00, 0xFB, 0x40, 0x45, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF];
+        let result = minicbor::decode::<Op>(bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decode_dag_impl_indefinite_length_error() {
+        // Use minicbor::decode::<Dag> (not decode_dag) to exercise Dag's own
+        // Decode impl with an indefinite-length outer array.
+        let bytes = &[0x9F, 0xFF]; // indefinite-length array, immediate break
+        let result = minicbor::decode::<Dag>(bytes);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_decode_dag_truncated_input() {
+        // A definite-length outer array claiming 1 element, but no element follows.
+        let bytes = &[0x81]; // array(1) then EOF
+        let result = decode_dag(bytes);
+        assert!(matches!(result, Err(DecodeError::Cbor(_))));
+    }
+
+    #[test]
     fn test_cbor_compactness() {
         // Build the same 32-node micrograd DAG
         let mut dag = Dag::new();
