@@ -829,4 +829,156 @@ mod tests {
         assert_eq!(b.publish_topic, "sensor/scaled");
         assert_eq!(b.gain, 1.0);
     }
+
+    // ===================================================================
+    // PidBlock -- declared_channels directly
+    // ===================================================================
+
+    #[test]
+    fn test_pid_declared_channels_names() {
+        let pid = PidBlock {
+            setpoint_topic: "sp".into(),
+            feedback_topic: "fb".into(),
+            output_topic: "out".into(),
+            ..PidBlock::default()
+        };
+        let channels = pid.declared_channels();
+        assert_eq!(channels.len(), 3);
+        assert_eq!(channels[0].name, "sp");
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[0].kind, ChannelKind::PubSub);
+        assert_eq!(channels[1].name, "fb");
+        assert_eq!(channels[1].direction, ChannelDirection::Input);
+        assert_eq!(channels[2].name, "out");
+        assert_eq!(channels[2].direction, ChannelDirection::Output);
+    }
+
+    // ===================================================================
+    // PidBlock -- partial config application
+    // ===================================================================
+
+    #[test]
+    fn test_pid_apply_config_partial() {
+        let mut pid = PidBlock::default();
+        // Only update kp and feedback_topic; leave others at default
+        pid.apply_config(&serde_json::json!({
+            "kp": 10.0,
+            "feedback_topic": "temp/fb"
+        }));
+        assert_eq!(pid.kp, 10.0);
+        assert_eq!(pid.feedback_topic, "temp/fb");
+        // These should remain at defaults
+        assert_eq!(pid.ki, 0.1);
+        assert_eq!(pid.kd, 0.01);
+        assert_eq!(pid.setpoint_topic, "ctrl/setpoint");
+        assert_eq!(pid.output_topic, "ctrl/output");
+        assert_eq!(pid.out_min, -100.0);
+        assert_eq!(pid.out_max, 100.0);
+        assert_eq!(pid.deploy_node, "pico2");
+    }
+
+    #[test]
+    fn test_pid_apply_config_all_fields() {
+        let mut pid = PidBlock::default();
+        pid.apply_config(&serde_json::json!({
+            "kp": 5.0,
+            "ki": 0.5,
+            "kd": 0.05,
+            "setpoint_topic": "motor/sp",
+            "feedback_topic": "motor/fb",
+            "output_topic": "motor/cmd",
+            "out_min": -50.0,
+            "out_max": 50.0,
+            "deploy_node": "stm32"
+        }));
+        assert_eq!(pid.kp, 5.0);
+        assert_eq!(pid.ki, 0.5);
+        assert_eq!(pid.kd, 0.05);
+        assert_eq!(pid.setpoint_topic, "motor/sp");
+        assert_eq!(pid.feedback_topic, "motor/fb");
+        assert_eq!(pid.output_topic, "motor/cmd");
+        assert_eq!(pid.out_min, -50.0);
+        assert_eq!(pid.out_max, 50.0);
+        assert_eq!(pid.deploy_node, "stm32");
+    }
+
+    // ===================================================================
+    // SimpleGainBlock::lower -- evaluate
+    // ===================================================================
+
+    #[test]
+    fn test_gain_lower_evaluate() {
+        let gain = SimpleGainBlock {
+            factor: 2.5,
+            input_topic: "in".into(),
+            output_topic: "out".into(),
+            deploy_node: "pico2".into(),
+        };
+        let result = gain.lower().expect("lower failed");
+        let dag = &result.dag;
+        // Subscribe + Const + Mul + Publish = 4 nodes
+        assert_eq!(dag.len(), 4);
+        assert_eq!(result.ports.inputs.len(), 1);
+        assert_eq!(result.ports.outputs.len(), 1);
+
+        let mut pubsub = MockPubSub {
+            values: BTreeMap::new(),
+        };
+        pubsub.values.insert("in".into(), 4.0);
+        let mut values = vec![0.0; dag.len()];
+        let eval = dag.evaluate(&NullChannels, &pubsub, &mut values);
+        assert_eq!(eval.publishes.len(), 1);
+        assert_eq!(eval.publishes[0].0, "out");
+        assert!((eval.publishes[0].1 - 10.0).abs() < 1e-10);
+    }
+
+    // ===================================================================
+    // PubSubBridgeBlock::lower -- unity vs non-unity gain
+    // ===================================================================
+
+    #[test]
+    fn test_bridge_unity_gain_evaluate() {
+        let bridge = PubSubBridgeBlock {
+            subscribe_topic: "x".into(),
+            publish_topic: "y".into(),
+            gain: 1.0,
+            deploy_node: "pico2".into(),
+        };
+        let result = bridge.lower().expect("lower failed");
+        // Unity: Subscribe + Publish = 2 nodes
+        assert_eq!(result.dag.len(), 2);
+
+        let mut pubsub = MockPubSub {
+            values: BTreeMap::new(),
+        };
+        pubsub.values.insert("x".into(), 7.0);
+        let mut values = vec![0.0; result.dag.len()];
+        let eval = result.dag.evaluate(&NullChannels, &pubsub, &mut values);
+        assert_eq!(eval.publishes.len(), 1);
+        assert_eq!(eval.publishes[0].0, "y");
+        assert!((eval.publishes[0].1 - 7.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_bridge_non_unity_gain_evaluate() {
+        let bridge = PubSubBridgeBlock {
+            subscribe_topic: "x".into(),
+            publish_topic: "y".into(),
+            gain: 0.5,
+            deploy_node: "pico2".into(),
+        };
+        let result = bridge.lower().expect("lower failed");
+        // Non-unity: Subscribe + Const + Mul + Publish = 4 nodes
+        assert_eq!(result.dag.len(), 4);
+
+        let mut pubsub = MockPubSub {
+            values: BTreeMap::new(),
+        };
+        pubsub.values.insert("x".into(), 10.0);
+        let mut values = vec![0.0; result.dag.len()];
+        let eval = result.dag.evaluate(&NullChannels, &pubsub, &mut values);
+        assert_eq!(eval.publishes.len(), 1);
+        assert_eq!(eval.publishes[0].0, "y");
+        assert!((eval.publishes[0].1 - 5.0).abs() < 1e-10);
+    }
 }

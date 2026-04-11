@@ -489,4 +489,104 @@ mod tests {
         assert!(b.as_codegen().is_none());
         assert!(b.as_sim_model().is_none());
     }
+
+    #[test]
+    fn new_with_invalid_json_returns_error() {
+        let def = find_def("constant");
+        let result = DataDrivenBlock::new(def, "not valid json");
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(
+            err.contains("invalid config JSON"),
+            "error should mention invalid config JSON, got: {err}"
+        );
+    }
+
+    #[test]
+    fn config_json_includes_string_params() {
+        // channel_read has string params: "channel" and "peripheral"
+        let def = find_def("channel_read");
+        let b = DataDrivenBlock::new(def, r#"{"channel":"adc0","peripheral":"ADC1"}"#).unwrap();
+        let json = b.config_json();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["channel"], "adc0");
+        assert_eq!(parsed["peripheral"], "ADC1");
+    }
+
+    #[test]
+    fn config_json_includes_pubsub_string_params() {
+        // pubsub_source has string params: "topic" and "port_kind"
+        let def = find_def("pubsub_source");
+        let b = DataDrivenBlock::new(def, r#"{"topic":"my_topic","port_kind":"Text"}"#).unwrap();
+        let json = b.config_json();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["topic"], "my_topic");
+        assert_eq!(parsed["port_kind"], "Text");
+    }
+
+    #[test]
+    fn bool_param_kind_handling() {
+        use module_traits::function_def::*;
+        use module_traits::PortKind;
+
+        // Build a custom FunctionDef with a Bool param
+        let def = FunctionDef {
+            id: "test_bool".into(),
+            display_name: "Test Bool".into(),
+            category: "Test".into(),
+            op: FunctionOp::Constant,
+            inputs: vec![],
+            outputs: vec![FuncPortDef::new("out", PortKind::Float)],
+            params: vec![
+                ParamDef::float("value", 0.0),
+                ParamDef {
+                    name: "enabled".into(),
+                    kind: ParamKind::Bool,
+                    default: "true".into(),
+                },
+            ],
+            mlir_op: None,
+        };
+
+        // Test bool with explicit value
+        let b = DataDrivenBlock::new(def.clone(), r#"{"enabled": false}"#).unwrap();
+        assert_eq!(b.param_f64("enabled"), 0.0);
+
+        // Test bool with default (true)
+        let b2 = DataDrivenBlock::new(def.clone(), r#"{}"#).unwrap();
+        assert_eq!(b2.param_f64("enabled"), 1.0);
+
+        // Test bool with explicit true
+        let b3 = DataDrivenBlock::new(def, r#"{"enabled": true}"#).unwrap();
+        assert_eq!(b3.param_f64("enabled"), 1.0);
+    }
+
+    #[test]
+    fn int_param_kind_handling() {
+        // channel_read uses int params indirectly through FunctionDef params.
+        // Let's build a custom def with Int kind.
+        use module_traits::function_def::*;
+        use module_traits::PortKind;
+
+        let def = FunctionDef {
+            id: "test_int".into(),
+            display_name: "Test Int".into(),
+            category: "Test".into(),
+            op: FunctionOp::Constant,
+            inputs: vec![],
+            outputs: vec![FuncPortDef::new("out", PortKind::Float)],
+            params: vec![
+                ParamDef::float("value", 0.0),
+                ParamDef::int("count", 5),
+            ],
+            mlir_op: None,
+        };
+
+        let b = DataDrivenBlock::new(def.clone(), r#"{"count": 10}"#).unwrap();
+        assert_eq!(b.param_f64("count"), 10.0);
+
+        // Default value
+        let b2 = DataDrivenBlock::new(def, r#"{}"#).unwrap();
+        assert_eq!(b2.param_f64("count"), 5.0);
+    }
 }

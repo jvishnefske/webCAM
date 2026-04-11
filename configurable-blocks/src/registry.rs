@@ -111,4 +111,12 @@ mod tests {
         // Should be valid JSON
         let _: serde_json::Value = serde_json::from_str(&json).expect("invalid JSON");
     }
+
+    #[test]
+    fn test_palette_json_is_nonempty_array() {
+        let json = palette_json();
+        let parsed: serde_json::Value = serde_json::from_str(&json).expect("invalid JSON");
+        assert!(parsed.is_array(), "palette_json should return a JSON array");
+        assert!(!parsed.as_array().unwrap().is_empty(), "palette should not be empty");
+    }
 }

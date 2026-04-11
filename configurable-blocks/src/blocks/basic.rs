@@ -1600,4 +1600,120 @@ mod tests {
         assert!(types.contains(&"map_scale"), "missing map_scale");
         assert!(types.contains(&"lowpass"), "missing lowpass");
     }
+
+    // ===================================================================
+    // MapScaleBlock -- zero input range (in_min == in_max)
+    // ===================================================================
+
+    #[test]
+    fn test_map_scale_zero_input_range() {
+        let mut block = MapScaleBlock::default();
+        block.apply_config(&serde_json::json!({
+            "in_min": 5.0, "in_max": 5.0,
+            "out_min": 0.0, "out_max": 100.0,
+            "input_topic": "raw", "output_topic": "scaled"
+        }));
+        // When in_min == in_max, scale should be 0.0
+        let result = block.lower().unwrap();
+        let ps = MockPubSub {
+            values: BTreeMap::from([("raw".into(), 512.0)]),
+        };
+        let mut values = vec![0.0; result.dag.len()];
+        let eval = result.dag.evaluate(&NullChannels, &ps, &mut values);
+        // output = (512 - 5) * 0 + 0 = 0.0
+        assert_eq!(eval.publishes.len(), 1);
+        assert!((eval.publishes[0].1 - 0.0).abs() < 1e-10);
+    }
+
+    // ===================================================================
+    // LowPassBlock -- out-of-range alpha values
+    // ===================================================================
+
+    #[test]
+    fn test_lowpass_alpha_clamped_above() {
+        let mut block = LowPassBlock::default();
+        block.apply_config(&serde_json::json!({"alpha": 2.0}));
+        // alpha should be clamped to 1.0
+        assert_eq!(block.alpha, 1.0);
+    }
+
+    #[test]
+    fn test_lowpass_alpha_clamped_below() {
+        let mut block = LowPassBlock::default();
+        block.apply_config(&serde_json::json!({"alpha": -0.5}));
+        // alpha should be clamped to 0.0
+        assert_eq!(block.alpha, 0.0);
+    }
+
+    // ===================================================================
+    // AdcBlock -- full lifecycle
+    // ===================================================================
+
+    #[test]
+    fn test_adc_full_lifecycle() {
+        let mut block = AdcBlock::default();
+
+        // config_schema
+        let schema = block.config_schema();
+        assert_eq!(schema.len(), 1);
+        assert_eq!(schema[0].key, "channel_name");
+        assert_eq!(schema[0].kind, FieldKind::Text);
+
+        // apply_config
+        block.apply_config(&serde_json::json!({"channel_name": "adc1"}));
+        assert_eq!(block.channel_name, "adc1");
+
+        // declared_channels
+        let channels = block.declared_channels();
+        assert_eq!(channels.len(), 1);
+        assert_eq!(channels[0].name, "adc1");
+        assert_eq!(channels[0].direction, ChannelDirection::Input);
+        assert_eq!(channels[0].kind, ChannelKind::Hardware);
+
+        // block_type, display_name, category
+        assert_eq!(block.block_type(), "adc");
+        assert_eq!(block.display_name(), "ADC Input");
+        assert_eq!(block.category(), BlockCategory::Io);
+
+        // config_json
+        let json = block.config_json();
+        assert_eq!(json["channel_name"], "adc1");
+
+        // lower
+        let result = block.lower().unwrap();
+        assert_eq!(result.dag.len(), 1); // single Input op
+    }
+
+    // ===================================================================
+    // SubtractBlock::lower -- verify DAG ops
+    // ===================================================================
+
+    #[test]
+    fn test_subtract_lower_dag_structure() {
+        let block = SubtractBlock::default();
+        let result = block.lower().unwrap();
+        // subscribe + subscribe + sub + publish = 4 nodes
+        assert_eq!(result.dag.len(), 4);
+        assert_eq!(result.ports.inputs.len(), 2);
+        assert_eq!(result.ports.inputs[0].0, "a");
+        assert_eq!(result.ports.inputs[1].0, "b");
+        assert_eq!(result.ports.outputs.len(), 1);
+        assert_eq!(result.ports.outputs[0].0, "out");
+    }
+
+    // ===================================================================
+    // NegateBlock::lower -- verify DAG ops
+    // ===================================================================
+
+    #[test]
+    fn test_negate_lower_dag_structure() {
+        let block = NegateBlock::default();
+        let result = block.lower().unwrap();
+        // subscribe + neg + publish = 3 nodes
+        assert_eq!(result.dag.len(), 3);
+        assert_eq!(result.ports.inputs.len(), 1);
+        assert_eq!(result.ports.inputs[0].0, "in");
+        assert_eq!(result.ports.outputs.len(), 1);
+        assert_eq!(result.ports.outputs[0].0, "out");
+    }
 }
