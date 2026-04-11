@@ -76,5 +76,5 @@ pub use bus::SimBus;
 pub use device::{Address, I2cDevice};
 pub use error::BusError;
 pub use pmbus::{PmBusAccess, PmBusDevice, PmBusEngine, PmBusKind, PmBusRegDesc, PmBusValue};
-pub use runtime::{RuntimeBus, RuntimeDevice};
+pub use runtime::{RuntimeBus, RuntimeDevice, RuntimeDeviceError};
 pub use smbus::SmBusWordDevice;

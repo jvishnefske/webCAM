@@ -232,49 +232,57 @@ pub async fn run_with_api<B: I2cBusSet>(
                 // Binary frame -- CBOR request
                 0x02 => {
                     // Route by CBOR tag: firmware update (20-23) or I2C dispatch
-                    let result = match fw_update::peek_tag(frame.payload) {
-                        Some(tag) if fw_update::is_fw_tag(tag) => {
-                            match fw_update::handle_fw_request(
-                                fw_state.clone(),
-                                fw,
-                                frame.payload,
-                                &mut resp_cbor_buf,
-                            ) {
-                                Ok((new_state, n)) => {
-                                    // Check if we need to reset after FwFinish
-                                    let needs_reset =
-                                        matches!(new_state, FwUpdateState::Complete) && tag == 22;
-                                    fw_state = new_state;
+                    let result: Result<usize, crate::fw_update::EncodeError> =
+                        match fw_update::peek_tag(frame.payload) {
+                            Some(tag) if fw_update::is_fw_tag(tag) => {
+                                match fw_update::handle_fw_request(
+                                    fw_state.clone(),
+                                    fw,
+                                    frame.payload,
+                                    &mut resp_cbor_buf,
+                                ) {
+                                    Ok((new_state, n)) => {
+                                        // Check if we need to reset after FwFinish
+                                        let needs_reset =
+                                            matches!(new_state, FwUpdateState::Complete)
+                                                && tag == 22;
+                                        fw_state = new_state;
 
-                                    if needs_reset {
-                                        // Send ack, then reset
-                                        let _ = crate::ws_framing::write_frame(
-                                            &mut socket,
-                                            0x02,
-                                            &resp_cbor_buf[..n],
-                                        )
-                                        .await;
-                                        // Brief delay to let the ack flush
-                                        embassy_time::Timer::after_millis(100).await;
-                                        fw.system_reset();
+                                        if needs_reset {
+                                            // Send ack, then reset
+                                            let _ = crate::ws_framing::write_frame(
+                                                &mut socket,
+                                                0x02,
+                                                &resp_cbor_buf[..n],
+                                            )
+                                            .await;
+                                            // Brief delay to let the ack flush
+                                            embassy_time::Timer::after_millis(100).await;
+                                            fw.system_reset();
+                                        }
+                                        Ok(n)
                                     }
-                                    Ok(n)
-                                }
-                                Err(()) => {
-                                    defmt::warn!("WS: fw update error");
-                                    crate::ws_dispatch::encode_error(
-                                        &mut resp_cbor_buf,
-                                        "fw update error",
-                                    )
+                                    Err(_e) => {
+                                        defmt::warn!("WS: fw update error");
+                                        crate::ws_dispatch::encode_error(
+                                            &mut resp_cbor_buf,
+                                            "fw update error",
+                                        )
+                                    }
                                 }
                             }
-                        }
-                        _ => crate::ws_dispatch::handle_request::<B>(
-                            buses,
-                            frame.payload,
-                            &mut resp_cbor_buf,
-                        ),
-                    };
+                            _ => crate::ws_dispatch::handle_request::<B>(
+                                buses,
+                                frame.payload,
+                                &mut resp_cbor_buf,
+                            )
+                            .map_err(|e| match e {
+                                crate::ws_dispatch::DispatchError::Encode(enc) => enc,
+                                crate::ws_dispatch::DispatchError::MalformedRequest => {
+                                    crate::fw_update::EncodeError::BufferTooSmall
+                                }
+                            }),
+                        };
 
                     match result {
                         Ok(n) => {
@@ -290,7 +298,7 @@ pub async fn run_with_api<B: I2cBusSet>(
                                 break;
                             }
                         }
-                        Err(()) => {
+                        Err(_) => {
                             defmt::warn!("WS: dispatch error");
                         }
                     }

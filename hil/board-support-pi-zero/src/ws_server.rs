@@ -81,7 +81,7 @@ pub async fn run(
                                     break;
                                 }
                             }
-                            Err(()) => {
+                            Err(_) => {
                                 log::error!("Failed to handle request from {addr}");
                             }
                         }
@@ -100,6 +100,18 @@ pub async fn run(
     }
 }
 
+/// Error type for dispatch failures.
+#[derive(Debug)]
+#[allow(dead_code)]
+enum DispatchRequestError {
+    /// DAP dispatch failed.
+    Dap(cbor_dispatch::CborDispatchError),
+    /// I2C dispatch failed.
+    I2c(hil_firmware_support::ws_dispatch::DispatchError),
+    /// DAP not enabled.
+    DapNotEnabled,
+}
+
 /// Dispatches a binary WebSocket frame to either the DAP processor or
 /// the I2C bus handler based on the CBOR tag.
 ///
@@ -108,28 +120,29 @@ pub async fn run(
 ///
 /// # Errors
 ///
-/// Returns `Err(())` if the request cannot be processed.
+/// Returns an error if the request cannot be processed.
 fn dispatch_request(
     buses: &Arc<Mutex<CombinedBusSet>>,
     dap: &Option<Arc<Mutex<Box<dyn DapProcessor + Send>>>>,
     data: &[u8],
     resp_buf: &mut [u8],
-) -> Result<usize, ()> {
+) -> Result<usize, DispatchRequestError> {
     if let Some(tag) = cbor_dispatch::peek_cbor_tag(data) {
         if cbor_dispatch::is_dap_tag(tag) {
             return match dap {
                 Some(dap_mutex) => {
                     let mut guard = dap_mutex.lock().unwrap_or_else(|e| e.into_inner());
                     cbor_dispatch::handle_dap_request(&mut **guard, data, resp_buf)
+                        .map_err(DispatchRequestError::Dap)
                 }
                 None => {
                     log::error!("DAP not enabled; ignoring tag-40 request");
-                    Err(())
+                    Err(DispatchRequestError::DapNotEnabled)
                 }
             };
         }
     }
 
     let mut guard = buses.lock().unwrap_or_else(|e| e.into_inner());
-    handle_request(&mut *guard, data, resp_buf)
+    handle_request(&mut *guard, data, resp_buf).map_err(DispatchRequestError::I2c)
 }
