@@ -12,8 +12,9 @@ use embedded_hal::i2c::I2c;
 use i2c_hil_sim::devices::{I2cSwitch, I2cSwitchBuilder, Tmp1075};
 use i2c_hil_sim::{Address, BusError};
 
-#[allow(clippy::type_complexity)]
-fn build_mux() -> I2cSwitch<((Tmp1075, ()), ((Tmp1075, ()), ()))> {
+type MuxSetup = I2cSwitch<((Tmp1075, ()), ((Tmp1075, ()), ()))>;
+
+fn build_mux() -> MuxSetup {
     I2cSwitchBuilder::new(Address::new(0x70).unwrap())
         .channel(Tmp1075::with_temperature(
             Address::new(0x4E).unwrap(),

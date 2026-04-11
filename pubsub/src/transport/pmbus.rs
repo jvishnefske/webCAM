@@ -218,7 +218,6 @@ mod tests {
 
     /// Record of an I2C operation for the mock.
     #[derive(Debug, Clone)]
-    #[allow(dead_code)]
     enum I2cOp {
         Write {
             addr: u8,
