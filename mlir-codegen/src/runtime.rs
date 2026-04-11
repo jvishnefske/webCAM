@@ -22,25 +22,24 @@ use crate::ir::{ArithOp, Attr, DataflowOp, FuncOp, IrModule, IrOpKind};
 // ── Hardware Bridge ──────────────────────────────────────────────
 
 /// Hardware abstraction for peripheral I/O. Default impls return 0 / no-op.
-#[allow(unused_variables)]
 pub trait HwBridge {
-    fn adc_read(&self, channel: u8) -> f64 {
+    fn adc_read(&self, _channel: u8) -> f64 {
         0.0
     }
-    fn pwm_write(&mut self, channel: u8, duty: f64) {}
-    fn gpio_read(&self, pin: u8) -> f64 {
+    fn pwm_write(&mut self, _channel: u8, _duty: f64) {}
+    fn gpio_read(&self, _pin: u8) -> f64 {
         0.0
     }
-    fn gpio_write(&mut self, pin: u8, value: f64) {}
-    fn uart_read(&self, port: u8) -> f64 {
+    fn gpio_write(&mut self, _pin: u8, _value: f64) {}
+    fn uart_read(&self, _port: u8) -> f64 {
         0.0
     }
-    fn uart_write(&mut self, port: u8, value: f64) {}
-    fn encoder_read(&self, channel: u8) -> f64 {
+    fn uart_write(&mut self, _port: u8, _value: f64) {}
+    fn encoder_read(&self, _channel: u8) -> f64 {
         0.0
     }
-    fn publish(&mut self, topic: u16, value: f64) {}
-    fn subscribe(&self, topic: u16) -> f64 {
+    fn publish(&mut self, _topic: u16, _value: f64) {}
+    fn subscribe(&self, _topic: u16) -> f64 {
         0.0
     }
 }
