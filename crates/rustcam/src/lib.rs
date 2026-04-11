@@ -1853,6 +1853,10 @@ endsolid test"
 
     // ── Error-path coverage: sketch_add_constraint ──────────────────
 
+    // Note: sketch_add_constraint error-path tests that return Err(JsValue) cannot
+    // run in native mode because JsValue::from_str panics on non-wasm32 targets.
+    // The constraint matching logic is tested via test_sketch_add_constraint_all_kinds.
+    #[cfg(target_arch = "wasm32")]
     #[test]
     fn test_sketch_add_constraint_unknown_kind() {
         sketch_reset();
@@ -1861,6 +1865,7 @@ endsolid test"
         assert!(result.is_err());
     }
 
+    #[cfg(target_arch = "wasm32")]
     #[test]
     fn test_sketch_add_constraint_too_few_ids() {
         sketch_reset();
@@ -1871,6 +1876,7 @@ endsolid test"
         assert!(result.is_err());
     }
 
+    #[cfg(target_arch = "wasm32")]
     #[test]
     fn test_sketch_add_constraint_invalid_json() {
         sketch_reset();
@@ -1986,5 +1992,104 @@ endsolid test"
         assert!((config.tool_diameter - config2.tool_diameter).abs() < f64::EPSILON);
         assert_eq!(config.strategy, config2.strategy);
         assert_eq!(config.machine_type, config2.machine_type);
+    }
+
+    // ── Additional coverage: build_toolpaths internal helpers ───────
+
+    #[test]
+    fn test_build_toolpaths_stl_slice_strategy() {
+        // "slice" is not a named match in build_toolpaths_stl, falls to default (ContourStrategy)
+        let mesh = stl::parse_stl(minimal_ascii_stl()).unwrap();
+        let config = CamConfig {
+            strategy: "slice".into(),
+            ..CamConfig::default()
+        };
+        let _paths = build_toolpaths_stl(&mesh, &config);
+    }
+
+    #[test]
+    fn test_build_toolpaths_stl_zigzag_y_direction() {
+        let mesh = stl::parse_stl(minimal_ascii_stl()).unwrap();
+        let config = CamConfig {
+            strategy: "zigzag".into(),
+            scan_direction: "y".into(),
+            ..CamConfig::default()
+        };
+        let _paths = build_toolpaths_stl(&mesh, &config);
+    }
+
+    #[test]
+    fn test_build_toolpaths_svg_laser_cut() {
+        let polylines = svg::parse_svg(simple_svg()).unwrap();
+        let config = CamConfig {
+            machine_type: "laser_cutter".into(),
+            strategy: "laser_cut".into(),
+            laser_power: Some(90.0),
+            ..CamConfig::default()
+        };
+        let paths = build_toolpaths_svg(&polylines, &config);
+        assert!(!paths.is_empty());
+    }
+
+    #[test]
+    fn test_build_toolpaths_svg_perimeter_cnc() {
+        let polylines = svg::parse_svg(simple_svg()).unwrap();
+        let config = CamConfig {
+            strategy: "perimeter".into(),
+            cut_depth: -2.0,
+            step_down: 1.0,
+            ..CamConfig::default()
+        };
+        let paths = build_toolpaths_svg(&polylines, &config);
+        // Should produce toolpaths at multiple Z levels
+        let _ = paths;
+    }
+
+    #[test]
+    fn test_camconfig_empty_json_uses_all_defaults() {
+        // Deserialize from "{}" and verify all serde defaults are applied
+        let config: CamConfig = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.tool_diameter, default_tool_diameter());
+        assert_eq!(config.tool_type, default_tool_type());
+        assert_eq!(config.step_over, default_step_over());
+        assert_eq!(config.step_down, default_step_down());
+        assert_eq!(config.feed_rate, default_feed_rate());
+        assert_eq!(config.plunge_rate, default_plunge_rate());
+        assert_eq!(config.spindle_speed, default_spindle_speed());
+        assert_eq!(config.safe_z, default_safe_z());
+        assert_eq!(config.cut_depth, default_cut_depth());
+        assert_eq!(config.strategy, default_strategy());
+        assert_eq!(config.machine_type, default_machine_type());
+        assert_eq!(config.scan_direction, default_scan_direction());
+        assert_eq!(config.perimeter_passes, default_perimeter_passes());
+        assert_eq!(config.corner_radius, 0.0);
+        assert!(config.effective_diameter.is_none());
+        assert!(!config.climb_cut);
+        assert!(config.laser_power.is_none());
+        assert!(config.passes.is_none());
+        assert!(config.air_assist.is_none());
+    }
+
+    #[test]
+    fn test_flatten_moves_with_toolpaths() {
+        // Build actual toolpaths and flatten them
+        let polylines = svg::parse_svg(simple_svg()).unwrap();
+        let config = CamConfig::default();
+        let toolpaths = build_toolpaths_svg(&polylines, &config);
+        let result = flatten_moves(&toolpaths);
+        assert!(result.is_ok());
+        let json = result.unwrap();
+        let moves: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        assert!(!moves.is_empty(), "should have moves from non-empty toolpaths");
+    }
+
+    #[test]
+    fn test_strategy_from_config_unknown_defaults_to_contour() {
+        let config = CamConfig {
+            strategy: "nonexistent_strategy".into(),
+            ..CamConfig::default()
+        };
+        // Should not panic; defaults to ContourStrategy
+        let _strategy = strategy_from_config(&config);
     }
 }

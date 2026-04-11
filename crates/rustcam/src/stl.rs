@@ -235,4 +235,17 @@ endsolid cube";
             "Error should mention no triangles, got: {err}"
         );
     }
+
+    #[test]
+    fn test_binary_stl_too_short_header() {
+        // Data shorter than 84 bytes passed directly to parse_binary_stl
+        let data = vec![0u8; 40];
+        let result = parse_binary_stl(&data);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("Binary STL too short"),
+            "Error should mention too short, got: {err}"
+        );
+    }
 }
