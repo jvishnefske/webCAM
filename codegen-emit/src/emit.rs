@@ -3212,6 +3212,170 @@ mod tests {
     }
 
     #[test]
+    fn register_block_in_logic_blocks_rs() {
+        // Verify the register block path in generate_logic_blocks_rs:
+        // register blocks emit no block function (handled in lib.rs).
+        let snap = GraphSnapshot {
+            blocks: vec![
+                make_constant_snapshot(1, 3.0),
+                BlockSnapshot {
+                    id: 2,
+                    block_type: "register".to_string(),
+                    name: "Reg".to_string(),
+                    inputs: vec![PortDef::new("in", PortKind::Float)],
+                    outputs: vec![PortDef::new("out", PortKind::Float)],
+                    config: serde_json::json!({"initial_value": 5.0}),
+                    output_values: vec![],
+                    target: None,
+                    custom_codegen: None,
+                    is_delay: true,
+                },
+            ],
+            channels: vec![ch(1, 1, 0, 2, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let result = generate_logic_blocks_rs(&snap).unwrap();
+        // Register blocks should NOT generate a block function
+        assert!(!result.contains("pub fn block_2("));
+        // Constant block should still have its function
+        assert!(result.contains("pub fn block_1() -> f64"));
+    }
+
+    #[test]
+    fn custom_codegen_in_logic_blocks_rs() {
+        // Verify custom_codegen path in generate_logic_blocks_rs
+        let snap = GraphSnapshot {
+            blocks: vec![BlockSnapshot {
+                id: 1,
+                block_type: "constant".to_string(),
+                name: "Custom".to_string(),
+                inputs: vec![],
+                outputs: vec![PortDef::new("out", PortKind::Float)],
+                config: serde_json::json!({"value": 1.0}),
+                output_values: vec![],
+                target: None,
+                custom_codegen: Some("pub fn block_1() -> f64 { custom_impl() }".to_string()),
+                is_delay: false,
+            }],
+            channels: vec![],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let result = generate_logic_blocks_rs(&snap).unwrap();
+        assert!(result.contains("custom_impl"));
+    }
+
+    #[test]
+    fn udp_blocks_in_logic_blocks_rs() {
+        // Test udp_source and udp_sink branches in generate_logic_blocks_rs
+        let snap = GraphSnapshot {
+            blocks: vec![
+                BlockSnapshot {
+                    id: 1,
+                    block_type: "udp_source".to_string(),
+                    name: "UDP Src".to_string(),
+                    inputs: vec![],
+                    outputs: vec![PortDef::new("out", PortKind::Float)],
+                    config: serde_json::json!({"address": "10.0.0.1:5000"}),
+                    output_values: vec![],
+                    target: None,
+                    custom_codegen: None,
+                    is_delay: false,
+                },
+                BlockSnapshot {
+                    id: 2,
+                    block_type: "udp_sink".to_string(),
+                    name: "UDP Sink".to_string(),
+                    inputs: vec![PortDef::new("in", PortKind::Float)],
+                    outputs: vec![],
+                    config: serde_json::json!({"address": "10.0.0.2:5001"}),
+                    output_values: vec![],
+                    target: None,
+                    custom_codegen: None,
+                    is_delay: false,
+                },
+            ],
+            channels: vec![ch(1, 1, 0, 2, 0)],
+            tick_count: 0,
+            time: 0.0,
+        };
+        let result = generate_logic_blocks_rs(&snap).unwrap();
+        assert!(result.contains("UDP receive from 10.0.0.1:5000"));
+        assert!(result.contains("UDP send to 10.0.0.2:5001"));
+    }
+
+    #[test]
+    fn from_graph_model_sub_snapshot_with_bridge_block() {
+        // Test the from_graph_model_sub_snapshot function with a block not
+        // present in the original snapshot (bridge block).
+        let original = GraphSnapshot {
+            blocks: vec![make_constant_snapshot(1, 5.0)],
+            channels: vec![],
+            tick_count: 10,
+            time: 1.5,
+        };
+
+        let gm_snap = graph_model::GraphSnapshot {
+            blocks: vec![
+                graph_model::BlockSnapshot {
+                    id: graph_model::BlockId(1),
+                    block_type: "constant".to_string(),
+                    name: "C".to_string(),
+                    inputs: vec![],
+                    outputs: vec![PortDef::new("out", PortKind::Float)],
+                    config: serde_json::json!({"value": 5.0}),
+                    is_delay: false,
+                },
+                // Bridge block not in original
+                graph_model::BlockSnapshot {
+                    id: graph_model::BlockId(999),
+                    block_type: "pubsub_source".to_string(),
+                    name: "bridge".to_string(),
+                    inputs: vec![],
+                    outputs: vec![PortDef::new("out", PortKind::Float)],
+                    config: serde_json::json!({}),
+                    is_delay: false,
+                },
+            ],
+            channels: vec![],
+        };
+
+        let result = from_graph_model_sub_snapshot(
+            &gm_snap,
+            &original,
+            Some(TargetFamily::Rp2040),
+        );
+        assert_eq!(result.blocks.len(), 2);
+        // Block 1 should keep original's output_values
+        assert_eq!(result.blocks[0].output_values.len(), 1);
+        // Bridge block (999) should have None output values
+        assert_eq!(result.blocks[1].output_values, vec![None]);
+        assert_eq!(result.blocks[1].target, Some(TargetFamily::Rp2040));
+        assert_eq!(result.tick_count, 10);
+        assert!((result.time - 1.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn to_graph_model_snapshot_roundtrip() {
+        // Test the to_graph_model_snapshot function.
+        let snap = GraphSnapshot {
+            blocks: vec![
+                make_constant_snapshot(1, 42.0),
+                make_gain_snapshot(2, 3.0),
+            ],
+            channels: vec![ch(1, 1, 0, 2, 0)],
+            tick_count: 5,
+            time: 2.0,
+        };
+        let gm = to_graph_model_snapshot(&snap);
+        assert_eq!(gm.blocks.len(), 2);
+        assert_eq!(gm.channels.len(), 1);
+        assert_eq!(gm.blocks[0].id.0, 1);
+        assert_eq!(gm.blocks[1].id.0, 2);
+    }
+
+    #[test]
     fn build_workspace_members_dedup() {
         let targets = vec![
             TargetWithBinding {

@@ -1852,4 +1852,222 @@ mod tests {
         // zero const + subscribe(channel_read) + publish(channel_write) = 3 ops
         assert!(module.funcs[0].ops.len() >= 3);
     }
+
+    // ── Typed IR lowering: additional block type tests ────────────
+
+    #[test]
+    fn test_lower_ir_subtract() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 10.0})),
+            make_block(2, "constant", serde_json::json!({"value": 3.0})),
+            {
+                let mut b = make_block(3, "subtract", serde_json::json!({}));
+                b.inputs = vec![
+                    PortDef { name: "a".to_string(), kind: PortKind::Float },
+                    PortDef { name: "b".to_string(), kind: PortKind::Float },
+                ];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 3, 0), make_channel(2, 2, 0, 3, 1)];
+        let snap = GraphSnapshot { blocks, channels };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{ArithOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Arith(ArithOp::Subf)),
+            "expected subf op in IR"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_multiply() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 4.0})),
+            make_block(2, "constant", serde_json::json!({"value": 5.0})),
+            {
+                let mut b = make_block(3, "multiply", serde_json::json!({}));
+                b.inputs = vec![
+                    PortDef { name: "a".to_string(), kind: PortKind::Float },
+                    PortDef { name: "b".to_string(), kind: PortKind::Float },
+                ];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 3, 0), make_channel(2, 2, 0, 3, 1)];
+        let snap = GraphSnapshot { blocks, channels };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{ArithOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Arith(ArithOp::Mulf)),
+            "expected mulf op for multiply block"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_clamp() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 150.0})),
+            {
+                let mut b = make_block(2, "clamp", serde_json::json!({"min": 0.0, "max": 100.0}));
+                b.inputs = vec![PortDef { name: "in".to_string(), kind: PortKind::Float }];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::Clamp)),
+            "expected clamp op in IR"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_gpio_in() {
+        let blocks = vec![{
+            let mut b = make_block(1, "gpio_in", serde_json::json!({"pin": 5}));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::GpioRead)),
+            "expected gpio_read op for gpio_in block"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_gpio_out() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            {
+                let mut b = make_block(2, "gpio_out", serde_json::json!({"pin": 7}));
+                b.inputs = vec![PortDef { name: "value".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::GpioWrite)),
+            "expected gpio_write op for gpio_out block"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_uart_rx() {
+        let blocks = vec![{
+            let mut b = make_block(1, "uart_rx", serde_json::json!({"port": 2}));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::UartRx)),
+            "expected uart_rx op in IR"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_uart_tx() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 99.0})),
+            {
+                let mut b = make_block(2, "uart_tx", serde_json::json!({"port": 3}));
+                b.inputs = vec![PortDef { name: "data".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::UartTx)),
+            "expected uart_tx op in IR"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_encoder() {
+        let blocks = vec![{
+            let mut b = make_block(1, "encoder", serde_json::json!({"channel": 0}));
+            b.inputs = vec![];
+            b.outputs = vec![
+                PortDef { name: "position".to_string(), kind: PortKind::Float },
+                PortDef { name: "velocity".to_string(), kind: PortKind::Float },
+            ];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        use crate::ir::{DataflowOp, IrOpKind};
+        assert!(
+            ops.iter().any(|op| op.kind == IrOpKind::Dataflow(DataflowOp::EncoderRead)),
+            "expected encoder_read op in IR"
+        );
+    }
+
+    #[test]
+    fn test_lower_ir_udp_source() {
+        let blocks = vec![{
+            let mut b = make_block(1, "udp_source", serde_json::json!({}));
+            b.inputs = vec![];
+            b
+        }];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let module = lower_graph_ir(&snap).unwrap();
+        let ops = &module.funcs[0].ops;
+        // udp_source emits a constant(0.0) stub
+        use crate::ir::{ArithOp, IrOpKind};
+        // Should have at least 2 constants (zero + stub)
+        let constant_count = ops.iter()
+            .filter(|op| op.kind == IrOpKind::Arith(ArithOp::Constant))
+            .count();
+        assert!(constant_count >= 2, "expected at least 2 constants for udp_source stub, got {constant_count}");
+    }
+
+    #[test]
+    fn test_lower_ir_udp_sink() {
+        let blocks = vec![
+            make_block(1, "constant", serde_json::json!({"value": 1.0})),
+            {
+                let mut b = make_block(2, "udp_sink", serde_json::json!({}));
+                b.inputs = vec![PortDef { name: "in".to_string(), kind: PortKind::Float }];
+                b.outputs = vec![];
+                b
+            },
+        ];
+        let channels = vec![make_channel(1, 1, 0, 2, 0)];
+        let snap = GraphSnapshot { blocks, channels };
+        // udp_sink should succeed (it's a no-op skip)
+        let module = lower_graph_ir(&snap).unwrap();
+        assert!(!module.funcs.is_empty());
+    }
+
+    #[test]
+    fn test_lower_ir_unsupported_block_type() {
+        let blocks = vec![make_block(1, "totally_unknown", serde_json::json!({}))];
+        let snap = GraphSnapshot { blocks, channels: vec![] };
+        let result = lower_graph_ir(&snap);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unsupported"));
+    }
 }
