@@ -88,60 +88,6 @@ pub fn dataflow_update_block(
     })
 }
 
-/// Validate whether a connection between two ports is valid.
-/// Returns empty string on success, or an error message on failure.
-#[wasm_bindgen]
-pub fn dataflow_validate_connection(
-    graph_id: u32,
-    from_block: u32,
-    from_port: u32,
-    to_block: u32,
-    to_port: u32,
-) -> String {
-    DATAFLOW_GRAPHS.with(|g| {
-        let graphs = g.borrow();
-        let graph = match graphs.get(&graph_id) {
-            Some(g) => g,
-            None => return "graph not found".to_string(),
-        };
-
-        // Build port count maps from the graph
-        let snap = graph.snapshot();
-        let mut output_counts = std::collections::HashMap::new();
-        let mut input_counts = std::collections::HashMap::new();
-        for block in &snap.blocks {
-            output_counts.insert(block.id, block.outputs.len());
-            input_counts.insert(block.id, block.inputs.len());
-        }
-
-        // Build existing connections list
-        let existing: Vec<(u32, usize, u32, usize)> = snap
-            .channels
-            .iter()
-            .map(|ch| (ch.from_block.0, ch.from_port, ch.to_block.0, ch.to_port))
-            .collect();
-
-        let req = dataflow::connection::ConnectionRequest {
-            from_block,
-            from_port: from_port as usize,
-            from_side: dataflow::connection::PortSide::Output,
-            to_block,
-            to_port: to_port as usize,
-            to_side: dataflow::connection::PortSide::Input,
-        };
-
-        match dataflow::connection::validate_connection(
-            &req,
-            &output_counts,
-            &input_counts,
-            &existing,
-        ) {
-            Ok(_) => String::new(),
-            Err(e) => e.to_string(),
-        }
-    })
-}
-
 /// Connect an output port to an input port. Returns channel id.
 #[wasm_bindgen]
 pub fn dataflow_connect(
@@ -247,56 +193,6 @@ pub fn dataflow_snapshot(graph_id: u32) -> Result<JsValue, JsValue> {
     })
 }
 
-/// Load a graph from a JSON `GraphSnapshot`, applying port-index migration for
-/// old state_machine graphs that predate the `state_in` port at index 0.
-///
-/// Returns the new graph id on success.
-#[wasm_bindgen]
-pub fn dataflow_load_snapshot(dt: f64, snapshot_json: &str) -> Result<u32, JsValue> {
-    let mut snap: dataflow::graph::GraphSnapshot =
-        serde_json::from_str(snapshot_json).map_err(|e| JsValue::from_str(&e.to_string()))?;
-
-    // Migrate v1 state machine port indices before replaying the graph.
-    dataflow::graph::migrate_state_machine_ports(&mut snap);
-
-    DATAFLOW_NEXT_ID.with(|next| {
-        let id = *next.borrow();
-        *next.borrow_mut() = id + 1;
-
-        let mut graph = dataflow::DataflowGraph::new();
-
-        // Replay blocks from the snapshot.  We insert them with fixed ids so
-        // channel references remain valid.
-        for block_snap in &snap.blocks {
-            let block = dataflow::blocks::create_block(
-                &block_snap.block_type,
-                &block_snap.config.to_string(),
-            )
-            .map_err(|e| JsValue::from_str(&e))?;
-            graph.add_block(block);
-        }
-
-        // Replay channels.
-        for ch in &snap.channels {
-            graph
-                .connect(
-                    dataflow::BlockId(ch.from_block.0),
-                    ch.from_port,
-                    dataflow::BlockId(ch.to_block.0),
-                    ch.to_port,
-                )
-                .map_err(|e| JsValue::from_str(&e))?;
-        }
-
-        DATAFLOW_GRAPHS.with(|g| g.borrow_mut().insert(id, graph));
-        DATAFLOW_SCHEDULERS.with(|s| {
-            s.borrow_mut().insert(id, dataflow::Scheduler::new(dt));
-        });
-
-        Ok(id)
-    })
-}
-
 /// List available block types as a typed JS array.
 #[wasm_bindgen]
 pub fn dataflow_block_types() -> JsValue {
@@ -306,6 +202,11 @@ pub fn dataflow_block_types() -> JsValue {
 
 // ── Function Def Schema API ──────────────────────────────────────────
 
+/// Return the list of builtin function definitions (non-WASM helper).
+pub fn function_defs_list() -> Vec<module_traits::FunctionDef> {
+    module_traits::builtin_function_defs()
+}
+
 /// Return the full function definition registry as JSON.
 ///
 /// This is the single source of truth for all block types — the frontend
@@ -313,16 +214,41 @@ pub fn dataflow_block_types() -> JsValue {
 /// of maintaining its own type mirrors.
 #[wasm_bindgen]
 pub fn dataflow_function_defs() -> Result<JsValue, JsValue> {
-    let defs = module_traits::builtin_function_defs();
+    let defs = function_defs_list();
     serde_wasm_bindgen::to_value(&defs).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 // ── MCU Pin Schema API ──────────────────────────────────────────────
 
+/// Return the list of supported MCU families (non-WASM helper).
+pub fn mcu_families_list() -> Vec<&'static str> {
+    module_traits::inventory::supported_families()
+}
+
+/// Look up an MCU definition by family name (non-WASM helper).
+pub fn get_mcu_definition(family: &str) -> Result<module_traits::inventory::McuDef, String> {
+    module_traits::inventory::mcu_for(family)
+        .ok_or_else(|| format!("unknown MCU family: {family}"))
+}
+
+/// Return MCU pin definitions for a family (non-WASM helper).
+pub fn get_mcu_pins(family: &str) -> Result<Vec<module_traits::inventory::PinDef>, String> {
+    let mcu = get_mcu_definition(family)?;
+    Ok(mcu.pins)
+}
+
+/// Return MCU peripheral instances for a family (non-WASM helper).
+pub fn get_mcu_peripherals(
+    family: &str,
+) -> Result<Vec<module_traits::inventory::PeripheralInst>, String> {
+    let mcu = get_mcu_definition(family)?;
+    Ok(mcu.peripherals)
+}
+
 /// List all supported MCU target families.
 #[wasm_bindgen]
 pub fn mcu_families() -> JsValue {
-    let families = module_traits::inventory::supported_families();
+    let families = mcu_families_list();
     serde_wasm_bindgen::to_value(&families).unwrap_or(JsValue::NULL)
 }
 
@@ -332,8 +258,7 @@ pub fn mcu_families() -> JsValue {
 /// The frontend uses this to build BSP configuration panels.
 #[wasm_bindgen]
 pub fn mcu_definition(family: &str) -> Result<JsValue, JsValue> {
-    let mcu = module_traits::inventory::mcu_for(family)
-        .ok_or_else(|| JsValue::from_str(&format!("unknown MCU family: {family}")))?;
+    let mcu = get_mcu_definition(family).map_err(|e| JsValue::from_str(&e))?;
     serde_wasm_bindgen::to_value(&mcu).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
@@ -343,9 +268,8 @@ pub fn mcu_definition(family: &str) -> Result<JsValue, JsValue> {
 /// The frontend uses this to populate channel binding dropdowns.
 #[wasm_bindgen]
 pub fn mcu_pins(family: &str) -> Result<JsValue, JsValue> {
-    let mcu = module_traits::inventory::mcu_for(family)
-        .ok_or_else(|| JsValue::from_str(&format!("unknown MCU family: {family}")))?;
-    serde_wasm_bindgen::to_value(&mcu.pins).map_err(|e| JsValue::from_str(&e.to_string()))
+    let pins = get_mcu_pins(family).map_err(|e| JsValue::from_str(&e))?;
+    serde_wasm_bindgen::to_value(&pins).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 /// Return peripheral instances for a target family.
@@ -353,9 +277,8 @@ pub fn mcu_pins(family: &str) -> Result<JsValue, JsValue> {
 /// Each peripheral includes its signals and available pin mappings.
 #[wasm_bindgen]
 pub fn mcu_peripherals(family: &str) -> Result<JsValue, JsValue> {
-    let mcu = module_traits::inventory::mcu_for(family)
-        .ok_or_else(|| JsValue::from_str(&format!("unknown MCU family: {family}")))?;
-    serde_wasm_bindgen::to_value(&mcu.peripherals)
+    let periphs = get_mcu_peripherals(family).map_err(|e| JsValue::from_str(&e))?;
+    serde_wasm_bindgen::to_value(&periphs)
         .map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
@@ -484,32 +407,6 @@ pub fn dataflow_remove_i2c_device(graph_id: u32, bus: u8, addr: u8) -> Result<()
     })
 }
 
-/// Read the 256-byte register map of a simulated I2C device (as JSON array).
-#[wasm_bindgen]
-pub fn dataflow_i2c_device_registers(
-    graph_id: u32,
-    bus: u8,
-    addr: u8,
-) -> Result<JsValue, JsValue> {
-    DATAFLOW_GRAPHS.with(|g| {
-        let graphs = g.borrow();
-        let graph = graphs
-            .get(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let sim = graph
-            .sim_peripherals_ref()
-            .map_err(|e| JsValue::from_str(&e))?;
-        match sim.i2c_device_registers(bus, addr) {
-            Some(regs) => {
-                let json = serde_json::to_string(&regs[..])
-                    .map_err(|e| JsValue::from_str(&e.to_string()))?;
-                Ok(JsValue::from_str(&json))
-            }
-            None => Err(JsValue::from_str("I2C device not found")),
-        }
-    })
-}
-
 // ── Serial simulation WASM API ──────────────────────────────────────
 
 /// Configure a simulated serial port. Parity: 0=None, 1=Odd, 2=Even.
@@ -537,26 +434,6 @@ pub fn dataflow_configure_serial(
     })
 }
 
-/// List all configured serial ports as JSON.
-#[wasm_bindgen]
-pub fn dataflow_serial_ports(graph_id: u32) -> Result<JsValue, JsValue> {
-    DATAFLOW_GRAPHS.with(|g| {
-        let graphs = g.borrow();
-        let graph = graphs
-            .get(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let sim = graph
-            .sim_peripherals_ref()
-            .map_err(|e| JsValue::from_str(&e))?;
-        let ports = sim.serial_ports();
-        let configs: Vec<&dataflow::sim_peripherals::SerialConfig> =
-            ports.iter().map(|(_, cfg)| cfg).collect();
-        let json =
-            serde_json::to_string(&configs).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        Ok(JsValue::from_str(&json))
-    })
-}
-
 // ── TCP socket simulation WASM API ──────────────────────────────────
 
 /// Inject data into a simulated TCP receive buffer.
@@ -572,24 +449,6 @@ pub fn dataflow_tcp_inject(graph_id: u32, socket_id: u8, data: &[u8]) -> Result<
             .map_err(|e| JsValue::from_str(&e))?;
         sim.inject_tcp_data(socket_id, data);
         Ok(())
-    })
-}
-
-/// Drain data from a simulated TCP send buffer (as JSON array).
-#[wasm_bindgen]
-pub fn dataflow_tcp_drain(graph_id: u32, socket_id: u8) -> Result<JsValue, JsValue> {
-    DATAFLOW_GRAPHS.with(|g| {
-        let mut graphs = g.borrow_mut();
-        let graph = graphs
-            .get_mut(&graph_id)
-            .ok_or_else(|| JsValue::from_str("graph not found"))?;
-        let sim = graph
-            .sim_peripherals_mut()
-            .map_err(|e| JsValue::from_str(&e))?;
-        let data = sim.drain_tcp_data(socket_id);
-        let json =
-            serde_json::to_string(&data).map_err(|e| JsValue::from_str(&e.to_string()))?;
-        Ok(JsValue::from_str(&json))
     })
 }
 
@@ -927,10 +786,8 @@ mod tests {
 
     // ── I2C device tests ────────────────────────────────────────────
     //
-    // Note: Functions returning `Result<JsValue, JsValue>` (like
-    // `dataflow_i2c_device_registers`) panic on non-wasm targets because
-    // `JsValue::from_str` is a wasm-only intrinsic. We test the underlying
-    // graph/sim_peripherals APIs directly instead.
+    // We test the underlying graph/sim_peripherals APIs directly because
+    // `JsValue::from_str` is a wasm-only intrinsic.
 
     #[test]
     fn test_i2c_device_lifecycle() {
@@ -996,9 +853,8 @@ mod tests {
 
     // ── Serial configuration tests ──────────────────────────────────
     //
-    // `dataflow_serial_ports` returns `Result<JsValue, JsValue>`, so we
-    // test the underlying sim peripherals API directly for assertions
-    // that require reading the return value.
+    // We test the underlying sim peripherals API directly for assertions
+    // that require reading return values.
 
     #[test]
     fn test_serial_configuration() {
@@ -1062,8 +918,7 @@ mod tests {
 
     // ── TCP inject/drain tests ──────────────────────────────────────
     //
-    // `dataflow_tcp_drain` returns `Result<JsValue, JsValue>`, so we
-    // verify drain results via internal APIs.
+    // We verify drain results via internal APIs.
 
     #[test]
     fn test_tcp_inject_drain() {
@@ -1393,5 +1248,187 @@ mod tests {
         PANEL_RUNTIMES.with(|r| {
             assert!(!r.borrow().contains_key(&99999));
         });
+    }
+
+    // ── Part 2: MCU API helper tests ───────────────────────────────────
+
+    #[test]
+    fn test_mcu_families_list() {
+        let families = mcu_families_list();
+        assert!(!families.is_empty());
+        // All known families should be present
+        assert!(families.contains(&"Rp2040"));
+        assert!(families.contains(&"Host"));
+    }
+
+    #[test]
+    fn test_get_mcu_definition_valid() {
+        let mcu = get_mcu_definition("Rp2040").unwrap();
+        assert!(!mcu.family.is_empty());
+        assert!(!mcu.pins.is_empty());
+    }
+
+    #[test]
+    fn test_get_mcu_definition_invalid() {
+        let result = get_mcu_definition("nonexistent_mcu");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown MCU family"));
+    }
+
+    #[test]
+    fn test_get_mcu_pins_valid() {
+        let pins = get_mcu_pins("Rp2040").unwrap();
+        assert!(!pins.is_empty());
+    }
+
+    #[test]
+    fn test_get_mcu_pins_invalid() {
+        let result = get_mcu_pins("nonexistent_mcu");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown MCU family"));
+    }
+
+    #[test]
+    fn test_get_mcu_peripherals_valid() {
+        let periphs = get_mcu_peripherals("Rp2040").unwrap();
+        assert!(!periphs.is_empty());
+    }
+
+    #[test]
+    fn test_get_mcu_peripherals_invalid() {
+        let result = get_mcu_peripherals("nonexistent_mcu");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("unknown MCU family"));
+    }
+
+    #[test]
+    fn test_function_defs_list() {
+        let defs = function_defs_list();
+        assert!(!defs.is_empty());
+    }
+
+    // ── Part 3: Error-path tests for internal APIs ─────────────────────
+
+    #[test]
+    fn test_connect_invalid_ports() {
+        let gid = dataflow_new(0.01);
+        DATAFLOW_GRAPHS.with(|g| {
+            let mut graphs = g.borrow_mut();
+            let graph = graphs.get_mut(&gid).unwrap();
+            let src = dataflow::blocks::create_block("constant", r#"{"value":1.0}"#).unwrap();
+            let dst = dataflow::blocks::create_block("gain", r#"{"gain":2.0}"#).unwrap();
+            let src_id = graph.add_block(src);
+            let dst_id = graph.add_block(dst);
+
+            // Invalid source port
+            let result = graph.connect(src_id, 99, dst_id, 0);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("source port"));
+
+            // Invalid destination port
+            let result = graph.connect(src_id, 0, dst_id, 99);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("destination port"));
+
+            // Non-existent source block
+            let result = graph.connect(dataflow::BlockId(999), 0, dst_id, 0);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("source block not found"));
+
+            // Non-existent destination block
+            let result = graph.connect(src_id, 0, dataflow::BlockId(999), 0);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("destination block not found"));
+
+            // Duplicate connection
+            graph.connect(src_id, 0, dst_id, 0).unwrap();
+            let result = graph.connect(src_id, 0, dst_id, 0);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("already connected"));
+        });
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_disconnect_nonexistent() {
+        let gid = dataflow_new(0.01);
+        DATAFLOW_GRAPHS.with(|g| {
+            let mut graphs = g.borrow_mut();
+            let graph = graphs.get_mut(&gid).unwrap();
+            // Disconnecting a non-existent channel returns false
+            assert!(!graph.disconnect(dataflow::ChannelId(999)));
+        });
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_run_and_snapshot_invalid_graph() {
+        // Operations on graphs that don't exist
+        DATAFLOW_GRAPHS.with(|g| {
+            let graphs = g.borrow();
+            assert!(graphs.get(&99999).is_none());
+        });
+        DATAFLOW_SCHEDULERS.with(|s| {
+            let schedulers = s.borrow();
+            assert!(schedulers.get(&99999).is_none());
+        });
+    }
+
+    #[test]
+    fn test_set_speed_valid() {
+        let gid = dataflow_new(0.01);
+        DATAFLOW_SCHEDULERS.with(|s| {
+            let mut schedulers = s.borrow_mut();
+            let sched = schedulers.get_mut(&gid).unwrap();
+            sched.speed = 3.0;
+            assert!((sched.speed - 3.0).abs() < f64::EPSILON);
+        });
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_codegen_with_graph() {
+        let gid = dataflow_new(0.01);
+        dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        // Test the codegen internal API
+        DATAFLOW_GRAPHS.with(|g| {
+            let graphs = g.borrow();
+            let graph = graphs.get(&gid).unwrap();
+            let snap = graph.snapshot().to_codegen_snapshot();
+            let result = dataflow::codegen::generate_rust(&snap, 0.01);
+            assert!(result.is_ok());
+        });
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_codegen_multi_invalid_targets() {
+        let gid = dataflow_new(0.01);
+        dataflow_add_block(gid, "constant", r#"{"value":1.0}"#).unwrap();
+        // Invalid targets JSON should fail deserialization
+        let result: Result<Vec<dataflow::codegen::binding::TargetWithBinding>, _> =
+            serde_json::from_str("not valid json");
+        assert!(result.is_err());
+        dataflow_destroy(gid);
+    }
+
+    #[test]
+    fn test_add_block_invalid_type() {
+        let result = dataflow::blocks::create_block("nonexistent_block_type", "{}");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_replace_block_nonexistent() {
+        let gid = dataflow_new(0.01);
+        DATAFLOW_GRAPHS.with(|g| {
+            let mut graphs = g.borrow_mut();
+            let graph = graphs.get_mut(&gid).unwrap();
+            let block = dataflow::blocks::create_block("constant", r#"{"value":1.0}"#).unwrap();
+            let result = graph.replace_block(dataflow::BlockId(999), block);
+            assert!(result.is_err());
+            assert!(result.unwrap_err().contains("block not found"));
+        });
+        dataflow_destroy(gid);
     }
 }

@@ -534,4 +534,62 @@ mod tests {
             serde_json::from_str(&config_to_json("test", &config)).unwrap();
         assert_eq!(json["key"], 1.5);
     }
+
+    #[test]
+    fn bridge_target_annotation_with_text_value() {
+        // Test the Value::Text branch for target annotation parsing
+        let input = "@target(\"stm32f4\")\nblock s: adc_source(channel = 0)\n";
+        let graph = parser::parse(input).unwrap();
+        let snapshot = ast_to_snapshot(&graph).unwrap();
+        assert_eq!(
+            snapshot.blocks[0].target,
+            Some(TargetFamily::Stm32f4)
+        );
+    }
+
+    #[test]
+    fn bridge_target_annotation_unknown() {
+        // Unknown target annotation should result in None
+        let input = "@target(unknown_mcu)\nblock c: constant(1.0)\n";
+        let graph = parser::parse(input).unwrap();
+        let snapshot = ast_to_snapshot(&graph).unwrap();
+        assert!(snapshot.blocks[0].target.is_none());
+    }
+
+    #[test]
+    fn inject_defaults_unknown_block_type() {
+        // Unknown block type should be a no-op
+        let mut map = serde_json::Map::new();
+        inject_defaults("totally_unknown", &mut map);
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn positional_to_json_no_args() {
+        // Test positional with no arguments (uses defaults)
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("constant", &[])).unwrap();
+        assert_eq!(json["value"], 0.0);
+
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("gain", &[])).unwrap();
+        assert_eq!(json["param1"], 1.0);
+
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("clamp", &[])).unwrap();
+        assert_eq!(json["param1"], 0.0);
+        assert_eq!(json["param2"], 1.0);
+
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("plot", &[])).unwrap();
+        assert_eq!(json["max_samples"], 1000);
+
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("adc_source", &[])).unwrap();
+        assert_eq!(json["channel"], 0);
+
+        let json: serde_json::Value =
+            serde_json::from_str(&positional_to_json("pwm_sink", &[])).unwrap();
+        assert_eq!(json["channel"], 0);
+    }
 }

@@ -461,4 +461,49 @@ mod tests {
         assert_eq!(outputs.get("motor/enable"), Some(&1.0));
         assert!(!outputs.contains_key("sensor/temp")); // not an output
     }
+
+    #[test]
+    fn get_widget_returns_none_for_missing() {
+        let panel = PanelModel::new("test");
+        assert!(panel.get_widget(999).is_none());
+    }
+
+    #[test]
+    fn get_widget_mut_returns_none_for_missing() {
+        let mut panel = PanelModel::new("test");
+        assert!(panel.get_widget_mut(999).is_none());
+    }
+
+    #[test]
+    fn get_widget_returns_some_for_existing() {
+        let mut panel = PanelModel::new("test");
+        let id = panel.add_widget(make_widget(WidgetKind::Toggle, "Switch"));
+        assert!(panel.get_widget(id).is_some());
+        assert_eq!(panel.get_widget(id).unwrap().label, "Switch");
+    }
+
+    #[test]
+    fn get_widget_mut_can_modify() {
+        let mut panel = PanelModel::new("test");
+        let id = panel.add_widget(make_widget(WidgetKind::Toggle, "Before"));
+        panel.get_widget_mut(id).unwrap().label = "After".to_string();
+        assert_eq!(panel.get_widget(id).unwrap().label, "After");
+    }
+
+    #[test]
+    fn collect_output_values_skips_unset_topics() {
+        let mut panel = PanelModel::new("test");
+        let mut w = make_widget(WidgetKind::Toggle, "Switch");
+        w.channels.push(ChannelBinding {
+            topic: "unset/topic".to_string(),
+            direction: ChannelDirection::Output,
+            port_kind: PortKind::Float,
+        });
+        panel.add_widget(w);
+
+        let rt = PanelRuntime::new();
+        // Topic value not set — should not appear in outputs
+        let outputs = rt.collect_output_values(&panel);
+        assert!(outputs.is_empty());
+    }
 }

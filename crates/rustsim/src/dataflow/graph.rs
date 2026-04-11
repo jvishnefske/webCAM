@@ -1111,4 +1111,80 @@ mod tests {
         assert_eq!(snap.channels[0].to_port, 1, "SM channel should shift");
         assert_eq!(snap.channels[1].to_port, 0, "gain channel should not shift");
     }
+
+    #[test]
+    fn sim_peripherals_ref_error() {
+        let g = DataflowGraph::new();
+        let result = g.sim_peripherals_ref();
+        match result {
+            Err(msg) => assert!(msg.contains("simulation mode not enabled")),
+            Ok(_) => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn sim_peripherals_mut_error() {
+        let mut g = DataflowGraph::new();
+        let result = g.sim_peripherals_mut();
+        match result {
+            Err(msg) => assert!(msg.contains("simulation mode not enabled")),
+            Ok(_) => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn tick_simulation_mode_with_peripherals() {
+        use crate::dataflow::blocks::embedded::{AdcBlock, AdcConfig, PwmBlock, PwmConfig};
+
+        let mut g = DataflowGraph::new();
+        g.set_simulation_mode(true);
+        let mut sim = crate::dataflow::sim_peripherals::WasmSimPeripherals::new();
+        sim.set_adc_voltage(0, 2.5);
+        g.set_sim_peripherals(sim);
+
+        let adc = g.add_block(Box::new(AdcBlock::from_config(AdcConfig::default())));
+        let pwm = g.add_block(Box::new(PwmBlock::from_config(PwmConfig::default())));
+        g.connect(adc, 0, pwm, 0).unwrap();
+
+        g.tick(0.01);
+        g.tick(0.01);
+
+        let snap = g.snapshot();
+        let adc_snap = snap.blocks.iter().find(|b| b.id == adc.0).unwrap();
+        // ADC should read simulated voltage
+        assert!(adc_snap.output_values[0].is_some());
+    }
+
+    #[test]
+    fn tick_simulation_mode_without_peripherals() {
+        use crate::dataflow::blocks::embedded::{AdcBlock, AdcConfig};
+
+        let mut g = DataflowGraph::new();
+        g.set_simulation_mode(true);
+        // Don't set sim peripherals — test the None path
+
+        let adc = g.add_block(Box::new(AdcBlock::from_config(AdcConfig::default())));
+        g.tick(0.01);
+
+        let snap = g.snapshot();
+        let adc_snap = snap.blocks.iter().find(|b| b.id == adc.0).unwrap();
+        // Without peripherals, sim_tick has no peripherals => empty outputs
+        assert_eq!(adc_snap.output_values.len(), 1);
+    }
+
+    #[test]
+    fn to_codegen_snapshot_roundtrip() {
+        let mut g = DataflowGraph::new();
+        let c = g.add_block(make_constant(5.0));
+        let gain = g.add_block(make_gain(2.0));
+        g.connect(c, 0, gain, 0).unwrap();
+        g.tick(0.01);
+
+        let snap = g.snapshot();
+        let codegen_snap = snap.to_codegen_snapshot();
+
+        assert_eq!(codegen_snap.blocks.len(), 2);
+        assert_eq!(codegen_snap.channels.len(), 1);
+        assert_eq!(codegen_snap.tick_count, 1);
+    }
 }
