@@ -298,3 +298,36 @@ fn empty_channel() {
     mux.read(0x48, &mut buf).unwrap();
     assert_eq!(buf, [0x00, 0x00]);
 }
+
+#[test]
+fn channel_with_devices_multi_device() {
+    // Use channel_with_devices to put two devices on a single channel
+    let dev_a = RegisterDevice::new(Address::new(0x48).unwrap(), [0xAA; 4]);
+    let dev_b = RegisterDevice::new(Address::new(0x49).unwrap(), [0xBB; 4]);
+    let devices = (dev_a, (dev_b, ()));
+
+    let mut mux = I2cSwitchBuilder::new(mux_addr())
+        .channel_with_devices(devices)
+        .build();
+
+    // Enable channel 0
+    mux.write(0x70, &[0x01]).unwrap();
+
+    // Access both devices on the same channel
+    let mut buf = [0u8; 1];
+    mux.read(0x48, &mut buf).unwrap();
+    assert_eq!(buf[0], 0xAA);
+
+    mux.read(0x49, &mut buf).unwrap();
+    assert_eq!(buf[0], 0xBB);
+}
+
+#[test]
+fn channels_accessor() {
+    let mux = I2cSwitchBuilder::new(mux_addr())
+        .channel(Tmp1075::new(Address::new(0x48).unwrap()))
+        .build();
+
+    // Exercise the channels() accessor
+    let _channels = mux.channels();
+}

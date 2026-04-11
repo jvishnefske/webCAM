@@ -499,6 +499,7 @@ impl DfuFlashWriter for StubDfuWriter {
         Ok(())
     }
 
+    #[cfg(not(tarpaulin_include))]
     fn system_reset(&mut self) -> ! {
         // Unreachable: mark_updated() returns Err, so the protocol
         // never transitions to Complete and never calls system_reset.
@@ -1066,5 +1067,75 @@ mod tests {
         let mut buf = [0u8; 64];
         let n = encode_fw_mark_booted_ack(&mut buf).unwrap();
         assert_eq!(decode_tag(&buf[..n]), 23);
+    }
+
+    #[test]
+    fn test_fw_update_state_clone() {
+        let receiving = FwUpdateState::Receiving {
+            total_size: 1024,
+            expected_crc: 0xDEAD,
+            received: 512,
+            crc_state: 0xBEEF,
+        };
+        let cloned = receiving.clone();
+        match cloned {
+            FwUpdateState::Receiving {
+                total_size,
+                expected_crc,
+                received,
+                crc_state,
+            } => {
+                assert_eq!(total_size, 1024);
+                assert_eq!(expected_crc, 0xDEAD);
+                assert_eq!(received, 512);
+                assert_eq!(crc_state, 0xBEEF);
+            }
+            _ => panic!("expected Receiving state after clone"),
+        }
+
+        let idle = FwUpdateState::Idle;
+        let idle_clone = idle.clone();
+        assert!(matches!(idle_clone, FwUpdateState::Idle));
+
+        let complete = FwUpdateState::Complete;
+        let complete_clone = complete.clone();
+        assert!(matches!(complete_clone, FwUpdateState::Complete));
+    }
+
+    #[test]
+    fn test_mock_dfu_read_dfu() {
+        let mut writer = MockDfuWriter::new();
+        // Write some data first
+        writer.write_dfu(0, &[0xAA, 0xBB, 0xCC, 0xDD]).unwrap();
+
+        // Read it back
+        let mut buf = [0u8; 4];
+        writer.read_dfu(0, &mut buf).unwrap();
+        assert_eq!(buf, [0xAA, 0xBB, 0xCC, 0xDD]);
+    }
+
+    #[test]
+    fn test_mock_dfu_read_dfu_out_of_bounds() {
+        let mut writer = MockDfuWriter::new();
+        let mut buf = [0u8; 4];
+        // Reading past the end should fail
+        assert!(writer.read_dfu(MOCK_DFU_SIZE as u32, &mut buf).is_err());
+    }
+
+    #[test]
+    fn test_stub_dfu_writer_fw_begin_fails() {
+        let mut stub = StubDfuWriter::new();
+        let mut req_buf = [0u8; 64];
+        let req_len = encode_fw_begin(&mut req_buf, 1024, 0x12345678).unwrap();
+
+        let mut resp_buf = [0u8; 64];
+        // Should fail because StubDfuWriter::erase_dfu returns Err
+        let result = handle_fw_request(
+            FwUpdateState::Idle,
+            &mut stub,
+            &req_buf[..req_len],
+            &mut resp_buf,
+        );
+        assert!(result.is_err());
     }
 }

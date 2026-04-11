@@ -58,6 +58,9 @@ edition = "2021"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
 
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tarpaulin_include)'] }
+
 [workspace.lints.clippy]
 unwrap_in_result = "deny"
 expect_used = "warn"
