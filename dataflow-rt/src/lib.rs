@@ -4,6 +4,17 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
+/// Error type for peripheral operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PeripheralError {
+    /// Socket or port ID not found / not connected.
+    NotConnected,
+    /// I2C address did not acknowledge.
+    Nack,
+    /// Operation not supported by this peripheral implementation.
+    Unsupported,
+}
+
 /// Hardware peripheral abstraction for generated dataflow code.
 ///
 /// Bridges the logic library and target-specific hardware. Only methods
@@ -40,34 +51,50 @@ pub trait Peripherals {
         0
     }
     /// Connect a virtual TCP socket.
-    fn tcp_connect(&mut self, _id: u8, _addr: &str, _port: u16) -> Result<(), ()> {
-        Err(())
+    fn tcp_connect(&mut self, _id: u8, _addr: &str, _port: u16) -> Result<(), PeripheralError> {
+        Err(PeripheralError::Unsupported)
     }
     /// Send data on a connected TCP socket.
-    fn tcp_send(&mut self, _id: u8, _data: &[u8]) -> Result<usize, ()> {
-        Err(())
+    fn tcp_send(&mut self, _id: u8, _data: &[u8]) -> Result<usize, PeripheralError> {
+        Err(PeripheralError::Unsupported)
     }
     /// Receive data from a connected TCP socket.
-    fn tcp_recv(&mut self, _id: u8, _buf: &mut [u8]) -> Result<usize, ()> {
-        Err(())
+    fn tcp_recv(&mut self, _id: u8, _buf: &mut [u8]) -> Result<usize, PeripheralError> {
+        Err(PeripheralError::Unsupported)
     }
     /// Close a TCP socket.
     fn tcp_close(&mut self, _id: u8) {}
     /// Send a UDP datagram.
-    fn udp_send(&mut self, _id: u8, _addr: &str, _port: u16, _data: &[u8]) -> Result<usize, ()> {
-        Err(())
+    fn udp_send(
+        &mut self,
+        _id: u8,
+        _addr: &str,
+        _port: u16,
+        _data: &[u8],
+    ) -> Result<usize, PeripheralError> {
+        Err(PeripheralError::Unsupported)
     }
     /// Receive a UDP datagram.
-    fn udp_recv(&mut self, _id: u8, _buf: &mut [u8]) -> Result<usize, ()> {
-        Err(())
+    fn udp_recv(&mut self, _id: u8, _buf: &mut [u8]) -> Result<usize, PeripheralError> {
+        Err(PeripheralError::Unsupported)
     }
     /// Write bytes to an I2C device on the given bus.
-    fn i2c_write(&mut self, _bus: u8, _addr: u8, _data: &[u8]) -> Result<(), ()> {
-        Err(())
+    fn i2c_write(
+        &mut self,
+        _bus: u8,
+        _addr: u8,
+        _data: &[u8],
+    ) -> Result<(), PeripheralError> {
+        Err(PeripheralError::Unsupported)
     }
     /// Read bytes from an I2C device on the given bus.
-    fn i2c_read(&mut self, _bus: u8, _addr: u8, _buf: &mut [u8]) -> Result<(), ()> {
-        Err(())
+    fn i2c_read(
+        &mut self,
+        _bus: u8,
+        _addr: u8,
+        _buf: &mut [u8],
+    ) -> Result<(), PeripheralError> {
+        Err(PeripheralError::Unsupported)
     }
     /// Write then read (combined transaction) on an I2C bus.
     fn i2c_write_read(
@@ -76,8 +103,8 @@ pub trait Peripherals {
         _addr: u8,
         _write: &[u8],
         _read: &mut [u8],
-    ) -> Result<(), ()> {
-        Err(())
+    ) -> Result<(), PeripheralError> {
+        Err(PeripheralError::Unsupported)
     }
 }
 
