@@ -2121,7 +2121,7 @@ endsolid test"
     }
 
     #[test]
-    fn test_sketch_add_constraint_unknown_kind() {
+    fn test_sketch_add_constraint_unknown_kind_detailed() {
         sketch_reset();
         let p1: serde_json::Value = serde_json::from_str(&sketch_add_point(0.0, 0.0)).unwrap();
         let id1 = p1["id"].as_u64().unwrap() as u32;
