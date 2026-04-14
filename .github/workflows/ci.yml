@@ -34,6 +34,8 @@ jobs:
       - run: make ts
       - run: |
           echo '{"sha":"'"${GITHUB_SHA::8}"'","date":"'"$(date -u +%FT%TZ)"'","ref":"'"$GITHUB_REF_NAME"'"}' > www/version.json
+      - name: Remove build-only files from www
+        run: rm -rf www/node_modules www/src www/package.json www/package-lock.json www/tsconfig.json www/vitest.config.ts www/esbuild.config.mjs
       - run: cd www && zip -r ../rustcam.zip .
       - uses: actions/upload-artifact@v5
         with:
