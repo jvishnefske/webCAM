@@ -7,6 +7,7 @@ use leptos::prelude::*;
 
 use crate::backoff;
 use crate::components::header::Header;
+use crate::components::keyboard;
 use crate::components::tab_bar::{DataflowTabBar, ModeBar};
 use crate::messages::{BusEntry, Request, Response};
 use crate::types::BlockSet;
@@ -201,6 +202,9 @@ pub fn App() -> impl IntoView {
         request_tx,
     };
     provide_context(ctx);
+
+    // Install global keyboard shortcuts (Delete, Space) scoped to active tab.
+    keyboard::install_keyboard_handler(active_dataflow_tab);
 
     view! {
         <Header />
