@@ -50,14 +50,55 @@ struct DraggingWire {
     mouse_y: f64,
 }
 
+/// State of an in-progress node drag.
+#[derive(Clone, Copy)]
+struct DraggingNode {
+    block_id: BlockId,
+    start_mouse_x: f64,
+    start_mouse_y: f64,
+    start_node_x: f64,
+    start_node_y: f64,
+    moved: bool,
+}
+
+/// State of an in-progress canvas pan.
+#[derive(Clone, Copy)]
+struct Panning {
+    start_mouse_x: f64,
+    start_mouse_y: f64,
+    start_pan_x: f64,
+    start_pan_y: f64,
+}
+
 #[component]
 pub fn DagEditorPanel() -> impl IntoView {
+    // ── Layout / interaction constants ──────────────────────────────────────
+    const NODE_WIDTH: f64 = 190.0;
+    const PORT_RADIUS: f64 = 6.0;
+    const PORT_SPACING: f64 = 20.0;
+    const PORT_Y_START: f64 = 46.0;
+    const ZOOM_FACTOR: f64 = 1.1;
+    const ZOOM_MIN: f64 = 0.2;
+    const ZOOM_MAX: f64 = 5.0;
+    const DRAG_THRESHOLD: f64 = 3.0;
+
     // Revision counter — bumped after every engine mutation to trigger re-reads.
     let (revision, set_revision) = signal(0_u64);
     let bump = move || set_revision.update(|r| *r += 1);
 
     // Block positions: GraphEngine does not track positions.
     let (positions, set_positions) = signal(HashMap::<BlockId, (f64, f64)>::new());
+
+    // Pan / zoom state.
+    let (pan_x, set_pan_x) = signal(0.0_f64);
+    let (pan_y, set_pan_y) = signal(0.0_f64);
+    let (zoom, set_zoom) = signal(1.0_f64);
+
+    // Node drag state.
+    let (dragging_node, set_dragging_node) = signal(None::<DraggingNode>);
+
+    // Panning state.
+    let (panning, set_panning) = signal(None::<Panning>);
 
     // Shared block-set context: push (block_type, config) pairs to deploy panel.
     let set_shared_blocks = use_context::<WriteSignal<BlockSet>>();
@@ -507,9 +548,8 @@ pub fn DagEditorPanel() -> impl IntoView {
                 </div>
                 <svg
                     class="dag-canvas"
-                    viewBox="0 0 700 400"
+                    viewBox="0 0 900 500"
                     on:mousedown=move |ev: web_sys::MouseEvent| {
-                        // Start wire drag if mousedown is on an output port circle.
                         let target = match ev.target() {
                             Some(t) => t,
                             None => return,
@@ -519,7 +559,7 @@ pub fn DagEditorPanel() -> impl IntoView {
                             Err(_) => return,
                         };
 
-                        // Check if clicked on an edge path.
+                        // 1. Edge selection (data-channel-id).
                         if let Some(ch_id_str) = el.get_attribute("data-channel-id") {
                             if let Ok(ch_id) = ch_id_str.parse::<u32>() {
                                 set_selected_channel.set(Some(ch_id));
@@ -529,56 +569,208 @@ pub fn DagEditorPanel() -> impl IntoView {
                             }
                         }
 
+                        // 2. Wire drag from output port (data-side="out").
                         let side = el.get_attribute("data-side").unwrap_or_default();
-                        if side != "out" {
-                            // Clicked on empty canvas — deselect channel.
-                            set_selected_channel.set(None);
+                        if side == "out" {
+                            let block_id: BlockId = match el.get_attribute("data-block-id")
+                                .and_then(|s| s.parse().ok()) {
+                                Some(v) => v,
+                                None => return,
+                            };
+                            let port_idx: usize = match el.get_attribute("data-port-idx")
+                                .and_then(|s| s.parse().ok()) {
+                                Some(v) => v,
+                                None => return,
+                            };
+                            let svg_el = match el.closest("svg") {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            let (mx, my) = client_to_world(
+                                &svg_el,
+                                ev.client_x() as f64,
+                                ev.client_y() as f64,
+                                pan_x.get_untracked(),
+                                pan_y.get_untracked(),
+                                zoom.get_untracked(),
+                            );
+                            set_dragging_wire.set(Some(DraggingWire {
+                                from_block: block_id,
+                                from_port: port_idx,
+                                mouse_x: mx,
+                                mouse_y: my,
+                            }));
+                            ev.prevent_default();
                             return;
                         }
-                        let block_id: BlockId = match el.get_attribute("data-block-id")
-                            .and_then(|s| s.parse().ok()) {
-                            Some(v) => v,
-                            None => return,
-                        };
-                        let port_idx: usize = match el.get_attribute("data-port-idx")
-                            .and_then(|s| s.parse().ok()) {
-                            Some(v) => v,
-                            None => return,
-                        };
-                        let svg_el = match el.closest("svg") {
-                            Ok(Some(s)) => s,
-                            _ => return,
-                        };
-                        let (mx, my) = client_to_svg(&svg_el, ev.client_x() as f64, ev.client_y() as f64);
-                        set_dragging_wire.set(Some(DraggingWire {
-                            from_block: block_id,
-                            from_port: port_idx,
-                            mouse_x: mx,
-                            mouse_y: my,
-                        }));
-                        ev.prevent_default();
+
+                        // Also allow wire drag start from input ports — skip them for node drag.
+                        if side == "in" {
+                            return;
+                        }
+
+                        // 3. Node drag: walk up the DOM looking for data-block-id on a <g>.
+                        {
+                            let mut current: Option<web_sys::Element> = Some(el.clone());
+                            while let Some(node) = current {
+                                if node.has_attribute("data-block-id") {
+                                    if let Some(bid_str) = node.get_attribute("data-block-id") {
+                                        if let Ok(bid) = bid_str.parse::<BlockId>() {
+                                            let svg_el = match node.closest("svg") {
+                                                Ok(Some(s)) => s,
+                                                _ => return,
+                                            };
+                                            let (wx, wy) = client_to_world(
+                                                &svg_el,
+                                                ev.client_x() as f64,
+                                                ev.client_y() as f64,
+                                                pan_x.get_untracked(),
+                                                pan_y.get_untracked(),
+                                                zoom.get_untracked(),
+                                            );
+                                            let pos = positions.get_untracked();
+                                            let (nx, ny) = pos.get(&bid).copied().unwrap_or((0.0, 0.0));
+                                            set_dragging_node.set(Some(DraggingNode {
+                                                block_id: bid,
+                                                start_mouse_x: wx,
+                                                start_mouse_y: wy,
+                                                start_node_x: nx,
+                                                start_node_y: ny,
+                                                moved: false,
+                                            }));
+                                            ev.prevent_default();
+                                            return;
+                                        }
+                                    }
+                                }
+                                current = node.parent_element();
+                            }
+                        }
+
+                        // 4. Pan: shift+click or middle mouse button.
+                        if ev.shift_key() || ev.button() == 1 {
+                            let svg_el = match el.closest("svg") {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            let rect = svg_el.get_bounding_client_rect();
+                            let sx = (ev.client_x() as f64 - rect.left()) * 900.0 / rect.width();
+                            let sy = (ev.client_y() as f64 - rect.top()) * 500.0 / rect.height();
+                            set_panning.set(Some(Panning {
+                                start_mouse_x: sx,
+                                start_mouse_y: sy,
+                                start_pan_x: pan_x.get_untracked(),
+                                start_pan_y: pan_y.get_untracked(),
+                            }));
+                            ev.prevent_default();
+                            return;
+                        }
+
+                        // 5. Clicked on empty canvas — deselect.
+                        set_selected_channel.set(None);
+                        set_selected_id.set(None);
                     }
                     on:mousemove=move |ev: web_sys::MouseEvent| {
-                        if dragging_wire.get_untracked().is_none() {
+                        // Node drag.
+                        if let Some(dn) = dragging_node.get_untracked() {
+                            let svg_el_opt = ev.current_target()
+                                .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
+                            let svg_el = match svg_el_opt {
+                                Some(e) => e,
+                                None => return,
+                            };
+                            let (wx, wy) = client_to_world(
+                                &svg_el,
+                                ev.client_x() as f64,
+                                ev.client_y() as f64,
+                                pan_x.get_untracked(),
+                                pan_y.get_untracked(),
+                                zoom.get_untracked(),
+                            );
+                            let dx = wx - dn.start_mouse_x;
+                            let dy = wy - dn.start_mouse_y;
+                            let dist = (dx * dx + dy * dy).sqrt();
+                            let moved = dn.moved || dist > DRAG_THRESHOLD;
+                            if moved {
+                                let new_x = dn.start_node_x + dx;
+                                let new_y = dn.start_node_y + dy;
+                                set_positions.update(|p| {
+                                    p.insert(dn.block_id, (new_x, new_y));
+                                });
+                            }
+                            set_dragging_node.set(Some(DraggingNode {
+                                moved,
+                                ..dn
+                            }));
+                            ev.prevent_default();
                             return;
                         }
-                        let target = match ev.current_target() {
-                            Some(t) => t,
-                            None => return,
-                        };
-                        let svg_el: web_sys::Element = match target.dyn_into() {
-                            Ok(e) => e,
-                            Err(_) => return,
-                        };
-                        let (mx, my) = client_to_svg(&svg_el, ev.client_x() as f64, ev.client_y() as f64);
-                        set_dragging_wire.update(|dw| {
-                            if let Some(ref mut w) = dw {
-                                w.mouse_x = mx;
-                                w.mouse_y = my;
-                            }
-                        });
+
+                        // Pan drag.
+                        if let Some(pan) = panning.get_untracked() {
+                            let svg_el_opt = ev.current_target()
+                                .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
+                            let svg_el = match svg_el_opt {
+                                Some(e) => e,
+                                None => return,
+                            };
+                            let rect = svg_el.get_bounding_client_rect();
+                            let sx = (ev.client_x() as f64 - rect.left()) * 900.0 / rect.width();
+                            let sy = (ev.client_y() as f64 - rect.top()) * 500.0 / rect.height();
+                            set_pan_x.set(pan.start_pan_x + (sx - pan.start_mouse_x));
+                            set_pan_y.set(pan.start_pan_y + (sy - pan.start_mouse_y));
+                            ev.prevent_default();
+                            return;
+                        }
+
+                        // Wire drag.
+                        if dragging_wire.get_untracked().is_some() {
+                            let target = match ev.current_target() {
+                                Some(t) => t,
+                                None => return,
+                            };
+                            let svg_el: web_sys::Element = match target.dyn_into() {
+                                Ok(e) => e,
+                                Err(_) => return,
+                            };
+                            let (mx, my) = client_to_world(
+                                &svg_el,
+                                ev.client_x() as f64,
+                                ev.client_y() as f64,
+                                pan_x.get_untracked(),
+                                pan_y.get_untracked(),
+                                zoom.get_untracked(),
+                            );
+                            set_dragging_wire.update(|dw| {
+                                if let Some(ref mut w) = dw {
+                                    w.mouse_x = mx;
+                                    w.mouse_y = my;
+                                }
+                            });
+                        }
                     }
                     on:mouseup=move |ev: web_sys::MouseEvent| {
+                        // Finish node drag.
+                        if let Some(dn) = dragging_node.get_untracked() {
+                            set_dragging_node.set(None);
+                            if dn.moved {
+                                // Position already updated in mousemove; just bump revision.
+                                bump();
+                            } else {
+                                // No movement — treat as a click to select.
+                                set_selected_id.set(Some(dn.block_id));
+                                set_selected_channel.set(None);
+                            }
+                            return;
+                        }
+
+                        // Finish panning.
+                        if panning.get_untracked().is_some() {
+                            set_panning.set(None);
+                            return;
+                        }
+
+                        // Finish wire drag.
                         let wire = match dragging_wire.get_untracked() {
                             Some(w) => w,
                             None => return,
@@ -632,15 +824,40 @@ pub fn DagEditorPanel() -> impl IntoView {
                             bump();
                         }
                     }
+                    on:wheel=move |ev: web_sys::WheelEvent| {
+                        ev.prevent_default();
+                        let svg_el_opt = ev.current_target()
+                            .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
+                        let svg_el = match svg_el_opt {
+                            Some(e) => e,
+                            None => return,
+                        };
+                        let rect = svg_el.get_bounding_client_rect();
+                        // Mouse position in SVG viewport coords.
+                        let mx = (ev.client_x() as f64 - rect.left()) * 900.0 / rect.width();
+                        let my = (ev.client_y() as f64 - rect.top()) * 500.0 / rect.height();
+
+                        let old_zoom = zoom.get_untracked();
+                        let direction = if ev.delta_y() < 0.0 { 1.0 } else { -1.0 };
+                        let new_zoom = (old_zoom * ZOOM_FACTOR.powf(direction)).clamp(ZOOM_MIN, ZOOM_MAX);
+
+                        // Zoom toward mouse: adjust pan so the world point under cursor stays fixed.
+                        let old_pan_x = pan_x.get_untracked();
+                        let old_pan_y = pan_y.get_untracked();
+                        set_pan_x.set(mx - (mx - old_pan_x) * new_zoom / old_zoom);
+                        set_pan_y.set(my - (my - old_pan_y) * new_zoom / old_zoom);
+                        set_zoom.set(new_zoom);
+                    }
                 >
+                    <g class="dag-world" transform=move || format!("translate({},{}) scale({})", pan_x.get(), pan_y.get(), zoom.get())>
                     // Dashed drag line
                     {move || {
                         let dw = dragging_wire.get();
                         let pos = positions.get();
                         dw.and_then(|w| {
                             let (sx, sy) = pos.get(&w.from_block)?;
-                            let x1 = sx + 190.0;
-                            let y1 = sy + 46.0 + w.from_port as f64 * 16.0;
+                            let x1 = sx + NODE_WIDTH;
+                            let y1 = sy + PORT_Y_START + w.from_port as f64 * PORT_SPACING;
                             let x2 = w.mouse_x;
                             let y2 = w.mouse_y;
                             let cpx = f64::max((x2 - x1).abs() * 0.4, 30.0);
@@ -673,10 +890,10 @@ pub fn DagEditorPanel() -> impl IntoView {
                         let edge_views = edge_list.iter().filter_map(|edge| {
                             let (sx, sy) = pos.get(&edge.from_block)?;
                             let (dx, dy) = pos.get(&edge.to_block)?;
-                            let x1 = sx + 190.0;
-                            let y1 = sy + 46.0 + edge.from_port as f64 * 16.0;
+                            let x1 = sx + NODE_WIDTH;
+                            let y1 = sy + PORT_Y_START + edge.from_port as f64 * PORT_SPACING;
                             let x2 = *dx;
-                            let y2 = dy + 46.0 + edge.to_port as f64 * 16.0;
+                            let y2 = dy + PORT_Y_START + edge.to_port as f64 * PORT_SPACING;
                             let cpx = f64::max((x2 - x1).abs() * 0.4, 30.0);
                             let d = format!(
                                 "M {},{} C {},{} {},{} {},{}",
@@ -736,32 +953,30 @@ pub fn DagEditorPanel() -> impl IntoView {
                                 .filter(|c| c.direction == ChannelDirection::Input).count();
                             let out_count = channels.iter()
                                 .filter(|c| c.direction == ChannelDirection::Output).count();
-                            let height = 50.0 + (in_count.max(out_count) as f64) * 16.0;
+                            let height = 50.0 + (in_count.max(out_count) as f64) * PORT_SPACING;
+                            let node_w_str = NODE_WIDTH.to_string();
 
                             view! {
                                 <g
                                     class=move || if is_selected() { "dag-node selected" } else { "dag-node" }
                                     transform=format!("translate({},{})", x, y)
-                                    on:click=move |_| {
-                                        set_selected_id.set(Some(id));
-                                        set_selected_channel.set(None);
-                                    }
+                                    attr:data-block-id=id.to_string()
                                 >
                                     <rect
-                                        width="190" height=height rx="6" ry="6"
+                                        width=node_w_str.clone() height=height rx="6" ry="6"
                                         class="dag-node-rect"
                                     />
                                     <text x="95" y="18" class="dag-node-title">{name}</text>
                                     <text x="95" y="32" class="dag-node-type">{bt}</text>
                                     // Input ports
                                     {channels.iter().filter(|c| c.direction == ChannelDirection::Input).enumerate().map(|(i, ch)| {
-                                        let py = 46.0 + i as f64 * 16.0;
+                                        let py = PORT_Y_START + i as f64 * PORT_SPACING;
                                         let label = ch.name.clone();
                                         let bid = id.to_string();
                                         let pidx = i.to_string();
                                         view! {
                                             <circle
-                                                cx="0" cy=py r="4"
+                                                cx="0" cy=py r=PORT_RADIUS
                                                 class="dag-port dag-port-in"
                                                 attr:data-block-id=bid
                                                 attr:data-port-idx=pidx
@@ -772,13 +987,13 @@ pub fn DagEditorPanel() -> impl IntoView {
                                     }).collect_view()}
                                     // Output ports
                                     {channels.iter().filter(|c| c.direction == ChannelDirection::Output).enumerate().map(|(i, ch)| {
-                                        let py = 46.0 + i as f64 * 16.0;
+                                        let py = PORT_Y_START + i as f64 * PORT_SPACING;
                                         let label = ch.name.clone();
                                         let bid = id.to_string();
                                         let pidx = i.to_string();
                                         view! {
                                             <circle
-                                                cx="190" cy=py r="4"
+                                                cx=node_w_str.clone() cy=py r=PORT_RADIUS
                                                 class="dag-port dag-port-out"
                                                 attr:data-block-id=bid
                                                 attr:data-port-idx=pidx
@@ -796,6 +1011,7 @@ pub fn DagEditorPanel() -> impl IntoView {
                             <g class="dag-nodes">{node_views}</g>
                         }
                     }}
+                    </g>
                 </svg>
             </div>
 
@@ -860,31 +1076,25 @@ fn find_config_key_for_channel(config: &serde_json::Value, channel_name: &str) -
     None
 }
 
-/// Convert mouse client coordinates to SVG user-space coordinates.
-fn client_to_svg(svg: &web_sys::Element, client_x: f64, client_y: f64) -> (f64, f64) {
+/// Convert mouse client coordinates to world coordinates (SVG viewport -> inverse of pan/zoom).
+fn client_to_world(
+    svg: &web_sys::Element,
+    client_x: f64,
+    client_y: f64,
+    pan_x: f64,
+    pan_y: f64,
+    zoom: f64,
+) -> (f64, f64) {
     let rect = svg.get_bounding_client_rect();
     let rect_w = rect.width();
     let rect_h = rect.height();
-    let (vb_w, vb_h) = svg
-        .get_attribute("viewBox")
-        .and_then(|vb| {
-            let parts: Vec<f64> = vb
-                .split_whitespace()
-                .filter_map(|s| s.parse().ok())
-                .collect();
-            if parts.len() == 4 {
-                Some((parts[2], parts[3]))
-            } else {
-                None
-            }
-        })
-        .unwrap_or((700.0, 400.0));
-
-    let scale_x = vb_w / rect_w;
-    let scale_y = vb_h / rect_h;
-    let x = (client_x - rect.left()) * scale_x;
-    let y = (client_y - rect.top()) * scale_y;
-    (x, y)
+    // Map to SVG viewport coords (viewBox is 900x500).
+    let vb_w = 900.0;
+    let vb_h = 500.0;
+    let sx = (client_x - rect.left()) * vb_w / rect_w;
+    let sy = (client_y - rect.top()) * vb_h / rect_h;
+    // Invert the world transform: world = (svg - pan) / zoom
+    ((sx - pan_x) / zoom, (sy - pan_y) / zoom)
 }
 
 /// POST CBOR DAG to the Pico2 HTTP API.
