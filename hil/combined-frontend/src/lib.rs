@@ -14,6 +14,7 @@ pub mod components;
 pub mod graph_engine;
 pub mod hex;
 pub mod messages;
+pub mod theme;
 pub mod types;
 #[cfg(target_arch = "wasm32")]
 pub mod ws_client;

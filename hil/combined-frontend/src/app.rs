@@ -1,4 +1,4 @@
-//! Root application component with tab navigation and shared state.
+//! Root application component with mode navigation and shared state.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -7,22 +7,32 @@ use leptos::prelude::*;
 
 use crate::backoff;
 use crate::components::header::Header;
-use crate::components::tab_bar::TabBar;
+use crate::components::tab_bar::{DataflowTabBar, ModeBar};
 use crate::messages::{BusEntry, Request, Response};
 use crate::types::BlockSet;
 use crate::ws_client::{self, ConnState};
 
 // ---------------------------------------------------------------------------
-// Tab enum
+// AppMode & DataflowTab enums
 // ---------------------------------------------------------------------------
 
+/// Top-level application mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tab {
+pub enum AppMode {
+    Cam,
+    Sketch,
+    Dataflow,
+    Panel,
+}
+
+/// Sub-tab within Dataflow mode (the existing HIL tabs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataflowTab {
+    DagEditor,
     Buses,
     Telemetry,
     Console,
     Firmware,
-    DagEditor,
     Deploy,
 }
 
@@ -42,9 +52,11 @@ pub struct AppContext {
     pub console_log: ReadSignal<Vec<String>>,
     pub set_console_log: WriteSignal<Vec<String>>,
     pub fw_response: ReadSignal<Option<Response>>,
-    // Tab
-    pub active_tab: ReadSignal<Tab>,
-    pub set_active_tab: WriteSignal<Tab>,
+    // Mode & tab
+    pub active_mode: ReadSignal<AppMode>,
+    pub set_active_mode: WriteSignal<AppMode>,
+    pub active_dataflow_tab: ReadSignal<DataflowTab>,
+    pub set_active_dataflow_tab: WriteSignal<DataflowTab>,
     // Request queue — components push requests here, app drains and sends
     pub request_tx: WriteSignal<Vec<Request>>,
 }
@@ -77,7 +89,8 @@ pub fn App() -> impl IntoView {
     let (fans, set_fans) = signal(Vec::<i32>::new());
     let (console_log, set_console_log) = signal(Vec::<String>::new());
     let (fw_response, set_fw_response) = signal(None::<Response>);
-    let (active_tab, set_active_tab) = signal(Tab::Buses);
+    let (active_mode, set_active_mode) = signal(AppMode::Dataflow);
+    let (active_dataflow_tab, set_active_dataflow_tab) = signal(DataflowTab::DagEditor);
 
     // -- Request queue (safe: Vec<Request> is Send+Sync) --
     let (request_rx, request_tx) = signal(Vec::<Request>::new());
@@ -166,7 +179,7 @@ pub fn App() -> impl IntoView {
         f();
     }
 
-    // -- Shared block set (editor → deploy panel bridge) --
+    // -- Shared block set (editor -> deploy panel bridge) --
     let (shared_blocks, set_shared_blocks) = signal(BlockSet::new());
     provide_context(shared_blocks);
     provide_context(set_shared_blocks);
@@ -181,35 +194,55 @@ pub fn App() -> impl IntoView {
         console_log,
         set_console_log,
         fw_response,
-        active_tab,
-        set_active_tab,
+        active_mode,
+        set_active_mode,
+        active_dataflow_tab,
+        set_active_dataflow_tab,
         request_tx,
     };
     provide_context(ctx);
 
     view! {
         <Header />
-        <TabBar />
+        <ModeBar />
         <div class="main-content">
             {move || {
-                match active_tab.get() {
-                    Tab::Buses => view! {
-                        <crate::components::hil::bus_overview::BusOverview />
+                match active_mode.get() {
+                    AppMode::Cam => view! {
+                        <div>"CAM mode (coming soon)"</div>
                     }.into_any(),
-                    Tab::Telemetry => view! {
-                        <crate::components::hil::telemetry::TelemetryPanel />
+                    AppMode::Sketch => view! {
+                        <div>"Sketch mode (coming soon)"</div>
                     }.into_any(),
-                    Tab::Console => view! {
-                        <crate::components::hil::i2c_console::I2cConsole />
+                    AppMode::Dataflow => view! {
+                        <DataflowTabBar />
+                        <div class="dataflow-content">
+                            {move || {
+                                match active_dataflow_tab.get() {
+                                    DataflowTab::DagEditor => view! {
+                                        <crate::components::dag::editor::DagEditorPanel />
+                                    }.into_any(),
+                                    DataflowTab::Buses => view! {
+                                        <crate::components::hil::bus_overview::BusOverview />
+                                    }.into_any(),
+                                    DataflowTab::Telemetry => view! {
+                                        <crate::components::hil::telemetry::TelemetryPanel />
+                                    }.into_any(),
+                                    DataflowTab::Console => view! {
+                                        <crate::components::hil::i2c_console::I2cConsole />
+                                    }.into_any(),
+                                    DataflowTab::Firmware => view! {
+                                        <crate::components::hil::firmware::FirmwarePanel />
+                                    }.into_any(),
+                                    DataflowTab::Deploy => view! {
+                                        <crate::components::deploy::panel::DeployPanel />
+                                    }.into_any(),
+                                }
+                            }}
+                        </div>
                     }.into_any(),
-                    Tab::Firmware => view! {
-                        <crate::components::hil::firmware::FirmwarePanel />
-                    }.into_any(),
-                    Tab::DagEditor => view! {
-                        <crate::components::dag::editor::DagEditorPanel />
-                    }.into_any(),
-                    Tab::Deploy => view! {
-                        <crate::components::deploy::panel::DeployPanel />
+                    AppMode::Panel => view! {
+                        <div>"Panel mode (coming soon)"</div>
                     }.into_any(),
                 }
             }}
