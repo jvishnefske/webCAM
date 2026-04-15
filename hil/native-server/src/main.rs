@@ -12,8 +12,8 @@ struct Args {
     #[arg(long, default_value_t = 3000)]
     port: u16,
 
-    /// Path to the www directory to serve.
-    #[arg(long, default_value = "www")]
+    /// Path to the www directory to serve (default: Leptos combined-frontend build output).
+    #[arg(long, default_value = "hil/combined-frontend/dist")]
     www_dir: PathBuf,
 
     /// Don't open browser on startup.

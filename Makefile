@@ -87,7 +87,7 @@ serve-leptos: ## Serve Leptos frontend via Trunk (primary)
 serve-native: combined-frontend ## Build Leptos frontend + run native server with mock HAL
 	cargo build -p native-server
 	@echo "Starting native-server at http://localhost:3000"
-	cargo run -p native-server -- --www-dir hil/combined-frontend/dist --port 3000
+	cargo run -p native-server -- --port 3000
 
 serve-native-legacy: wasm-dataflow ## Build old TS frontend + run native server
 	cargo build -p native-server
