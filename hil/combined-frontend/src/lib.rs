@@ -11,6 +11,7 @@ pub mod app;
 pub mod backoff;
 #[cfg(target_arch = "wasm32")]
 pub mod components;
+pub mod graph_engine;
 pub mod hex;
 pub mod messages;
 pub mod types;

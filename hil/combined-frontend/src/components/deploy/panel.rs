@@ -13,8 +13,8 @@ use configurable_blocks::lower::lower_block_set;
 use module_traits::deployment::*;
 use module_traits::inventory;
 
-use crate::types::BlockSet;
 use super::profile_editor::ProfileEditor;
+use crate::types::BlockSet;
 
 #[component]
 pub fn DeployPanel() -> impl IntoView {
@@ -50,7 +50,8 @@ pub fn DeployPanel() -> impl IntoView {
         let editor_blocks: BlockSet = blocks_for_editor.get();
 
         if editor_blocks.is_empty() {
-            set_gen_status.set("No blocks to deploy. Add blocks in the DAG Editor tab first.".into());
+            set_gen_status
+                .set("No blocks to deploy. Add blocks in the DAG Editor tab first.".into());
             set_gen_files.set(vec![]);
             return;
         }
@@ -96,7 +97,10 @@ pub fn DeployPanel() -> impl IntoView {
             Ok(files) => {
                 set_gen_status.set(format!(
                     "Generated {} files for {} ({}) from {} editor blocks",
-                    files.len(), node, family, editor_blocks.len()
+                    files.len(),
+                    node,
+                    family,
+                    editor_blocks.len()
                 ));
                 set_gen_files.set(files);
             }

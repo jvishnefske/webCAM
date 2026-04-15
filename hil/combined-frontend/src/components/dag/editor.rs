@@ -107,7 +107,10 @@ pub fn DagEditorPanel() -> impl IntoView {
         };
         let blks = blocks.get();
         match blks.iter().find(|b| b.id == sel) {
-            Some(pb) => pb.reconstruct().map(|b| b.config_schema()).unwrap_or_default(),
+            Some(pb) => pb
+                .reconstruct()
+                .map(|b| b.config_schema())
+                .unwrap_or_default(),
             None => Vec::new(),
         }
     });
@@ -277,14 +280,15 @@ pub fn DagEditorPanel() -> impl IntoView {
         }
         let mut combined = dag_core::op::Dag::new();
         for pb in blks.iter() {
-            let block = pb.reconstruct()
+            let block = pb
+                .reconstruct()
                 .ok_or_else(|| format!("Unknown block type: {}", pb.block_type))?;
-            let result = block.lower()
-                .map_err(|e| format!("Lower error: {:?}", e))?;
+            let result = block.lower().map_err(|e| format!("Lower error: {:?}", e))?;
             let offset = combined.len() as u16;
             for op in result.dag.nodes() {
                 let adjusted = offset_op(op, offset);
-                combined.add_op(adjusted)
+                combined
+                    .add_op(adjusted)
                     .map_err(|e| format!("Merge error: {:?}", e))?;
             }
         }
@@ -301,7 +305,10 @@ pub fn DagEditorPanel() -> impl IntoView {
     let on_step = move |_| {
         let dag = match build_dag() {
             Ok(d) => d,
-            Err(e) => { set_deploy_status.set(e); return; }
+            Err(e) => {
+                set_deploy_status.set(e);
+                return;
+            }
         };
         SIM.with(|cell| {
             let mut sim = cell.borrow_mut();
@@ -312,7 +319,11 @@ pub fn DagEditorPanel() -> impl IntoView {
                 s.tick(&dag);
                 set_sim_topics.set(s.topics().clone());
                 set_sim_tick_count.set(s.tick_count());
-                set_deploy_status.set(format!("Tick {} ({} topics)", s.tick_count(), s.topics().len()));
+                set_deploy_status.set(format!(
+                    "Tick {} ({} topics)",
+                    s.tick_count(),
+                    s.topics().len()
+                ));
             }
         });
     };
@@ -340,7 +351,10 @@ pub fn DagEditorPanel() -> impl IntoView {
             // Rebuild DAG and start ticking
             let dag = match build_dag() {
                 Ok(d) => d,
-                Err(e) => { set_deploy_status.set(e); return; }
+                Err(e) => {
+                    set_deploy_status.set(e);
+                    return;
+                }
             };
             SIM.with(|cell| {
                 let mut sim = cell.borrow_mut();
@@ -369,7 +383,8 @@ pub fn DagEditorPanel() -> impl IntoView {
                         set_tick.set(s.tick_count());
                     }
                 });
-            }).forget();
+            })
+            .forget();
         }
     };
 
@@ -766,10 +781,7 @@ pub fn DagEditorPanel() -> impl IntoView {
 /// Blocks store channel topic names as string values in their config JSON.
 /// For example, `{"input_topic": "add/a", "output_topic": "add/out"}`.
 /// Given channel_name="add/a", this returns Some("input_topic").
-fn find_config_key_for_channel(
-    config: &serde_json::Value,
-    channel_name: &str,
-) -> Option<String> {
+fn find_config_key_for_channel(config: &serde_json::Value, channel_name: &str) -> Option<String> {
     let obj = config.as_object()?;
     for (key, val) in obj {
         if let Some(s) = val.as_str() {
@@ -793,7 +805,10 @@ fn client_to_svg(svg: &web_sys::Element, client_x: f64, client_y: f64) -> (f64, 
     let (vb_w, vb_h) = svg
         .get_attribute("viewBox")
         .and_then(|vb| {
-            let parts: Vec<f64> = vb.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+            let parts: Vec<f64> = vb
+                .split_whitespace()
+                .filter_map(|s| s.parse().ok())
+                .collect();
             if parts.len() == 4 {
                 Some((parts[2], parts[3]))
             } else {

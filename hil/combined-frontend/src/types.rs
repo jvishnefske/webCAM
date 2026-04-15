@@ -61,16 +61,16 @@ pub struct KnownChannels {
 pub type BlockSet = Vec<(String, serde_json::Value)>;
 
 /// DAG deployment status.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum DagStatus {
+    #[default]
     Empty,
-    Loaded { nodes: usize },
-    Deployed { nodes: usize, ticks: u64 },
+    Loaded {
+        nodes: usize,
+    },
+    Deployed {
+        nodes: usize,
+        ticks: u64,
+    },
     Error(String),
-}
-
-impl Default for DagStatus {
-    fn default() -> Self {
-        Self::Empty
-    }
 }
