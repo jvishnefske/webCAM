@@ -13,7 +13,7 @@ See [design.md](design.md) for full design including:
 ## Tech Stack
 
 - **Core**: Rust (library + WASM via `wasm-bindgen`)
-- **Frontend**: TypeScript, Tailwind CSS, esbuild
+- **Frontend**: Leptos 0.7 (Rust/WASM via Trunk), legacy TypeScript (deprecated)
 - **Python bindings**: PyO3 + maturin (planned, `py-binding/` crate)
 - **Dataflow engine**: `src/dataflow/` — graph, blocks, channels, codegen
 - **Expression DAG**: `dag-core/` — lightweight no_std DAG with CBOR serialization
@@ -26,10 +26,14 @@ See [design.md](design.md) for full design including:
 ## Build Commands
 
 ```bash
-# Rust/WASM
+# Leptos frontend (primary)
+cd hil/combined-frontend && trunk build --release
+cd hil/combined-frontend && trunk serve --port 3000
+
+# Rust/WASM (legacy TypeScript frontends, deprecated)
 wasm-pack build --target web
 
-# Frontend dev server
+# Frontend dev server (deprecated, use trunk serve instead)
 cd www && npm run dev
 
 # Rust tests (default-members only)
@@ -86,6 +90,8 @@ hil/
 ## Key Directories
 
 ```
+hil/combined-frontend/   # Primary frontend (Leptos 0.7 / Rust WASM via Trunk)
+
 src/
   dataflow/              # Reactive dataflow engine
     block.rs             # Block trait, Value, PortDef, PortKind
@@ -100,7 +106,7 @@ src/
     scheduler.rs         # Tick scheduling
   lib.rs                 # WASM API surface (wasm-bindgen exports)
 
-www/
+www/                     # (deprecated) Legacy TypeScript frontend — use hil/combined-frontend/
   src/
     dataflow/            # Block editor UI
       editor.ts          # Workspace orchestrator

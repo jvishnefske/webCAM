@@ -1,4 +1,4 @@
-.PHONY: build wasm lint test ts ci release serve clean help verify \
+.PHONY: build wasm lint test ts ci release serve serve-leptos clean help verify \
        hil-firmware hil-stm32 hil-pi-zero hil-jlink-flash hil-verify all \
        dag-frontend combined-frontend embed-assets ts-combined version hil-e2e
 
@@ -45,15 +45,15 @@ wasm-cam: ## Build CAM WASM + JS bindings
 wasm-dataflow: ## Build Dataflow WASM + JS bindings
 	wasm-pack build crates/rustsim --target web --out-dir ../../www-dataflow/pkg --release
 
-ts: ts-cam ts-dataflow ts-combined ## Build and test all TypeScript frontends
+ts: ts-cam ts-dataflow ts-combined ## (deprecated) Build and test all TypeScript frontends
 
-ts-cam: ## Build and test CAM TypeScript frontend
+ts-cam: ## (deprecated) Build and test CAM TypeScript frontend
 	cd www-cam && npm ci && npm run typecheck && npm run test && npm run build
 
-ts-dataflow: ## Build and test Dataflow TypeScript frontend
+ts-dataflow: ## (deprecated) Build and test Dataflow TypeScript frontend
 	cd www-dataflow && npm ci && npm run typecheck && npm run test && npm run build
 
-ts-combined: ## Build combined frontend (copies WASM pkgs + builds www/)
+ts-combined: ## (deprecated) Build combined frontend (copies WASM pkgs + builds www/)
 	cp -r www-cam/pkg/* www/pkg/
 	cp -r www-dataflow/pkg/* www/pkg/
 	cd www && npm ci && npm run typecheck && npm run test && npm run build
@@ -67,21 +67,22 @@ verify: ## Build, test, lint, format-check (swiss-cheese gate)
 	cargo clippy --workspace $(WORKSPACE_EXCLUDES) --all-targets -- -D warnings
 	cargo fmt --check
 
-ci: lint test wasm ts ## Run full CI pipeline locally
+ci: lint test wasm ## Run full CI pipeline locally
 
-release: wasm ts ## Package all webapps for deployment
-	cd www-cam && zip -r ../rustcam.zip .
-	cd www-dataflow && zip -r ../rustsim.zip .
-	cd www && zip -r ../rustcam-combined.zip dist/ pkg/ index.html
-	@echo "Release artifacts: rustcam.zip rustsim.zip rustcam-combined.zip"
+release: combined-frontend ## Package Leptos frontend for deployment
+	cd hil/combined-frontend/dist && zip -r ../../../rustcam-combined.zip .
+	@echo "Release artifact: rustcam-combined.zip"
 
-serve-cam: wasm-cam ts-cam ## Build and serve CAM locally
+serve-cam: wasm-cam ts-cam ## (deprecated) Build and serve CAM locally
 	@echo "Serving CAM at http://localhost:8080"
 	@cd www-cam && python3 -m http.server 8080
 
-serve-dataflow: wasm-dataflow ts-dataflow ## Build and serve Dataflow locally
+serve-dataflow: wasm-dataflow ts-dataflow ## (deprecated) Build and serve Dataflow locally
 	@echo "Serving Dataflow at http://localhost:8081"
 	@cd www-dataflow && python3 -m http.server 8081
+
+serve-leptos: ## Serve Leptos frontend via Trunk (primary)
+	cd hil/combined-frontend && trunk serve --port 3000
 
 serve-native: combined-frontend ## Build Leptos frontend + run native server with mock HAL
 	cargo build -p native-server
@@ -93,7 +94,7 @@ serve-native-legacy: wasm-dataflow ## Build old TS frontend + run native server
 	@echo "Starting native-server (legacy TS) at http://localhost:3000"
 	cargo run -p native-server -- --www-dir www-dataflow --port 3000
 
-dev: ## Hot-reload dev server (watches Rust+TS, rebuilds WASM automatically)
+dev: ## Hot-reload dev server (use serve-leptos for Leptos frontend)
 	./scripts/dev.sh
 
 hil-e2e: ## Run E2E tests against live Pico2 (requires flashed device)
