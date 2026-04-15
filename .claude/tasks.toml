@@ -1,88 +1,319 @@
 version = 1
-status = "in_progress"
+status = "complete"
 
 [project]
-name = "mvp-model-based-dev"
-description = "MVP model-based development: simulate in-browser with play/pause/step, monitor live pubsub values, visual wiring with auto-topics"
+name = "leptos-frontend-rewrite"
+description = "Reimplement all TypeScript frontend (www/) in Leptos combined-frontend (hil/combined-frontend/)"
+worktree_base = ".worktrees"
 
 # ============================================================================
-# Phase 1: Simulation engine (foundation for everything else)
+# Phase 0: Foundation — crate wiring, theme, app shell
 # ============================================================================
 
 [[tasks]]
 id = "task-001"
-title = "Add tick counter and pubsub persistence to in-browser DAG evaluation"
+title = "Add graph-model and codegen crate dependencies to combined-frontend"
 acceptance = """
-- dag-core eval gains a SimState struct: tick_count (u64), pubsub_store (HashMap<String, f64>)
-- SimState::tick(dag, values) evaluates once, stores Publish outputs in pubsub_store,
-  feeds them back as Subscribe inputs on next tick
-- SimState::reset() clears tick_count and pubsub_store
-- tick_count increments on each tick
-- 5+ tests: multi-tick pubsub persistence, reset clears state, tick_count increments
+- Cargo.toml gains: graph-model, block-registry (no tsify feature), codegen-emit, target-registry, deployment
+- A new src/graph_engine.rs module wraps graph lifecycle:
+  - GraphEngine::new(dt) creates engine with empty block/channel state
+  - add_block(block_type, config_json) -> BlockId using block-registry create_block
+  - remove_block(id), update_block(id, block_type, config_json)
+  - connect(from_block, from_port, to_block, to_port) -> ChannelId
+  - disconnect(channel_id)
+  - tick(dt) evaluates all blocks in topological order via Module::as_tick()
+  - snapshot() -> graph_model::GraphSnapshot
+  - block_types() -> Vec<BlockTypeInfo> from block-registry
+  - function_defs() -> Vec<FunctionDef> from configurable-blocks registry
+- Existing editor.rs PlacedBlock/SimState code migrated to use GraphEngine
+- 5+ unit tests: add/remove block, connect/disconnect, tick produces output values, snapshot round-trip
+- trunk build --release succeeds
+- cargo clippy --target wasm32-unknown-unknown -p combined-frontend -- -D warnings clean
 """
 deps = []
 status = "complete"
 
 [[tasks]]
 id = "task-002"
-title = "Add transport controls to combined-frontend DAG editor"
+title = "Theme module and 4-mode app shell with responsive layout"
 acceptance = """
-- Play button: starts a setInterval/gloo_timers loop that calls SimState::tick at configurable dt
-- Pause button: stops the loop
-- Step button: single tick
-- Reset button: calls SimState::reset, clears eval_results
-- dt and speed controls (input fields)
-- Tick counter displayed in status bar
-- All controls use the SimState from task-001
-- Builds with trunk build --release
+- New src/theme.rs with const color tokens, font stacks, spacing values matching www/src/theme.ts
+  - Port type colors (Float=cyan, Bytes=amber, Text=green, Series=violet, Any=gray)
+  - Wire colors, surface/bg/border/accent colors (dark theme)
+  - Spacing constants (sidebar width, header height, port radius, node dimensions)
+  - portColor(kind) -> &str function
+- App shell restructured: top-level mode switcher (CAM, Sketch, Dataflow, Panel)
+  - Dataflow mode contains existing HIL sub-tabs (Buses, Telemetry, Console, Firmware, Deploy)
+  - Each mode shows/hides its content area reactively
+  - Active mode persisted in signal, highlighted in nav
+- Responsive layout: sidebar + main content + optional right pane
+- All existing components continue to render correctly within Dataflow mode
+- trunk build --release succeeds
 """
-deps = ["task-001"]
-status = "pending"
+deps = []
+status = "complete"
+
+# ============================================================================
+# Phase 1: Dataflow editor completion
+# ============================================================================
 
 [[tasks]]
 id = "task-003"
-title = "Add live pubsub monitor panel to DAG editor"
+title = "Project persistence with sidebar and auto-save"
 acceptance = """
-- New panel below canvas showing all pubsub topics and current values
-- Updates on every tick (driven by SimState, not polling HTTP)
-- Shows topic name, current value (4 decimal places), direction (pub/sub)
-- Collapsible panel with header showing topic count
-- Topics sorted alphabetically
-- Builds with trunk build --release
+- New src/components/dag/storage.rs:
+  - save_project(name, GraphSnapshot, positions, viewport) to LocalStorage as JSON
+  - load_project(name) -> (GraphSnapshot, positions, viewport)
+  - list_projects() -> Vec<(name, last_modified)>
+  - delete_project(name)
+  - Auto-save on graph mutations with 2-second debounce
+- New src/components/dag/sidebar.rs:
+  - Project list with last-modified timestamps (human-readable "2m ago")
+  - Click to load, delete button per project
+  - "New Project" button that clears graph
+  - Active project name displayed in header
+- Project name editable (inline text input)
+- 3+ tests: save/load round-trip, list ordering, delete removes entry
+- trunk build --release succeeds
 """
-deps = ["task-002"]
-status = "pending"
-
-# ============================================================================
-# Phase 2: Visual wiring (parallel with monitoring)
-# ============================================================================
+deps = ["task-001"]
+status = "complete"
 
 [[tasks]]
 id = "task-004"
-title = "Add SVG edge rendering between connected blocks"
+title = "Transport controls and simulation engine using GraphEngine"
 acceptance = """
-- PlacedBlock gains a connections: Vec<(usize, usize, usize)> field (from_id, from_port, to_id, to_port — stored as from_block, to_block, to_port)
-- SVG <line> or <path> elements drawn between output port circles and input port circles
-- Edges update when blocks are repositioned (reactive via signals)
-- Edge color matches port type
-- Builds with trunk build --release
+- Transport bar component with Play/Pause, Step, Reset buttons
+- Play starts a gloo_timers interval calling GraphEngine::tick(dt) at configurable rate
+- Pause stops the interval
+- Step calls tick once
+- Reset clears graph state and tick counter
+- Speed multiplier input (0.25x, 0.5x, 1x, 2x, 4x)
+- dt input field (default 0.01)
+- Batch run: input steps count + "Run" button, calls tick N times synchronously
+- Tick count and simulation time displayed in status bar
+- Snapshot signal updates on every tick, driving reactive UI updates
+- trunk build --release succeeds
 """
-deps = []
-status = "pending"
+deps = ["task-001"]
+status = "complete"
 
 [[tasks]]
 id = "task-005"
-title = "Add drag-to-connect wiring with auto-topic generation"
+title = "Canvas-based Series plot component"
 acceptance = """
-- Mousedown on output port starts wire drag (dashed SVG line follows cursor)
-- Mouseup on input port completes connection:
-  - Generates auto-topic name (e.g. "wire_3_0" from source block id + port)
-  - Sets output block's publish topic to the auto-topic
-  - Sets input block's subscribe topic to the auto-topic
-  - Adds edge to connections list
-- Mouseup on empty canvas cancels wire
-- Delete key on selected edge removes it and clears auto-topics
-- 3+ tests for auto-topic generation logic
+- New src/components/dag/plot.rs Leptos component
+- Renders on HTML5 <canvas> element via web-sys CanvasRenderingContext2d
+- Accepts Vec<f64> series data from block output values of kind Series
+- Scrolling history buffer (last 200 samples)
+- Auto-scaling Y axis with min/max labels
+- Grid lines and axis labels
+- Multiple series overlay with distinct colors
+- Updates reactively on each simulation tick
+- Displayed in right-pane "Plot" tab within Dataflow mode
+- trunk build --release succeeds
 """
 deps = ["task-004"]
-status = "pending"
+status = "complete"
+
+[[tasks]]
+id = "task-006"
+title = "State machine editor component"
+acceptance = """
+- New src/components/dag/state_machine_editor.rs
+- Opened when a state_machine block is selected
+- State management: add/remove/rename states, set initial state
+- Transition editor: add/remove transitions with from/to state selection
+- Guard conditions: Topic-based (topic + field conditions), Unconditional, GuardPort
+- Field conditions: field name, operator (Eq/Ne/Gt/Lt/Ge/Le), value
+- Actions: topic + message payload per transition
+- Input/output topic bindings list (add/remove)
+- Emits StateMachineConfig JSON that updates the block config via GraphEngine
+- Visual state list with transitions shown per-state
+- trunk build --release succeeds
+"""
+deps = ["task-001"]
+status = "complete"
+
+[[tasks]]
+id = "task-007"
+title = "Multi-board management and codegen export with ZIP download"
+acceptance = """
+- Board manager component:
+  - Add/remove boards (name + MCU family dropdown from target-registry)
+  - Board list with delete buttons
+  - Per-block target assignment dropdown (which board runs this block)
+- Target checkboxes: Host, RP2040, STM32F4, STM32G0B1, ESP32-C3
+- MCU pin table component (reuse existing pin_table concept):
+  - Shows PinDef list for selected MCU family
+  - Pin name, port, number, alternate functions, ADC channel
+- Single-target export: calls codegen-emit to generate Rust crate, displays file listing
+- Multi-target export: generates workspace with per-board crates + pubsub bridges
+- ZIP download: constructs zip archive in-browser (CBOR or raw bytes), triggers download
+- File preview: collapsible <details> per file showing generated code with line counts
+- trunk build --release succeeds
+"""
+deps = ["task-001", "task-004"]
+status = "complete"
+
+# ============================================================================
+# Phase 2: CAM mode
+# ============================================================================
+
+[[tasks]]
+id = "task-008"
+title = "CAM mode — file upload, config, G-code generation"
+acceptance = """
+- Add rustcam as dependency in Cargo.toml (path = "../../crates/rustcam")
+- New src/components/cam/mod.rs with sub-components:
+- File upload: drag-drop zone + file picker for STL and SVG files
+  - Reads file bytes via web-sys FileReader
+  - Detects file type from extension
+- Machine profile selector: CNC Mill / Laser Cutter (from rustcam::available_profiles)
+- Strategy picker: Contour, Pocket, Slice, Zigzag (CNC) / Cut, Engrave (Laser)
+- Tool configuration: type (End Mill/Ball/Face), diameter, corner radius, step-over
+- CNC params: cut depth, step-down, feed rate, plunge rate, spindle speed, safe Z
+- Laser params: power, feed rate, passes, air assist toggle
+- Generate button: calls rustcam process_stl/process_svg with config JSON
+- G-code output display: scrollable text area with line count
+- Copy to clipboard button, Download .gcode button
+- Error display for invalid configs or processing failures
+- trunk build --release succeeds
+"""
+deps = ["task-002"]
+status = "complete"
+
+[[tasks]]
+id = "task-009"
+title = "CAM preview canvas and simulation playback"
+acceptance = """
+- Preview canvas component:
+  - Renders toolpath moves as 2D line segments on HTML5 <canvas>
+  - Rapid moves as dashed gray, cut moves as solid colored lines
+  - Auto-fit to canvas bounds with padding
+  - Pan and zoom support (wheel + drag)
+- Simulation playback component:
+  - Loads SimMove array from rustcam sim_moves_stl/sim_moves_svg
+  - Play/Pause/Reset controls
+  - Animated cursor showing current tool position
+  - Material removal visualization (progressive line drawing)
+  - Speed control slider
+- Preview updates on file load or config change
+- Displayed in right pane tabs within CAM mode
+- trunk build --release succeeds
+"""
+deps = ["task-008"]
+status = "complete"
+
+# ============================================================================
+# Phase 3: Sketch mode
+# ============================================================================
+
+[[tasks]]
+id = "task-010"
+title = "2D sketch editor with constraint solver"
+acceptance = """
+- New src/components/sketch/mod.rs with sub-components:
+- Drawing canvas:
+  - HTML5 <canvas> with coordinate transform (pan, zoom, grid)
+  - Grid snapping (configurable grid size)
+  - Tool selector: Line, Rectangle, Circle, Polyline
+  - Click-to-place drawing interaction per tool
+  - Shape rendering: stroked outlines with vertex handles
+  - Selection: click shape to select, highlight selected
+  - Undo (Ctrl+Z), Clear All
+- Shape list panel: count and list of drawn shapes with types
+- Constraint solver bridge (uses rustcam sketch API):
+  - sketch_reset, sketch_add_point, sketch_add_constraint, sketch_solve
+  - Supported constraints: Coincident, Horizontal, Vertical, Distance, Fixed,
+    Perpendicular, Parallel, Equal-length
+  - Constraint list with remove buttons
+  - DOF status display (Fully/Under/Over-Constrained)
+- "Use Sketch in CAM" button: exports shapes as SVG string, switches to CAM mode
+- trunk build --release succeeds
+"""
+deps = ["task-002", "task-008"]
+status = "complete"
+
+# ============================================================================
+# Phase 4: Panel mode
+# ============================================================================
+
+[[tasks]]
+id = "task-011"
+title = "Panel editor with widgets and HIL live-sync"
+acceptance = """
+- New src/components/panel/mod.rs with sub-components:
+- Widget types: Toggle, Slider (min/max/step), Gauge (min/max), Label, Button, Indicator
+- Panel model: name, Vec<Widget> with id, kind, label, position, size, channel bindings
+- Widget workspace:
+  - Drag to position widgets on a grid
+  - Click to select, show selection highlight
+  - Delete selected widget
+- Widget palette: click to add widget type to workspace
+- Property inspector (selected widget):
+  - Label text input
+  - Kind-specific params (Slider min/max/step, Gauge range, etc.)
+  - Channel bindings: direction (Input/Output) + topic name
+- Widget rendering:
+  - Toggle: clickable switch, sends 0.0/1.0 on topic
+  - Slider: range input, sends current value on topic
+  - Gauge: arc or bar showing current value from topic
+  - Label: displays topic value as text
+  - Button: sends 1.0 pulse on click
+  - Indicator: colored dot (green >0.5, gray <=0.5)
+- Panel save/load (LocalStorage, JSON)
+- HIL live-sync: when connected, widget values read/write via panel_set_topic/panel_get_values
+- trunk build --release succeeds
+"""
+deps = ["task-002"]
+status = "complete"
+
+# ============================================================================
+# Phase 5: Integration and polish
+# ============================================================================
+
+[[tasks]]
+id = "task-012"
+title = "Firmware upload with chunked OTA protocol"
+acceptance = """
+- Replace firmware.rs stub with full implementation:
+  - File picker for .bin firmware files
+  - File size and CRC32 display after selection
+  - Upload button triggers OTA sequence:
+    1. FwBegin(size, crc32) request
+    2. FwChunk(offset, data) requests in 512-byte chunks
+    3. FwFinish request after all chunks sent
+  - Progress bar showing bytes sent / total
+  - Status messages: "Preparing", "Uploading (45%)", "Verifying", "Complete"
+  - Error handling: retry failed chunks, abort on FwError
+  - "Mark Booted" button after successful upload (FwMarkBooted request)
+- All CBOR message types already implemented in messages.rs
+- trunk build --release succeeds
+"""
+deps = ["task-002"]
+status = "complete"
+
+[[tasks]]
+id = "task-013"
+title = "Cross-mode integration, telemetry, and final polish"
+acceptance = """
+- Mode switching preserves state (switching away doesn't destroy component state)
+- Sketch -> CAM handoff: "Use in CAM" exports SVG, switches mode, loads SVG in CAM
+- Telemetry event publishing:
+  - CBOR-over-WebSocket events for block add/remove/update, connect/disconnect, reset
+  - Optional enable/disable toggle
+  - Sequence numbers and timestamps on events
+- Version display: build SHA, date, branch in header (from compile-time env vars or version.json)
+- Keyboard shortcuts:
+  - Delete/Backspace: remove selected block or edge
+  - Ctrl+Z: undo in sketch mode
+  - Space: play/pause in dataflow mode
+- Responsive layout: sidebar collapses on narrow viewports
+- All modes render correctly and are navigable
+- No TypeScript/esbuild build required for full app functionality
+- trunk build --release succeeds
+- cargo clippy --target wasm32-unknown-unknown -p combined-frontend -- -D warnings clean
+"""
+deps = ["task-003", "task-005", "task-007", "task-009", "task-010", "task-011", "task-012"]
+status = "complete"
