@@ -12,6 +12,7 @@ use crate::types::BlockSet;
 use super::config_panel::ConfigPanel;
 use super::monitor::MonitorPanel;
 use super::palette::BlockPalette;
+use super::transport::TransportBar;
 
 /// An edge connecting an output port on one block to an input port on another.
 ///
@@ -301,8 +302,8 @@ pub fn DagEditorPanel() -> impl IntoView {
         static SIM: RefCell<Option<dag_core::eval::SimState>> = const { RefCell::new(None) };
     }
 
-    // Step: single tick
-    let on_step = move |_| {
+    // Helper: ensure SimState is initialised, then run one tick
+    let do_one_tick = move || {
         let dag = match build_dag() {
             Ok(d) => d,
             Err(e) => {
@@ -328,8 +329,13 @@ pub fn DagEditorPanel() -> impl IntoView {
         });
     };
 
+    // Step: single tick
+    let on_step = Callback::new(move |()| {
+        do_one_tick();
+    });
+
     // Reset
-    let on_reset = move |_| {
+    let on_reset = Callback::new(move |()| {
         SIM.with(|cell| {
             if let Some(ref mut s) = *cell.borrow_mut() {
                 s.reset();
@@ -339,10 +345,35 @@ pub fn DagEditorPanel() -> impl IntoView {
         });
         set_sim_running.set(false);
         set_deploy_status.set("Reset".into());
-    };
+    });
+
+    // Batch run: execute N ticks synchronously
+    let on_batch_run = Callback::new(move |steps: u32| {
+        let dag = match build_dag() {
+            Ok(d) => d,
+            Err(e) => {
+                set_deploy_status.set(e);
+                return;
+            }
+        };
+        SIM.with(|cell| {
+            let mut sim = cell.borrow_mut();
+            if sim.is_none() || sim.as_ref().is_some_and(|s| s.tick_count() == 0) {
+                *sim = Some(dag_core::eval::SimState::new(dag.len()));
+            }
+            if let Some(ref mut s) = *sim {
+                for _ in 0..steps {
+                    s.tick(&dag);
+                }
+                set_sim_topics.set(s.topics().clone());
+                set_sim_tick_count.set(s.tick_count());
+                set_deploy_status.set(format!("Batch {} ticks (now at {})", steps, s.tick_count()));
+            }
+        });
+    });
 
     // Play/Pause toggle
-    let on_play_pause = move |_| {
+    let on_play_pause = Callback::new(move |()| {
         let running = sim_running.get();
         if running {
             set_sim_running.set(false);
@@ -386,7 +417,7 @@ pub fn DagEditorPanel() -> impl IntoView {
             })
             .forget();
         }
-    };
+    });
 
     // Deploy: lower all blocks, merge DAGs, CBOR encode, POST to MCU
     let on_deploy = move |_| {
@@ -462,18 +493,19 @@ pub fn DagEditorPanel() -> impl IntoView {
 
             // Center: canvas
             <div class="dag-canvas-container">
-                <div class="dag-toolbar">
-                    <button
-                        class=move || if sim_running.get() { "btn btn-danger" } else { "btn btn-primary" }
-                        on:click=on_play_pause
-                    >
-                        {move || if sim_running.get() { "Pause" } else { "Play" }}
-                    </button>
-                    <button class="btn btn-secondary" on:click=on_step>"Step"</button>
-                    <button class="btn btn-secondary" on:click=on_reset>"Reset"</button>
+                <TransportBar
+                    sim_running=sim_running
+                    set_sim_running=set_sim_running
+                    tick_count=sim_tick_count
+                    status=deploy_status
+                    on_play_pause=on_play_pause
+                    on_step=on_step
+                    on_reset=on_reset
+                    on_batch_run=on_batch_run
+                />
+                <div class="dag-toolbar-extra">
                     <button class="btn btn-secondary" on:click=on_deploy>"Deploy"</button>
                     <button class="btn btn-danger" on:click=on_delete>"Delete"</button>
-                    <span class="dag-status">{move || deploy_status.get()}</span>
                 </div>
                 <svg
                     class="dag-canvas"
