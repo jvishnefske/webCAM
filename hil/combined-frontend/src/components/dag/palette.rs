@@ -12,7 +12,6 @@ pub fn BlockPalette(on_add: Callback<String>) -> impl IntoView {
 
     view! {
         <div class="dag-palette">
-            <div class="palette-title">"Block Palette"</div>
             {groups.into_iter().map(|(category, entries)| {
                 view! {
                     <PaletteCategory category=category entries=entries on_add=on_add />

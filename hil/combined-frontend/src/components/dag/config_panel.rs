@@ -35,7 +35,7 @@ pub fn ConfigPanel(
                 if let Some(bt) = block_type.get() {
                     view! {
                         <div>
-                            <div class="config-panel-title">{bt}</div>
+                            <div class="config-panel-title">{bt.clone()}</div>
                             <div class="config-fields">
                                 <For
                                     each=move || config_fields.get()

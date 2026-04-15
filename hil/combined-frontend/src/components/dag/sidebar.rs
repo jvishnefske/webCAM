@@ -43,27 +43,20 @@ pub fn ProjectSidebar(
     };
 
     view! {
-        <div class="dag-sidebar">
-            <div class="sidebar-title">"Projects"</div>
-
-            // Project name input
-            <div class="sidebar-name-row">
-                <input
-                    type="text"
-                    class="sidebar-name-input"
-                    placeholder="Project name"
-                    prop:value=move || project_name.get()
-                    on:input=move |ev| {
-                        use wasm_bindgen::JsCast;
-                        if let Some(input) = ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok()) {
-                            set_project_name.set(input.value());
-                        }
+        <div class="dag-project-bar">
+            <input
+                type="text"
+                class="dag-project-name-input"
+                placeholder="Project name"
+                prop:value=move || project_name.get()
+                on:input=move |ev| {
+                    use wasm_bindgen::JsCast;
+                    if let Some(input) = ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok()) {
+                        set_project_name.set(input.value());
                     }
-                />
-            </div>
-
-            // Action buttons
-            <div class="sidebar-actions">
+                }
+            />
+            <div class="dag-project-actions">
                 <button class="btn btn-primary btn-sm" on:click=on_save_click>"Save"</button>
                 <button class="btn btn-secondary btn-sm" on:click=on_new_click>"New"</button>
             </div>
