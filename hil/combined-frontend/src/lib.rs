@@ -21,6 +21,7 @@ pub mod components;
 pub mod graph_engine;
 pub mod hex;
 pub mod messages;
+pub mod panel_types;
 pub mod sim_util;
 pub mod theme;
 pub mod types;

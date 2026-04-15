@@ -34,6 +34,7 @@ pub enum DataflowTab {
     Console,
     Firmware,
     Deploy,
+    Panel,
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +244,9 @@ pub fn App() -> impl IntoView {
                     }.into_any(),
                     AppMode::Panel => view! {
                         <div>"Panel mode (coming soon)"</div>
+                    }.into_any(),
+                    Tab::Panel => view! {
+                        <crate::components::panel::PanelEditor />
                     }.into_any(),
                 }
             }}
