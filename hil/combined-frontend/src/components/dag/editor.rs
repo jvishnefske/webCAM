@@ -451,6 +451,75 @@ pub fn DagEditorPanel() -> impl IntoView {
         }
     });
 
+    // Keyboard shortcut: Delete/Backspace -> delete selected block
+    if let Some(kb) = use_context::<crate::components::keyboard::KeyboardActions>() {
+        let delete_sig = kb.delete_pressed;
+        Effect::new(move |prev: Option<u64>| {
+            let current = delete_sig.get();
+            // Only fire when the counter actually increments (skip initial).
+            if prev.is_some() && current > prev.unwrap_or(0) {
+                if let Some(sel) = selected_id.get_untracked() {
+                    set_blocks.update(|v| v.retain(|b| b.id != sel));
+                    sync_shared(&blocks.get());
+                    set_selected_id.set(None);
+                }
+            }
+            current
+        });
+
+        let play_sig = kb.toggle_play_pressed;
+        Effect::new(move |prev: Option<u64>| {
+            let current = play_sig.get();
+            if prev.is_some() && current > prev.unwrap_or(0) {
+                // Trigger play/pause by toggling sim_running.
+                // We replicate the essential logic here because `on_play_pause`
+                // is a closure expecting a mouse event argument.
+                let running = sim_running.get_untracked();
+                if running {
+                    set_sim_running.set(false);
+                    set_deploy_status.set("Paused".into());
+                } else {
+                    let dag = match build_dag() {
+                        Ok(d) => d,
+                        Err(e) => {
+                            set_deploy_status.set(e);
+                            return current;
+                        }
+                    };
+                    SIM.with(|cell| {
+                        let mut sim = cell.borrow_mut();
+                        if sim.is_none() {
+                            *sim = Some(dag_core::eval::SimState::new(dag.len()));
+                        }
+                    });
+                    set_sim_running.set(true);
+                    set_deploy_status.set("Running...".into());
+
+                    let set_topics = set_sim_topics;
+                    let set_tick = set_sim_tick_count;
+                    gloo_timers::callback::Interval::new(100, move || {
+                        if !sim_running.get_untracked() {
+                            return;
+                        }
+                        let dag = match build_dag() {
+                            Ok(d) => d,
+                            Err(_) => return,
+                        };
+                        SIM.with(|cell| {
+                            if let Some(ref mut s) = *cell.borrow_mut() {
+                                s.tick(&dag);
+                                set_topics.set(s.topics().clone());
+                                set_tick.set(s.tick_count());
+                            }
+                        });
+                    })
+                    .forget();
+                }
+            }
+            current
+        });
+    }
+
     // Deploy: lower all blocks, merge DAGs, CBOR encode, POST to MCU
     let on_deploy = move |_| {
         let blks = blocks.get();

@@ -1,8 +1,11 @@
-//! Header component with connection status badge.
+//! Header component with connection status badge and build version.
 
 use crate::app::AppContext;
 use crate::ws_client::ConnState;
 use leptos::prelude::*;
+
+/// Crate version from Cargo.toml, embedded at compile time.
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[component]
 pub fn Header() -> impl IntoView {
@@ -22,7 +25,7 @@ pub fn Header() -> impl IntoView {
 
     view! {
         <div class="header">
-            <h1>"RustCAM"</h1>
+            <h1>"RustCAM" <span class="version-badge">{format!("v{VERSION}")}</span></h1>
             <div class=conn_class>
                 <span class="status-dot"></span>
                 <span>{conn_text}</span>
