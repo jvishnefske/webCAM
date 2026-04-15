@@ -7,6 +7,8 @@
 //! tested on native targets (not behind `#[cfg(target_arch = "wasm32")]`).
 
 mod panel;
+pub mod preview;
+pub mod simulation;
 
 pub use crate::cam_config::{build_cam_config, CamParams};
 pub use panel::CamPanel;
