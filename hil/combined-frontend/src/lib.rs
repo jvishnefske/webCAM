@@ -9,6 +9,7 @@
 #[cfg(target_arch = "wasm32")]
 pub mod app;
 pub mod backoff;
+pub mod cam_config;
 // Storage pure-logic is always compiled (tests run on host).
 // The canonical file lives under components/dag/ and is re-exported here
 // for non-wasm targets so `cargo test` works without the full component tree.

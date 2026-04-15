@@ -34,7 +34,6 @@ pub enum DataflowTab {
     Console,
     Firmware,
     Deploy,
-    Panel,
 }
 
 // ---------------------------------------------------------------------------
@@ -210,7 +209,7 @@ pub fn App() -> impl IntoView {
             {move || {
                 match active_mode.get() {
                     AppMode::Cam => view! {
-                        <div>"CAM mode (coming soon)"</div>
+                        <crate::components::cam::CamPanel />
                     }.into_any(),
                     AppMode::Sketch => view! {
                         <div>"Sketch mode (coming soon)"</div>
@@ -243,9 +242,6 @@ pub fn App() -> impl IntoView {
                         </div>
                     }.into_any(),
                     AppMode::Panel => view! {
-                        <div>"Panel mode (coming soon)"</div>
-                    }.into_any(),
-                    Tab::Panel => view! {
                         <crate::components::panel::PanelEditor />
                     }.into_any(),
                 }
