@@ -9,6 +9,13 @@
 #[cfg(target_arch = "wasm32")]
 pub mod app;
 pub mod backoff;
+// Storage pure-logic is always compiled (tests run on host).
+// The canonical file lives under components/dag/ and is re-exported here
+// for non-wasm targets so `cargo test` works without the full component tree.
+#[cfg(not(target_arch = "wasm32"))]
+#[path = "components/dag/storage.rs"]
+pub mod storage;
+
 #[cfg(target_arch = "wasm32")]
 pub mod components;
 pub mod graph_engine;
