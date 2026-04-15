@@ -48,5 +48,10 @@ console_error_panic_hook = "0.1"
 module-traits = { path = "../../module-traits" }
 dag-core = { path = "../../dag-core", default-features = false, features = ["std"] }
 configurable-blocks = { path = "../../configurable-blocks" }
+graph-model = { path = "../../graph-model" }
+block-registry = { path = "../../block-registry", default-features = false }
+codegen-emit = { path = "../../codegen-emit" }
+target-registry = { path = "../../target-registry" }
+deployment = { path = "../../deployment" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
