@@ -2,6 +2,7 @@ pub mod config_panel;
 pub mod editor;
 pub mod monitor;
 pub mod palette;
+pub mod plot;
 #[cfg(target_arch = "wasm32")]
 pub mod sidebar;
 pub mod state_machine_editor;

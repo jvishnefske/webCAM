@@ -24,6 +24,7 @@ pub mod graph_engine;
 pub mod hex;
 pub mod messages;
 pub mod panel_types;
+pub mod plot_math;
 pub mod sim_util;
 pub mod state_machine_config;
 pub mod theme;
