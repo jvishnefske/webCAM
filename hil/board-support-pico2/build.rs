@@ -1,7 +1,8 @@
 //! Build script for board-support-pico2.
 //!
 //! Copies the `memory.x` linker script to the output directory and
-//! gzip-compresses any frontend assets found in `../hil-frontend/dist/`.
+//! gzip-compresses frontend assets from `../combined-frontend/dist/` (Leptos).
+//! Legacy hil-frontend and DAG frontends are supported as fallbacks.
 
 use std::env;
 use std::fs;
@@ -51,7 +52,7 @@ fn compress_frontend(out: &PathBuf) {
     println!("cargo:rerun-if-changed={}", frontend_dist.display());
 
     if !frontend_dist.is_dir() {
-        println!("cargo:warning=No hil-frontend/dist/ found, building without static assets");
+        // Silently skip — combined-frontend is the primary frontend now.
         return;
     }
 
