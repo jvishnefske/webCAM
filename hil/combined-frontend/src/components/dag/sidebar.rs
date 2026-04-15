@@ -1,120 +1,132 @@
-//! Project sidebar: list, load, delete, and rename saved projects.
+//! Project sidebar: save, load, delete projects from localStorage.
 
-#[cfg(target_arch = "wasm32")]
-mod inner {
-    use leptos::prelude::*;
+use leptos::prelude::*;
 
-    use super::super::storage::{
-        delete_project, format_relative_time, list_projects, SavedProject,
+use super::storage;
+
+/// Sidebar component showing saved projects with load/delete buttons.
+#[component]
+pub fn ProjectSidebar(
+    /// Current project name signal.
+    project_name: ReadSignal<String>,
+    /// Setter for the project name.
+    set_project_name: WriteSignal<String>,
+    /// Callback to save the current project.
+    on_save: Callback<()>,
+    /// Callback to load a project by name.
+    on_load: Callback<String>,
+    /// Callback to create a new (empty) project.
+    on_new: Callback<()>,
+) -> impl IntoView {
+    // List of project names from localStorage.
+    let (project_list, set_project_list) = signal(Vec::<String>::new());
+    let (sidebar_status, set_sidebar_status) = signal(String::new());
+
+    // Refresh the project list.
+    let refresh_list = move || match storage::list_projects() {
+        Ok(names) => set_project_list.set(names),
+        Err(e) => set_sidebar_status.set(format!("Error: {e}")),
     };
 
-    /// Sidebar listing saved projects with load/delete actions.
-    #[component]
-    pub fn ProjectSidebar(
-        on_load: Callback<SavedProject>,
-        on_new: Callback<()>,
-        active_project: ReadSignal<String>,
-        set_active_project: WriteSignal<String>,
-    ) -> impl IntoView {
-        // Refresh trigger — bump to re-read LocalStorage.
-        let (refresh, set_refresh) = signal(0_u32);
+    // Initial load.
+    refresh_list();
 
-        let projects = move || {
-            // Subscribe to the refresh signal so we re-read on change.
-            refresh.get();
-            list_projects()
-        };
+    let on_save_click = move |_| {
+        on_save.run(());
+        refresh_list();
+        set_sidebar_status.set("Saved.".into());
+    };
 
-        let now_ms = move || js_sys::Date::now();
+    let on_new_click = move |_| {
+        on_new.run(());
+        set_sidebar_status.set(String::new());
+    };
 
-        view! {
-            <div class="project-sidebar">
-                <div class="sidebar-header">
-                    <span class="sidebar-title">"Projects"</span>
-                    <button
-                        class="btn btn-sm btn-new-project"
-                        on:click=move |_| {
-                            on_new.run(());
-                            set_refresh.update(|n| *n += 1);
+    view! {
+        <div class="dag-sidebar">
+            <div class="sidebar-title">"Projects"</div>
+
+            // Project name input
+            <div class="sidebar-name-row">
+                <input
+                    type="text"
+                    class="sidebar-name-input"
+                    placeholder="Project name"
+                    prop:value=move || project_name.get()
+                    on:input=move |ev| {
+                        use wasm_bindgen::JsCast;
+                        if let Some(input) = ev.target().and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok()) {
+                            set_project_name.set(input.value());
                         }
-                    >
-                        "New"
-                    </button>
-                </div>
-
-                <div class="sidebar-active-name">
-                    <label>"Name:"</label>
-                    <input
-                        type="text"
-                        class="project-name-input"
-                        prop:value=move || active_project.get()
-                        on:input=move |ev| {
-                            use wasm_bindgen::JsCast;
-                            if let Some(input) = ev
-                                .target()
-                                .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-                            {
-                                set_active_project.set(input.value());
-                            }
-                        }
-                    />
-                </div>
-
-                <ul class="project-list">
-                    {move || {
-                        let current_now = now_ms();
-                        projects()
-                            .into_iter()
-                            .map(|(name, ts)| {
-                                let name_load = name.clone();
-                                let name_delete = name.clone();
-                                let relative = format_relative_time(ts, current_now);
-                                view! {
-                                    <li class="project-item">
-                                        <div class="project-info">
-                                            <span class="project-name">{name.clone()}</span>
-                                            <span class="project-time">{relative}</span>
-                                        </div>
-                                        <div class="project-actions">
-                                            <button
-                                                class="btn btn-xs btn-load"
-                                                on:click={
-                                                    let name_load = name_load.clone();
-                                                    move |_| {
-                                                        if let Some(proj) =
-                                                            super::super::storage::load_project(&name_load)
-                                                        {
-                                                            on_load.run(proj);
-                                                        }
-                                                        set_refresh.update(|n| *n += 1);
-                                                    }
-                                                }
-                                            >
-                                                "Load"
-                                            </button>
-                                            <button
-                                                class="btn btn-xs btn-delete"
-                                                on:click={
-                                                    let name_delete = name_delete.clone();
-                                                    move |_| {
-                                                        delete_project(&name_delete);
-                                                        set_refresh.update(|n| *n += 1);
-                                                    }
-                                                }
-                                            >
-                                                "Delete"
-                                            </button>
-                                        </div>
-                                    </li>
-                                }
-                            })
-                            .collect_view()
-                    }}
-                </ul>
+                    }
+                />
             </div>
-        }
+
+            // Action buttons
+            <div class="sidebar-actions">
+                <button class="btn btn-primary btn-sm" on:click=on_save_click>"Save"</button>
+                <button class="btn btn-secondary btn-sm" on:click=on_new_click>"New"</button>
+            </div>
+
+            // Status message
+            {move || {
+                let status = sidebar_status.get();
+                if status.is_empty() {
+                    None
+                } else {
+                    Some(view! { <div class="sidebar-status">{status}</div> })
+                }
+            }}
+
+            // Saved project list
+            <div class="sidebar-project-list">
+                <For
+                    each=move || project_list.get()
+                    key=|name| name.clone()
+                    let:name
+                >
+                    {
+                        let name_for_load = name.clone();
+                        let name_for_delete = name.clone();
+                        let name_display = name.clone();
+                        let is_current = {
+                            let n = name.clone();
+                            move || project_name.get() == n
+                        };
+                        view! {
+                            <div class=move || if is_current() { "sidebar-project-item active" } else { "sidebar-project-item" }>
+                                <span class="sidebar-project-name">{name_display}</span>
+                                <div class="sidebar-project-btns">
+                                    <button
+                                        class="btn btn-sm btn-secondary"
+                                        on:click={
+                                            let name = name_for_load.clone();
+                                            let refresh = refresh_list;
+                                            move |_| {
+                                                on_load.run(name.clone());
+                                                refresh();
+                                            }
+                                        }
+                                    >"Load"</button>
+                                    <button
+                                        class="btn btn-sm btn-danger"
+                                        on:click={
+                                            let name = name_for_delete.clone();
+                                            let refresh = refresh_list;
+                                            let set_status = set_sidebar_status;
+                                            move |_| {
+                                                let _ = storage::delete_project(&name);
+                                                refresh();
+                                                set_status.set("Deleted.".into());
+                                            }
+                                        }
+                                    >"Del"</button>
+                                </div>
+                            </div>
+                        }
+                    }
+                </For>
+            </div>
+        </div>
     }
 }
-
-#[cfg(target_arch = "wasm32")]
-pub use inner::ProjectSidebar;
