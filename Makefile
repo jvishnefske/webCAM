@@ -83,9 +83,14 @@ serve-dataflow: wasm-dataflow ts-dataflow ## Build and serve Dataflow locally
 	@echo "Serving Dataflow at http://localhost:8081"
 	@cd www-dataflow && python3 -m http.server 8081
 
-serve-native: wasm-dataflow ## Build WASM + run native server with mock HAL
+serve-native: combined-frontend ## Build Leptos frontend + run native server with mock HAL
 	cargo build -p native-server
 	@echo "Starting native-server at http://localhost:3000"
+	cargo run -p native-server -- --www-dir hil/combined-frontend/dist --port 3000
+
+serve-native-legacy: wasm-dataflow ## Build old TS frontend + run native server
+	cargo build -p native-server
+	@echo "Starting native-server (legacy TS) at http://localhost:3000"
 	cargo run -p native-server -- --www-dir www-dataflow --port 3000
 
 dev: ## Hot-reload dev server (watches Rust+TS, rebuilds WASM automatically)
