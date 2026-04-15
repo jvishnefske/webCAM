@@ -1,4 +1,11 @@
 //! DAG editor panel: palette, canvas, config, deploy.
+//!
+//! Uses [`GraphEngine`] for block/channel management and simulation,
+//! [`storage`] for localStorage persistence, and [`ProjectSidebar`]
+//! for project load/save UI.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
 
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -7,559 +14,371 @@ use configurable_blocks::lower;
 use configurable_blocks::registry;
 use configurable_blocks::schema::ChannelDirection;
 
+use crate::graph_engine::{BlockId, ChannelId, GraphEngine};
 use crate::types::BlockSet;
 
 use super::config_panel::ConfigPanel;
 use super::monitor::MonitorPanel;
 use super::palette::BlockPalette;
-use super::state_machine_editor;
-use super::transport::TransportBar;
+use super::sidebar::ProjectSidebar;
+use super::storage::{self, SavedProject};
 
-/// An edge connecting an output port on one block to an input port on another.
-///
-/// Edges are auto-detected by matching `declared_channels()` topic names:
-/// a block with an Output channel named "foo" connects to any block with
-/// an Input channel named "foo".
-#[derive(Clone)]
-struct Edge {
-    /// Block id of the source (output) block.
-    from_block: usize,
-    /// Index of the output port on the source block (0-based among outputs).
-    from_port: usize,
-    /// Block id of the destination (input) block.
-    to_block: usize,
-    /// Index of the input port on the destination block (0-based among inputs).
-    to_port: usize,
+// ── Thread-local engine (not Send, same pattern as SimState) ────────────────
+
+thread_local! {
+    static ENGINE: RefCell<GraphEngine> = RefCell::new(GraphEngine::new());
 }
+
+/// Run a closure with a mutable reference to the engine.
+fn with_engine<R>(f: impl FnOnce(&mut GraphEngine) -> R) -> R {
+    ENGINE.with(|cell| f(&mut cell.borrow_mut()))
+}
+
+/// Run a closure with an immutable reference to the engine.
+fn with_engine_ref<R>(f: impl FnOnce(&GraphEngine) -> R) -> R {
+    ENGINE.with(|cell| f(&cell.borrow()))
+}
+
+// ── Wire drag state ─────────────────────────────────────────────────────────
 
 /// State of an in-progress wire drag from an output port.
 #[derive(Clone, Copy)]
 struct DraggingWire {
-    /// Block id of the source block.
-    from_block: usize,
-    /// Output port index on the source block.
+    from_block: BlockId,
     from_port: usize,
-    /// Current mouse X in SVG coordinates.
     mouse_x: f64,
-    /// Current mouse Y in SVG coordinates.
     mouse_y: f64,
-}
-
-/// Instance of a placed block on the canvas.
-///
-/// Stores block type + config as serializable data (Send+Sync safe).
-/// The trait object is reconstructed from the registry when needed.
-#[derive(Clone)]
-struct PlacedBlock {
-    id: usize,
-    block_type: String,
-    config: serde_json::Value,
-    x: f64,
-    y: f64,
-}
-
-impl PlacedBlock {
-    /// Reconstruct the ConfigurableBlock trait object from the registry.
-    fn reconstruct(&self) -> Option<Box<dyn lower::ConfigurableBlock>> {
-        let mut block = registry::create_block(&self.block_type)?;
-        block.apply_config(&self.config);
-        Some(block)
-    }
 }
 
 #[component]
 pub fn DagEditorPanel() -> impl IntoView {
-    // Block instances on the canvas
-    let (blocks, set_blocks) = signal(Vec::<PlacedBlock>::new());
-    let (next_id, set_next_id) = signal(1_usize);
+    // Revision counter — bumped after every engine mutation to trigger re-reads.
+    let (revision, set_revision) = signal(0_u64);
+    let bump = move || set_revision.update(|r| *r += 1);
+
+    // Block positions: GraphEngine does not track positions.
+    let (positions, set_positions) = signal(HashMap::<BlockId, (f64, f64)>::new());
 
     // Shared block-set context: push (block_type, config) pairs to deploy panel.
     let set_shared_blocks = use_context::<WriteSignal<BlockSet>>();
 
-    // Sync local blocks → shared context whenever blocks change.
-    let sync_shared = move |blks: &[PlacedBlock]| {
+    // Sync engine blocks -> shared context.
+    let sync_shared = move || {
         if let Some(setter) = set_shared_blocks {
-            let block_set: BlockSet = blks
-                .iter()
-                .map(|pb| (pb.block_type.clone(), pb.config.clone()))
-                .collect();
+            let block_set: BlockSet = with_engine_ref(|eng| {
+                eng.blocks()
+                    .iter()
+                    .map(|b| (b.block_type.clone(), b.config.clone()))
+                    .collect()
+            });
             setter.set(block_set);
         }
     };
 
-    // Selected block
-    let (selected_id, set_selected_id) = signal(None::<usize>);
+    // Selected block / channel.
+    let (selected_id, set_selected_id) = signal(None::<BlockId>);
+    let (selected_channel, set_selected_channel) = signal(None::<ChannelId>);
 
-    // Wire drag state: Some while dragging from an output port.
+    // Wire drag state.
     let (dragging_wire, set_dragging_wire) = signal(None::<DraggingWire>);
 
-    // Config signals derived from selection
-    let selected_block_type = Signal::derive(move || {
-        let sel = selected_id.get()?;
-        let blks = blocks.get();
-        let pb = blks.iter().find(|b| b.id == sel)?;
-        let block = pb.reconstruct()?;
-        Some(block.display_name().to_string())
+    // Project name.
+    let (project_name, set_project_name) = signal("untitled".to_string());
+
+    // ── Auto-save debounce ──────────────────────────────────────────────────
+
+    // We use a revision counter to detect changes. When revision changes,
+    // schedule a save after 2 seconds (debounced via gloo Timeout).
+    //
+    // The timeout handle is stored in a thread_local so we can cancel it
+    // on subsequent changes (debounce).
+    thread_local! {
+        static AUTOSAVE_HANDLE: RefCell<Option<gloo_timers::callback::Timeout>> = const { RefCell::new(None) };
+    }
+
+    let schedule_autosave = move || {
+        let name = project_name.get_untracked();
+        if name.is_empty() {
+            return;
+        }
+        // Cancel any pending autosave.
+        AUTOSAVE_HANDLE.with(|cell| {
+            *cell.borrow_mut() = None;
+        });
+        let pos = positions.get_untracked();
+        let timeout = gloo_timers::callback::Timeout::new(2_000, move || {
+            let snapshot = with_engine_ref(|eng| eng.snapshot());
+            let project = SavedProject {
+                name: name.clone(),
+                snapshot,
+                positions: pos,
+                saved_at: String::new(),
+            };
+            let _ = storage::save_project(&project);
+        });
+        AUTOSAVE_HANDLE.with(|cell| {
+            *cell.borrow_mut() = Some(timeout);
+        });
+    };
+
+    // Watch revision and schedule autosave.
+    Effect::new(move |_| {
+        let _rev = revision.get(); // track
+        schedule_autosave();
     });
 
-    // Raw block_type string (e.g. "state_machine") for conditional editors.
-    let selected_raw_block_type = Signal::derive(move || {
+    // ── Config signals derived from selection ───────────────────────────────
+
+    let selected_block_type = Signal::derive(move || {
+        let _rev = revision.get();
         let sel = selected_id.get()?;
-        let blks = blocks.get();
-        let pb = blks.iter().find(|b| b.id == sel)?;
-        Some(pb.block_type.clone())
+        with_engine_ref(|eng| {
+            let blk = eng.block(sel)?;
+            let block = blk.reconstruct()?;
+            Some(block.display_name().to_string())
+        })
     });
 
     let config_fields = Signal::derive(move || {
-        let sel = match selected_id.get() {
-            Some(s) => s,
-            None => return Vec::new(),
-        };
-        let blks = blocks.get();
-        match blks.iter().find(|b| b.id == sel) {
-            Some(pb) => pb
-                .reconstruct()
-                .map(|b| b.config_schema())
-                .unwrap_or_default(),
+        let _rev = revision.get();
+        let sel = selected_id.get();
+        match sel {
+            Some(id) => with_engine_ref(|eng| {
+                eng.block(id)
+                    .and_then(|b| b.reconstruct())
+                    .map(|b| b.config_schema())
+                    .unwrap_or_default()
+            }),
             None => Vec::new(),
         }
     });
 
     let config_values = Signal::derive(move || {
-        let sel = match selected_id.get() {
-            Some(s) => s,
-            None => return serde_json::Value::Object(Default::default()),
-        };
-        let blks = blocks.get();
-        match blks.iter().find(|b| b.id == sel) {
-            Some(pb) => pb.config.clone(),
+        let _rev = revision.get();
+        let sel = selected_id.get();
+        match sel {
+            Some(id) => with_engine_ref(|eng| {
+                eng.block(id)
+                    .map(|b| b.config.clone())
+                    .unwrap_or_else(|| serde_json::Value::Object(Default::default()))
+            }),
             None => serde_json::Value::Object(Default::default()),
         }
     });
 
     let channels_text = Signal::derive(move || {
+        let _rev = revision.get();
         let sel = match selected_id.get() {
             Some(s) => s,
             None => return String::new(),
         };
-        let blks = blocks.get();
-        match blks.iter().find(|b| b.id == sel) {
-            Some(pb) => match pb.reconstruct() {
-                Some(block) => {
-                    let chs = block.declared_channels();
-                    chs.iter()
-                        .map(|ch| {
-                            let dir = match ch.direction {
-                                ChannelDirection::Input => "IN",
-                                ChannelDirection::Output => "OUT",
-                            };
-                            let kind = format!("{:?}", ch.kind).to_lowercase();
-                            format!("{} {} [{}]", dir, ch.name, kind)
-                        })
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                }
-                None => String::new(),
-            },
-            None => String::new(),
-        }
-    });
+        with_engine_ref(|eng| {
+            let blk = match eng.block(sel) {
+                Some(b) => b,
+                None => return String::new(),
+            };
+            let block = match blk.reconstruct() {
+                Some(b) => b,
+                None => return String::new(),
+            };
 
-    let il_text = Signal::derive(move || {
-        let sel = match selected_id.get() {
-            Some(s) => s,
-            None => return String::new(),
-        };
-        let blks = blocks.get();
-        match blks.iter().find(|b| b.id == sel) {
-            Some(pb) => match pb.reconstruct() {
-                Some(block) => lower::lower_to_il_text(block.as_ref())
-                    .unwrap_or_else(|e| format!("Error: {}", e)),
-                None => String::new(),
-            },
-            None => String::new(),
-        }
-    });
+            // Declared channels from the block schema.
+            let chs = block.declared_channels();
+            let mut lines: Vec<String> = chs
+                .iter()
+                .map(|ch| {
+                    let dir = match ch.direction {
+                        ChannelDirection::Input => "IN",
+                        ChannelDirection::Output => "OUT",
+                    };
+                    let kind = format!("{:?}", ch.kind).to_lowercase();
+                    format!("{} {} [{}]", dir, ch.name, kind)
+                })
+                .collect();
 
-    // Auto-detect edges by matching output topic names to input topic names.
-    let edges = Signal::derive(move || {
-        let blks = blocks.get();
-        // Collect (block_id, port_index, topic_name) for every output channel.
-        let mut outputs: Vec<(usize, usize, String)> = Vec::new();
-        // Collect (block_id, port_index, topic_name) for every input channel.
-        let mut inputs: Vec<(usize, usize, String)> = Vec::new();
-
-        for pb in blks.iter() {
-            if let Some(block) = pb.reconstruct() {
-                let channels = block.declared_channels();
-                let mut in_idx = 0_usize;
-                let mut out_idx = 0_usize;
-                for ch in &channels {
-                    match ch.direction {
-                        ChannelDirection::Output => {
-                            outputs.push((pb.id, out_idx, ch.name.clone()));
-                            out_idx += 1;
-                        }
-                        ChannelDirection::Input => {
-                            inputs.push((pb.id, in_idx, ch.name.clone()));
-                            in_idx += 1;
-                        }
+            // Connected channels from the engine.
+            let connected = eng.channels_for_block(sel);
+            if !connected.is_empty() {
+                lines.push(String::new());
+                lines.push("-- Connections --".into());
+                for ch in connected {
+                    if ch.from_block == sel {
+                        lines.push(format!(
+                            "  OUT[{}] -> block {} IN[{}] ({})",
+                            ch.from_port, ch.to_block, ch.to_port, ch.topic
+                        ));
+                    } else {
+                        lines.push(format!(
+                            "  IN[{}] <- block {} OUT[{}] ({})",
+                            ch.to_port, ch.from_block, ch.from_port, ch.topic
+                        ));
                     }
                 }
             }
-        }
 
-        let mut result = Vec::<Edge>::new();
-        for (out_id, out_port, ref topic) in &outputs {
-            for (in_id, in_port, ref in_topic) in &inputs {
-                if topic == in_topic && out_id != in_id {
-                    result.push(Edge {
-                        from_block: *out_id,
-                        from_port: *out_port,
-                        to_block: *in_id,
-                        to_port: *in_port,
-                    });
-                }
-            }
-        }
-        result
+            lines.join("\n")
+        })
     });
 
-    // Deploy status
+    let il_text = Signal::derive(move || {
+        let _rev = revision.get();
+        let sel = match selected_id.get() {
+            Some(s) => s,
+            None => return String::new(),
+        };
+        with_engine_ref(|eng| {
+            eng.block(sel)
+                .and_then(|b| b.reconstruct())
+                .map(|block| {
+                    lower::lower_to_il_text(block.as_ref())
+                        .unwrap_or_else(|e| format!("Error: {}", e))
+                })
+                .unwrap_or_default()
+        })
+    });
+
+    // ── Edges from engine channels ──────────────────────────────────────────
+
+    // Structured edge data derived from the engine's channels.
+    let edges = Signal::derive(move || {
+        let _rev = revision.get();
+        with_engine_ref(|eng| eng.channels().to_vec())
+    });
+
+    // ── Deploy status ───────────────────────────────────────────────────────
     let (deploy_status, set_deploy_status) = signal(String::new());
 
-    // Add block from palette
+    // ── Sim state signals ───────────────────────────────────────────────────
+    let (sim_topics, set_sim_topics) = signal(std::collections::BTreeMap::<String, f64>::new());
+    let (sim_tick_count, set_sim_tick_count) = signal(0_u64);
+    let (sim_running, set_sim_running) = signal(false);
+
+    // ── Callbacks ───────────────────────────────────────────────────────────
+
+    // Add block from palette.
     let on_add_block = Callback::new(move |block_type: String| {
         if let Some(block) = registry::create_block(&block_type) {
-            let id = next_id.get();
-            set_next_id.set(id + 1);
-            let count = blocks.get().len();
-            let x = 30.0 + (count % 3) as f64 * 220.0;
-            let y = 30.0 + (count / 3) as f64 * 120.0;
             let config = block.config_json();
-            set_blocks.update(|v| {
-                v.push(PlacedBlock {
-                    id,
-                    block_type: block_type.clone(),
-                    config,
-                    x,
-                    y,
+            let id = with_engine(|eng| eng.add_block(&block_type, config));
+            if let Some(id) = id {
+                let count = with_engine_ref(|eng| eng.block_count());
+                let x = 30.0 + ((count - 1) % 3) as f64 * 220.0;
+                let y = 30.0 + ((count - 1) / 3) as f64 * 120.0;
+                set_positions.update(|p| {
+                    p.insert(id, (x, y));
                 });
-            });
-            sync_shared(&blocks.get());
-            set_selected_id.set(Some(id));
+                sync_shared();
+                bump();
+                set_selected_id.set(Some(id));
+                set_selected_channel.set(None);
+            }
         }
     });
 
-    // Config change handler (per-field update for generic config panel)
+    // Config change handler.
     let on_config_change = Callback::new(move |(key, value): (String, serde_json::Value)| {
         let sel = match selected_id.get_untracked() {
             Some(s) => s,
             None => return,
         };
-        set_blocks.update(|blks| {
-            if let Some(pb) = blks.iter_mut().find(|b| b.id == sel) {
-                // Update the stored config JSON directly
-                if let serde_json::Value::Object(ref mut map) = pb.config {
-                    map.insert(key, value);
-                }
-            }
-        });
-        sync_shared(&blocks.get());
+        with_engine(|eng| eng.update_config(sel, key, value));
+        sync_shared();
+        bump();
     });
 
-    // Full config replacement handler (for specialized editors like state_machine)
-    let on_full_config_change = Callback::new(move |new_config: serde_json::Value| {
-        let sel = match selected_id.get_untracked() {
-            Some(s) => s,
-            None => return,
-        };
-        set_blocks.update(|blks| {
-            if let Some(pb) = blks.iter_mut().find(|b| b.id == sel) {
-                pb.config = new_config;
-            }
-        });
-        sync_shared(&blocks.get());
-    });
-
-    // ReadSignal of the selected block's config JSON (for state machine editor).
-    let (sm_config_signal, set_sm_config_signal) =
-        signal(serde_json::Value::Object(Default::default()));
-    // Keep sm_config_signal in sync with the selected block's config.
-    Effect::new(move || {
-        let cfg = config_values.get();
-        set_sm_config_signal.set(cfg);
-    });
-
-    // Delete selected block
+    // Delete selected block or channel.
     let on_delete = move |_| {
+        // If a channel is selected, delete the channel.
+        if let Some(ch_id) = selected_channel.get_untracked() {
+            with_engine(|eng| eng.disconnect(ch_id));
+            set_selected_channel.set(None);
+            sync_shared();
+            bump();
+            return;
+        }
+        // Otherwise delete selected block.
         if let Some(sel) = selected_id.get_untracked() {
-            set_blocks.update(|v| v.retain(|b| b.id != sel));
-            sync_shared(&blocks.get());
+            with_engine(|eng| eng.remove_block(sel));
+            set_positions.update(|p| {
+                p.remove(&sel);
+            });
+            sync_shared();
+            bump();
             set_selected_id.set(None);
         }
     };
 
-    // Simulation state (persists pubsub values across ticks)
-    let (sim_topics, set_sim_topics) = signal(std::collections::BTreeMap::<String, f64>::new());
-    let (sim_tick_count, set_sim_tick_count) = signal(0_u64);
-    let (sim_running, set_sim_running) = signal(false);
+    // ── Simulation handlers ─────────────────────────────────────────────────
 
-    // Helper: build merged DAG from current blocks
-    let build_dag = move || -> Result<dag_core::op::Dag, String> {
-        let blks = blocks.get();
-        if blks.is_empty() {
-            return Err("No blocks".into());
-        }
-        let mut combined = dag_core::op::Dag::new();
-        for pb in blks.iter() {
-            let block = pb
-                .reconstruct()
-                .ok_or_else(|| format!("Unknown block type: {}", pb.block_type))?;
-            let result = block.lower().map_err(|e| format!("Lower error: {:?}", e))?;
-            let offset = combined.len() as u16;
-            for op in result.dag.nodes() {
-                let adjusted = offset_op(op, offset);
-                combined
-                    .add_op(adjusted)
-                    .map_err(|e| format!("Merge error: {:?}", e))?;
-            }
-        }
-        Ok(combined)
-    };
-
-    // SimState is stored in a thread_local RefCell (not Send, can't be in signal)
-    use std::cell::RefCell;
-    thread_local! {
-        static SIM: RefCell<Option<dag_core::eval::SimState>> = const { RefCell::new(None) };
-    }
-
-    // Helper: ensure SimState is initialised, then run one tick
-    let do_one_tick = move || {
-        let dag = match build_dag() {
-            Ok(d) => d,
-            Err(e) => {
-                set_deploy_status.set(e);
-                return;
-            }
-        };
-        SIM.with(|cell| {
-            let mut sim = cell.borrow_mut();
-            if sim.is_none() || sim.as_ref().is_some_and(|s| s.tick_count() == 0) {
-                *sim = Some(dag_core::eval::SimState::new(dag.len()));
-            }
-            if let Some(ref mut s) = *sim {
-                s.tick(&dag);
-                set_sim_topics.set(s.topics().clone());
-                set_sim_tick_count.set(s.tick_count());
+    let on_step = move |_| {
+        let result = with_engine(|eng| eng.tick());
+        match result {
+            Ok(()) => {
+                let (topics, count) = with_engine_ref(|eng| (eng.topics(), eng.tick_count()));
+                set_sim_topics.set(topics);
+                set_sim_tick_count.set(count);
                 set_deploy_status.set(format!(
                     "Tick {} ({} topics)",
-                    s.tick_count(),
-                    s.topics().len()
+                    count,
+                    sim_topics.get_untracked().len()
                 ));
             }
-        });
+            Err(e) => set_deploy_status.set(e),
+        }
     };
 
-    // Step: single tick
-    let on_step = Callback::new(move |()| {
-        do_one_tick();
-    });
-
-    // Reset
-    let on_reset = Callback::new(move |()| {
-        SIM.with(|cell| {
-            if let Some(ref mut s) = *cell.borrow_mut() {
-                s.reset();
-                set_sim_topics.set(std::collections::BTreeMap::new());
-                set_sim_tick_count.set(0);
-            }
-        });
+    let on_reset = move |_| {
+        with_engine(|eng| eng.reset_sim());
+        set_sim_topics.set(std::collections::BTreeMap::new());
+        set_sim_tick_count.set(0);
         set_sim_running.set(false);
         set_deploy_status.set("Reset".into());
-    });
+    };
 
-    // Batch run: execute N ticks synchronously
-    let on_batch_run = Callback::new(move |steps: u32| {
-        let dag = match build_dag() {
-            Ok(d) => d,
-            Err(e) => {
-                set_deploy_status.set(e);
-                return;
-            }
-        };
-        SIM.with(|cell| {
-            let mut sim = cell.borrow_mut();
-            if sim.is_none() || sim.as_ref().is_some_and(|s| s.tick_count() == 0) {
-                *sim = Some(dag_core::eval::SimState::new(dag.len()));
-            }
-            if let Some(ref mut s) = *sim {
-                for _ in 0..steps {
-                    s.tick(&dag);
-                }
-                set_sim_topics.set(s.topics().clone());
-                set_sim_tick_count.set(s.tick_count());
-                set_deploy_status.set(format!("Batch {} ticks (now at {})", steps, s.tick_count()));
-            }
-        });
-    });
-
-    // Play/Pause toggle
-    let on_play_pause = Callback::new(move |()| {
+    let on_play_pause = move |_| {
         let running = sim_running.get();
         if running {
             set_sim_running.set(false);
             set_deploy_status.set("Paused".into());
         } else {
-            // Rebuild DAG and start ticking
-            let dag = match build_dag() {
-                Ok(d) => d,
-                Err(e) => {
-                    set_deploy_status.set(e);
-                    return;
-                }
-            };
-            SIM.with(|cell| {
-                let mut sim = cell.borrow_mut();
-                if sim.is_none() {
-                    *sim = Some(dag_core::eval::SimState::new(dag.len()));
-                }
-            });
+            // Verify DAG can build.
+            let result = with_engine_ref(|eng| eng.build_dag());
+            if let Err(e) = result {
+                set_deploy_status.set(e);
+                return;
+            }
             set_sim_running.set(true);
             set_deploy_status.set("Running...".into());
 
-            // Start tick loop via gloo_timers (100ms = 10Hz)
-            let set_topics = set_sim_topics;
-            let set_tick = set_sim_tick_count;
             gloo_timers::callback::Interval::new(100, move || {
                 if !sim_running.get_untracked() {
-                    return; // paused — interval keeps firing but we skip
+                    return;
                 }
-                let dag = match build_dag() {
-                    Ok(d) => d,
-                    Err(_) => return,
-                };
-                SIM.with(|cell| {
-                    if let Some(ref mut s) = *cell.borrow_mut() {
-                        s.tick(&dag);
-                        set_topics.set(s.topics().clone());
-                        set_tick.set(s.tick_count());
-                    }
-                });
+                let result = with_engine(|eng| eng.tick());
+                if result.is_ok() {
+                    let (topics, count) = with_engine_ref(|eng| (eng.topics(), eng.tick_count()));
+                    set_sim_topics.set(topics);
+                    set_sim_tick_count.set(count);
+                }
             })
             .forget();
         }
-    });
+    };
 
-    // Keyboard shortcut: Delete/Backspace -> delete selected block
-    if let Some(kb) = use_context::<crate::components::keyboard::KeyboardActions>() {
-        let delete_sig = kb.delete_pressed;
-        Effect::new(move |prev: Option<u64>| {
-            let current = delete_sig.get();
-            // Only fire when the counter actually increments (skip initial).
-            if prev.is_some() && current > prev.unwrap_or(0) {
-                if let Some(sel) = selected_id.get_untracked() {
-                    set_blocks.update(|v| v.retain(|b| b.id != sel));
-                    sync_shared(&blocks.get());
-                    set_selected_id.set(None);
-                }
-            }
-            current
-        });
-
-        let play_sig = kb.toggle_play_pressed;
-        Effect::new(move |prev: Option<u64>| {
-            let current = play_sig.get();
-            if prev.is_some() && current > prev.unwrap_or(0) {
-                // Trigger play/pause by toggling sim_running.
-                // We replicate the essential logic here because `on_play_pause`
-                // is a closure expecting a mouse event argument.
-                let running = sim_running.get_untracked();
-                if running {
-                    set_sim_running.set(false);
-                    set_deploy_status.set("Paused".into());
-                } else {
-                    let dag = match build_dag() {
-                        Ok(d) => d,
-                        Err(e) => {
-                            set_deploy_status.set(e);
-                            return current;
-                        }
-                    };
-                    SIM.with(|cell| {
-                        let mut sim = cell.borrow_mut();
-                        if sim.is_none() {
-                            *sim = Some(dag_core::eval::SimState::new(dag.len()));
-                        }
-                    });
-                    set_sim_running.set(true);
-                    set_deploy_status.set("Running...".into());
-
-                    let set_topics = set_sim_topics;
-                    let set_tick = set_sim_tick_count;
-                    gloo_timers::callback::Interval::new(100, move || {
-                        if !sim_running.get_untracked() {
-                            return;
-                        }
-                        let dag = match build_dag() {
-                            Ok(d) => d,
-                            Err(_) => return,
-                        };
-                        SIM.with(|cell| {
-                            if let Some(ref mut s) = *cell.borrow_mut() {
-                                s.tick(&dag);
-                                set_topics.set(s.topics().clone());
-                                set_tick.set(s.tick_count());
-                            }
-                        });
-                    })
-                    .forget();
-                }
-            }
-            current
-        });
-    }
-
-    // Deploy: lower all blocks, merge DAGs, CBOR encode, POST to MCU
+    // Deploy: lower all blocks, merge DAGs, CBOR encode, POST to MCU.
     let on_deploy = move |_| {
-        let blks = blocks.get();
-        if blks.is_empty() {
-            set_deploy_status.set("No blocks to deploy".into());
-            return;
-        }
-
-        // Merge all blocks into a single DAG
-        let mut combined = dag_core::op::Dag::new();
-        for pb in blks.iter() {
-            let block = match pb.reconstruct() {
-                Some(b) => b,
-                None => {
-                    set_deploy_status.set(format!("Unknown block type: {}", pb.block_type));
-                    return;
-                }
-            };
-            let result = match block.lower() {
-                Ok(r) => r,
-                Err(e) => {
-                    set_deploy_status.set(format!("Lower error: {:?}", e));
-                    return;
-                }
-            };
-            // Append ops from this block's DAG into combined, adjusting node refs
-            let offset = combined.len() as u16;
-            for op in result.dag.nodes() {
-                let adjusted = offset_op(op, offset);
-                if let Err(e) = combined.add_op(adjusted) {
-                    set_deploy_status.set(format!("Merge error: {:?}", e));
-                    return;
-                }
+        let dag_result = with_engine_ref(|eng| eng.build_dag());
+        let dag = match dag_result {
+            Ok(d) => d,
+            Err(e) => {
+                set_deploy_status.set(e);
+                return;
             }
-        }
+        };
 
-        let cbor_bytes = dag_core::cbor::encode_dag(&combined);
-        let node_count = combined.len();
+        let cbor_bytes = dag_core::cbor::encode_dag(&dag);
+        let node_count = dag.len();
 
-        // POST to MCU via fetch API
         set_deploy_status.set(format!(
             "Deploying {} nodes ({} bytes)...",
             node_count,
@@ -575,7 +394,7 @@ pub fn DagEditorPanel() -> impl IntoView {
         });
     };
 
-    // Tick: POST /api/tick to evaluate the deployed DAG once
+    // Tick MCU remotely.
     let _on_tick = move |_: web_sys::MouseEvent| {
         let status_setter = set_deploy_status;
         wasm_bindgen_futures::spawn_local(async move {
@@ -586,27 +405,105 @@ pub fn DagEditorPanel() -> impl IntoView {
         });
     };
 
+    // ── Sidebar callbacks ───────────────────────────────────────────────────
+
+    let on_save = Callback::new(move |()| {
+        let name = project_name.get_untracked();
+        if name.is_empty() {
+            set_deploy_status.set("Enter a project name first".into());
+            return;
+        }
+        let snapshot = with_engine_ref(|eng| eng.snapshot());
+        let pos = positions.get_untracked();
+        let project = SavedProject {
+            name,
+            snapshot,
+            positions: pos,
+            saved_at: String::new(),
+        };
+        match storage::save_project(&project) {
+            Ok(()) => set_deploy_status.set("Project saved".into()),
+            Err(e) => set_deploy_status.set(format!("Save error: {e}")),
+        }
+    });
+
+    let on_load = Callback::new(move |name: String| match storage::load_project(&name) {
+        Ok(project) => {
+            with_engine(|eng| eng.restore(&project.snapshot));
+            set_positions.set(project.positions);
+            set_project_name.set(project.name);
+            set_selected_id.set(None);
+            set_selected_channel.set(None);
+            sync_shared();
+            bump();
+            set_deploy_status.set("Project loaded".into());
+        }
+        Err(e) => set_deploy_status.set(format!("Load error: {e}")),
+    });
+
+    let on_new = Callback::new(move |()| {
+        with_engine(|eng| {
+            *eng = GraphEngine::new();
+        });
+        set_positions.set(HashMap::new());
+        set_project_name.set("untitled".into());
+        set_selected_id.set(None);
+        set_selected_channel.set(None);
+        sync_shared();
+        bump();
+        set_deploy_status.set("New project".into());
+    });
+
+    // ── Keyboard handler (Delete key for edge deletion) ─────────────────────
+
+    // We handle keydown on the SVG container div.
+    let on_keydown = move |ev: web_sys::KeyboardEvent| {
+        if ev.key() == "Delete" || ev.key() == "Backspace" {
+            if let Some(ch_id) = selected_channel.get_untracked() {
+                with_engine(|eng| eng.disconnect(ch_id));
+                set_selected_channel.set(None);
+                sync_shared();
+                bump();
+                ev.prevent_default();
+            }
+        }
+    };
+
+    // ── View ────────────────────────────────────────────────────────────────
+
     view! {
         <h2 class="section-title">"DAG Editor"</h2>
         <div class="dag-editor-layout">
+            // Far left: project sidebar
+            <ProjectSidebar
+                project_name=project_name
+                set_project_name=set_project_name
+                on_save=on_save
+                on_load=on_load
+                on_new=on_new
+            />
+
             // Left: palette
             <BlockPalette on_add=on_add_block />
 
             // Center: canvas
-            <div class="dag-canvas-container">
-                <TransportBar
-                    sim_running=sim_running
-                    set_sim_running=set_sim_running
-                    tick_count=sim_tick_count
-                    status=deploy_status
-                    on_play_pause=on_play_pause
-                    on_step=on_step
-                    on_reset=on_reset
-                    on_batch_run=on_batch_run
-                />
-                <div class="dag-toolbar-extra">
+            <div
+                class="dag-canvas-container"
+                tabindex="0"
+                on:keydown=on_keydown
+            >
+                <div class="dag-toolbar">
+                    <button
+                        class=move || if sim_running.get() { "btn btn-danger" } else { "btn btn-primary" }
+                        on:click=on_play_pause
+                    >
+                        {move || if sim_running.get() { "Pause" } else { "Play" }}
+                    </button>
+                    <button class="btn btn-secondary" on:click=on_step>"Step"</button>
+                    <button class="btn btn-secondary" on:click=on_reset>"Reset"</button>
                     <button class="btn btn-secondary" on:click=on_deploy>"Deploy"</button>
                     <button class="btn btn-danger" on:click=on_delete>"Delete"</button>
+                    <span class="dag-status">{move || deploy_status.get()}</span>
                 </div>
                 <svg
                     class="dag-canvas"
@@ -621,11 +518,24 @@ pub fn DagEditorPanel() -> impl IntoView {
                             Ok(e) => e,
                             Err(_) => return,
                         };
+
+                        // Check if clicked on an edge path.
+                        if let Some(ch_id_str) = el.get_attribute("data-channel-id") {
+                            if let Ok(ch_id) = ch_id_str.parse::<u32>() {
+                                set_selected_channel.set(Some(ch_id));
+                                set_selected_id.set(None);
+                                ev.prevent_default();
+                                return;
+                            }
+                        }
+
                         let side = el.get_attribute("data-side").unwrap_or_default();
                         if side != "out" {
+                            // Clicked on empty canvas — deselect channel.
+                            set_selected_channel.set(None);
                             return;
                         }
-                        let block_id: usize = match el.get_attribute("data-block-id")
+                        let block_id: BlockId = match el.get_attribute("data-block-id")
                             .and_then(|s| s.parse().ok()) {
                             Some(v) => v,
                             None => return,
@@ -635,7 +545,6 @@ pub fn DagEditorPanel() -> impl IntoView {
                             Some(v) => v,
                             None => return,
                         };
-                        // Compute SVG coordinates from client position
                         let svg_el = match el.closest("svg") {
                             Ok(Some(s)) => s,
                             _ => return,
@@ -650,7 +559,6 @@ pub fn DagEditorPanel() -> impl IntoView {
                         ev.prevent_default();
                     }
                     on:mousemove=move |ev: web_sys::MouseEvent| {
-                        // Update drag line endpoint while dragging.
                         if dragging_wire.get_untracked().is_none() {
                             return;
                         }
@@ -671,15 +579,12 @@ pub fn DagEditorPanel() -> impl IntoView {
                         });
                     }
                     on:mouseup=move |ev: web_sys::MouseEvent| {
-                        // Complete or cancel wire drag.
                         let wire = match dragging_wire.get_untracked() {
                             Some(w) => w,
                             None => return,
                         };
-                        // Clear drag state first.
                         set_dragging_wire.set(None);
 
-                        // Check if mouseup target is an input port.
                         let target = match ev.target() {
                             Some(t) => t,
                             None => return,
@@ -690,9 +595,9 @@ pub fn DagEditorPanel() -> impl IntoView {
                         };
                         let side = el.get_attribute("data-side").unwrap_or_default();
                         if side != "in" {
-                            return; // Dropped on empty canvas — cancel.
+                            return;
                         }
-                        let to_block: usize = match el.get_attribute("data-block-id")
+                        let to_block: BlockId = match el.get_attribute("data-block-id")
                             .and_then(|s| s.parse().ok()) {
                             Some(v) => v,
                             None => return,
@@ -703,66 +608,39 @@ pub fn DagEditorPanel() -> impl IntoView {
                             None => return,
                         };
 
-                        // Do not wire a block to itself.
                         if wire.from_block == to_block {
                             return;
                         }
 
-                        // Generate auto-topic name.
-                        let auto_topic = format!("wire_{}_{}", wire.from_block, wire.from_port);
-
-                        // Update configs for both source and target blocks.
-                        set_blocks.update(|blks| {
-                            // --- Source block: set the output channel's config key ---
-                            if let Some(src_pb) = blks.iter().find(|b| b.id == wire.from_block) {
-                                if let Some(src_block) = src_pb.reconstruct() {
-                                    let channels = src_block.declared_channels();
-                                    let out_channels: Vec<_> = channels.iter()
-                                        .filter(|c| c.direction == ChannelDirection::Output)
-                                        .collect();
-                                    if let Some(out_ch) = out_channels.get(wire.from_port) {
-                                        if let Some(key) = find_config_key_for_channel(&src_pb.config, &out_ch.name) {
-                                            // Now mutably borrow to update
-                                            if let Some(src_mut) = blks.iter_mut().find(|b| b.id == wire.from_block) {
-                                                if let serde_json::Value::Object(ref mut map) = src_mut.config {
-                                                    map.insert(key, serde_json::Value::String(auto_topic.clone()));
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // --- Target block: set the input channel's config key ---
-                            if let Some(dst_pb) = blks.iter().find(|b| b.id == to_block) {
-                                if let Some(dst_block) = dst_pb.reconstruct() {
-                                    let channels = dst_block.declared_channels();
-                                    let in_channels: Vec<_> = channels.iter()
-                                        .filter(|c| c.direction == ChannelDirection::Input)
-                                        .collect();
-                                    if let Some(in_ch) = in_channels.get(to_port) {
-                                        if let Some(key) = find_config_key_for_channel(&dst_pb.config, &in_ch.name) {
-                                            if let Some(dst_mut) = blks.iter_mut().find(|b| b.id == to_block) {
-                                                if let serde_json::Value::Object(ref mut map) = dst_mut.config {
-                                                    map.insert(key, serde_json::Value::String(auto_topic.clone()));
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                        // Store edge in GraphEngine.
+                        let ch_id = with_engine(|eng| {
+                            eng.connect(wire.from_block, wire.from_port, to_block, to_port)
                         });
-                        sync_shared(&blocks.get());
+
+                        if ch_id.is_some() {
+                            // Also update block configs with auto-topic names for codegen compat.
+                            let auto_topic = with_engine_ref(|eng| {
+                                eng.channels()
+                                    .iter()
+                                    .find(|ch| Some(ch.id) == ch_id)
+                                    .map(|ch| ch.topic.clone())
+                                    .unwrap_or_default()
+                            });
+                            update_block_config_topic(wire.from_block, wire.from_port, ChannelDirection::Output, &auto_topic);
+                            update_block_config_topic(to_block, to_port, ChannelDirection::Input, &auto_topic);
+                            sync_shared();
+                            bump();
+                        }
                     }
                 >
-                    // Dashed drag line (rendered when dragging a wire)
+                    // Dashed drag line
                     {move || {
                         let dw = dragging_wire.get();
-                        let blks = blocks.get();
+                        let pos = positions.get();
                         dw.and_then(|w| {
-                            let src = blks.iter().find(|b| b.id == w.from_block)?;
-                            let x1 = src.x + 190.0;
-                            let y1 = src.y + 46.0 + w.from_port as f64 * 16.0;
+                            let (sx, sy) = pos.get(&w.from_block)?;
+                            let x1 = sx + 190.0;
+                            let y1 = sy + 46.0 + w.from_port as f64 * 16.0;
                             let x2 = w.mouse_x;
                             let y2 = w.mouse_y;
                             let cpx = f64::max((x2 - x1).abs() * 0.4, 30.0);
@@ -786,20 +664,19 @@ pub fn DagEditorPanel() -> impl IntoView {
                         })
                     }}
                     {move || {
-                        let blks = blocks.get();
+                        let _rev = revision.get();
+                        let pos = positions.get();
                         let edge_list = edges.get();
+                        let sel_ch = selected_channel.get();
 
-                        // Edge paths (rendered first so they appear behind nodes)
+                        // Edge paths
                         let edge_views = edge_list.iter().filter_map(|edge| {
-                            let src = blks.iter().find(|b| b.id == edge.from_block)?;
-                            let dst = blks.iter().find(|b| b.id == edge.to_block)?;
-                            // Output port: right side of src block
-                            let x1 = src.x + 190.0;
-                            let y1 = src.y + 46.0 + edge.from_port as f64 * 16.0;
-                            // Input port: left side of dst block
-                            let x2 = dst.x;
-                            let y2 = dst.y + 46.0 + edge.to_port as f64 * 16.0;
-                            // Cubic bezier control point x-offset
+                            let (sx, sy) = pos.get(&edge.from_block)?;
+                            let (dx, dy) = pos.get(&edge.to_block)?;
+                            let x1 = sx + 190.0;
+                            let y1 = sy + 46.0 + edge.from_port as f64 * 16.0;
+                            let x2 = *dx;
+                            let y2 = dy + 46.0 + edge.to_port as f64 * 16.0;
                             let cpx = f64::max((x2 - x1).abs() * 0.4, 30.0);
                             let d = format!(
                                 "M {},{} C {},{} {},{} {},{}",
@@ -808,27 +685,53 @@ pub fn DagEditorPanel() -> impl IntoView {
                                 x2 - cpx, y2,
                                 x2, y2
                             );
+                            let is_selected = sel_ch == Some(edge.id);
+                            let stroke = if is_selected { "#ef4444" } else { "#6b7280" };
+                            let width = if is_selected { "3" } else { "2" };
+                            let ch_id_str = edge.id.to_string();
+                            // Invisible fat hit area for easier click target
+                            let hit_d = d.clone();
+                            let hit_ch_id = ch_id_str.clone();
                             Some(view! {
+                                <path
+                                    d=hit_d
+                                    fill="none"
+                                    stroke="transparent"
+                                    stroke-width="12"
+                                    attr:data-channel-id=hit_ch_id
+                                    class="dag-edge-hit"
+                                    style="cursor:pointer"
+                                />
                                 <path
                                     d=d
                                     fill="none"
-                                    stroke="#6b7280"
-                                    stroke-width="2"
+                                    stroke=stroke
+                                    stroke-width=width
+                                    attr:data-channel-id=ch_id_str
                                     class="dag-edge"
+                                    style="pointer-events:none"
                                 />
                             })
                         }).collect_view();
 
                         // Block nodes
-                        let node_views = blks.iter().map(|pb| {
-                            let id = pb.id;
-                            let x = pb.x;
-                            let y = pb.y;
-                            let block = pb.reconstruct();
-                            let name = block.as_ref().map(|b| b.display_name().to_string()).unwrap_or_else(|| pb.block_type.clone());
-                            let bt = pb.block_type.clone();
+                        let blocks_data: Vec<_> = with_engine_ref(|eng| {
+                            eng.blocks().iter().map(|b| {
+                                let block = b.reconstruct();
+                                let name = block.as_ref()
+                                    .map(|bl| bl.display_name().to_string())
+                                    .unwrap_or_else(|| b.block_type.clone());
+                                let bt = b.block_type.clone();
+                                let channels = block.as_ref()
+                                    .map(|bl| bl.declared_channels())
+                                    .unwrap_or_default();
+                                (b.id, name, bt, channels)
+                            }).collect()
+                        });
+
+                        let node_views = blocks_data.into_iter().map(|(id, name, bt, channels)| {
+                            let (x, y) = pos.get(&id).copied().unwrap_or((30.0, 30.0));
                             let is_selected = move || selected_id.get() == Some(id);
-                            let channels = block.as_ref().map(|b| b.declared_channels()).unwrap_or_default();
                             let in_count = channels.iter()
                                 .filter(|c| c.direction == ChannelDirection::Input).count();
                             let out_count = channels.iter()
@@ -839,7 +742,10 @@ pub fn DagEditorPanel() -> impl IntoView {
                                 <g
                                     class=move || if is_selected() { "dag-node selected" } else { "dag-node" }
                                     transform=format!("translate({},{})", x, y)
-                                    on:click=move |_| set_selected_id.set(Some(id))
+                                    on:click=move |_| {
+                                        set_selected_id.set(Some(id));
+                                        set_selected_channel.set(None);
+                                    }
                                 >
                                     <rect
                                         width="190" height=height rx="6" ry="6"
@@ -896,45 +802,52 @@ pub fn DagEditorPanel() -> impl IntoView {
             // Bottom: live monitor
             <MonitorPanel topics=sim_topics tick_count=sim_tick_count />
 
-            // Right: config panel (state machine gets a specialized editor)
-            {move || {
-                let is_sm = selected_raw_block_type.get().as_deref() == Some("state_machine");
-                if is_sm {
-                    view! {
-                        <div class="dag-config-panel">
-                            <div class="config-panel-title">"State Machine"</div>
-                            <state_machine_editor::StateMachineEditor
-                                config=sm_config_signal
-                                on_config_change=on_full_config_change
-                            />
-                            <div class="config-section-title">"Channels"</div>
-                            <pre class="config-channels">{move || channels_text.get()}</pre>
-                            <div class="config-section-title">"Generated IL"</div>
-                            <pre class="config-il">{move || il_text.get()}</pre>
-                        </div>
-                    }.into_any()
-                } else {
-                    view! {
-                        <ConfigPanel
-                            block_type=selected_block_type
-                            config_fields=config_fields
-                            config_values=config_values
-                            on_change=on_config_change
-                            channels_text=channels_text
-                            il_text=il_text
-                        />
-                    }.into_any()
-                }
-            }}
+            // Right: config panel
+            <ConfigPanel
+                block_type=selected_block_type
+                config_fields=config_fields
+                config_values=config_values
+                on_change=on_config_change
+                channels_text=channels_text
+                il_text=il_text
+            />
         </div>
     }
 }
 
-/// Find the config key whose current value matches `channel_name`.
+/// Update a block's config in the engine to set the topic name for a specific port.
 ///
-/// Blocks store channel topic names as string values in their config JSON.
-/// For example, `{"input_topic": "add/a", "output_topic": "add/out"}`.
-/// Given channel_name="add/a", this returns Some("input_topic").
+/// Finds the config key corresponding to the given channel direction and port index,
+/// then sets it to `topic`.
+fn update_block_config_topic(
+    block_id: BlockId,
+    port_idx: usize,
+    direction: ChannelDirection,
+    topic: &str,
+) {
+    with_engine(|eng| {
+        let config = match eng.block(block_id) {
+            Some(b) => b.config.clone(),
+            None => return,
+        };
+        let block = match eng.block(block_id).and_then(|b| b.reconstruct()) {
+            Some(b) => b,
+            None => return,
+        };
+        let channels = block.declared_channels();
+        let filtered: Vec<_> = channels
+            .iter()
+            .filter(|c| c.direction == direction)
+            .collect();
+        if let Some(ch) = filtered.get(port_idx) {
+            if let Some(key) = find_config_key_for_channel(&config, &ch.name) {
+                eng.update_config(block_id, key, serde_json::Value::String(topic.to_string()));
+            }
+        }
+    });
+}
+
+/// Find the config key whose current value matches `channel_name`.
 fn find_config_key_for_channel(config: &serde_json::Value, channel_name: &str) -> Option<String> {
     let obj = config.as_object()?;
     for (key, val) in obj {
@@ -948,14 +861,10 @@ fn find_config_key_for_channel(config: &serde_json::Value, channel_name: &str) -
 }
 
 /// Convert mouse client coordinates to SVG user-space coordinates.
-///
-/// Uses the SVG element's bounding rect and viewBox to map screen pixels
-/// to the SVG coordinate system.
 fn client_to_svg(svg: &web_sys::Element, client_x: f64, client_y: f64) -> (f64, f64) {
     let rect = svg.get_bounding_client_rect();
     let rect_w = rect.width();
     let rect_h = rect.height();
-    // viewBox is "0 0 700 400" — extract via attribute or use defaults
     let (vb_w, vb_h) = svg
         .get_attribute("viewBox")
         .and_then(|vb| {
@@ -976,25 +885,6 @@ fn client_to_svg(svg: &web_sys::Element, client_x: f64, client_y: f64) -> (f64, 
     let x = (client_x - rect.left()) * scale_x;
     let y = (client_y - rect.top()) * scale_y;
     (x, y)
-}
-
-/// Offset all NodeId references in an Op by a given amount.
-fn offset_op(op: &dag_core::op::Op, offset: u16) -> dag_core::op::Op {
-    use dag_core::op::Op;
-    match op {
-        Op::Const(v) => Op::Const(*v),
-        Op::Input(name) => Op::Input(name.clone()),
-        Op::Output(name, src) => Op::Output(name.clone(), src + offset),
-        Op::Add(a, b) => Op::Add(a + offset, b + offset),
-        Op::Mul(a, b) => Op::Mul(a + offset, b + offset),
-        Op::Sub(a, b) => Op::Sub(a + offset, b + offset),
-        Op::Div(a, b) => Op::Div(a + offset, b + offset),
-        Op::Pow(a, b) => Op::Pow(a + offset, b + offset),
-        Op::Neg(a) => Op::Neg(a + offset),
-        Op::Relu(a) => Op::Relu(a + offset),
-        Op::Subscribe(topic) => Op::Subscribe(topic.clone()),
-        Op::Publish(topic, src) => Op::Publish(topic.clone(), src + offset),
-    }
 }
 
 /// POST CBOR DAG to the Pico2 HTTP API.
