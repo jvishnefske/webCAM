@@ -15,6 +15,7 @@ use configurable_blocks::registry;
 use configurable_blocks::schema::ChannelDirection;
 
 use crate::graph_engine::{BlockId, ChannelId, GraphEngine};
+use crate::sim_util::{format_sim_time, SPEED_PRESETS};
 use crate::types::BlockSet;
 
 use super::config_panel::ConfigPanel;
@@ -510,42 +511,201 @@ pub fn DagEditorPanel() -> impl IntoView {
         }
     };
 
+    // ── Local state for transport/batch/export ────────────────────────────
+    let (speed, set_speed) = signal(1.0_f64);
+    let (dt, set_dt) = signal(0.01_f64);
+    let (batch_input, set_batch_input) = signal("100".to_string());
+
+    // Export target checkboxes
+    let (export_host, set_export_host) = signal(true);
+    let (export_rp2040, set_export_rp2040) = signal(false);
+    let (export_stm32f4, set_export_stm32f4) = signal(false);
+    let (export_esp32c3, set_export_esp32c3) = signal(false);
+
+    // Batch run handler
+    let on_batch_run = move |_| {
+        if let Ok(n) = batch_input.get_untracked().parse::<u32>() {
+            if n > 0 {
+                // Build DAG first
+                let result = with_engine_ref(|eng| eng.build_dag());
+                if let Err(e) = result {
+                    set_deploy_status.set(e);
+                    return;
+                }
+                for _ in 0..n {
+                    let _ = with_engine(|eng| eng.tick());
+                }
+                let (topics, count) = with_engine_ref(|eng| (eng.topics(), eng.tick_count()));
+                set_sim_topics.set(topics);
+                set_sim_tick_count.set(count);
+                set_deploy_status.set(format!("Batch: {} ticks done (tick {})", n, count));
+            }
+        }
+    };
+
     // ── View ────────────────────────────────────────────────────────────────
 
     view! {
-        <h2 class="section-title">"DAG Editor"</h2>
         <div class="dag-editor-layout">
-            // Far left: project sidebar
-            <ProjectSidebar
-                project_name=project_name
-                set_project_name=set_project_name
-                on_save=on_save
-                on_load=on_load
-                on_new=on_new
-            />
+            // ── Left sidebar: all controls stacked ──────────────────────────
+            <div class="dag-sidebar">
+                // Project section
+                <section>
+                    <ProjectSidebar
+                        project_name=project_name
+                        set_project_name=set_project_name
+                        on_save=on_save
+                        on_load=on_load
+                        on_new=on_new
+                    />
+                </section>
 
-            // Left: palette
-            <BlockPalette on_add=on_add_block />
+                // Blocks palette section
+                <section>
+                    <h2 class="dag-section-head">"BLOCKS"</h2>
+                    <BlockPalette on_add=on_add_block />
+                </section>
 
-            // Center: canvas
+                // Inspector section
+                <section>
+                    <h2 class="dag-section-head">"INSPECTOR"</h2>
+                    <ConfigPanel
+                        block_type=selected_block_type
+                        config_fields=config_fields
+                        config_values=config_values
+                        on_change=on_config_change
+                        channels_text=channels_text
+                        il_text=il_text
+                    />
+                    <button class="btn btn-danger btn-sm" style="margin-top:6px" on:click=on_delete>
+                        "Delete Block"
+                    </button>
+                </section>
+
+                // Transport section
+                <section>
+                    <h2 class="dag-section-head">"TRANSPORT"</h2>
+                    <div class="dag-transport-row">
+                        <button
+                            class=move || if sim_running.get() { "btn btn-danger btn-sm" } else { "btn btn-primary btn-sm" }
+                            on:click=on_play_pause
+                        >
+                            {move || if sim_running.get() { "Pause" } else { "Play" }}
+                        </button>
+                        <button class="btn btn-secondary btn-sm" on:click=on_step>"Step"</button>
+                        <button class="btn btn-secondary btn-sm" on:click=on_reset>"Reset"</button>
+                    </div>
+                    <div class="dag-transport-row">
+                        <div class="dag-transport-field">
+                            "dt:"
+                            <input
+                                type="number"
+                                prop:value=move || format!("{}", dt.get())
+                                step="0.001"
+                                min="0.0001"
+                                on:change=move |ev| {
+                                    let val = event_target_value(&ev);
+                                    if let Ok(d) = val.parse::<f64>() {
+                                        if d > 0.0 { set_dt.set(d); }
+                                    }
+                                }
+                            />
+                        </div>
+                        <div class="dag-transport-field">
+                            "Speed:"
+                            <select
+                                on:change=move |ev| {
+                                    let val = event_target_value(&ev);
+                                    if let Ok(s) = val.parse::<f64>() { set_speed.set(s); }
+                                }
+                            >
+                                {SPEED_PRESETS.iter().map(|(val, label)| {
+                                    let selected = *val == 1.0;
+                                    let val_str = val.to_string();
+                                    let label_str = label.to_string();
+                                    view! {
+                                        <option value=val_str selected=selected>{label_str}</option>
+                                    }
+                                }).collect_view()}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="dag-transport-info">
+                        {move || format!(
+                            "Tick {} | t = {} | {}x",
+                            sim_tick_count.get(),
+                            format_sim_time(sim_tick_count.get(), dt.get()),
+                            speed.get(),
+                        )}
+                    </div>
+                    <span class="dag-status">{move || deploy_status.get()}</span>
+                </section>
+
+                // Batch section
+                <section>
+                    <h2 class="dag-section-head">"BATCH"</h2>
+                    <div class="dag-batch-row">
+                        <span style="font-size:0.75rem;color:var(--text-dim)">"Steps:"</span>
+                        <input
+                            type="number"
+                            prop:value=move || batch_input.get()
+                            min="1"
+                            on:input=move |ev| { set_batch_input.set(event_target_value(&ev)); }
+                        />
+                        <button class="btn btn-primary btn-sm" on:click=on_batch_run>"Run"</button>
+                    </div>
+                </section>
+
+                // Export section
+                <section>
+                    <h2 class="dag-section-head">"EXPORT"</h2>
+                    <div class="dag-export-targets">
+                        <label class="dag-export-target">
+                            <input type="checkbox" prop:checked=move || export_host.get()
+                                on:change=move |ev| { set_export_host.set(event_target_checked(&ev)); } />
+                            "Host (Sim)"
+                        </label>
+                        <label class="dag-export-target">
+                            <input type="checkbox" prop:checked=move || export_rp2040.get()
+                                on:change=move |ev| { set_export_rp2040.set(event_target_checked(&ev)); } />
+                            "RP2040"
+                        </label>
+                        <label class="dag-export-target">
+                            <input type="checkbox" prop:checked=move || export_stm32f4.get()
+                                on:change=move |ev| { set_export_stm32f4.set(event_target_checked(&ev)); } />
+                            "STM32F4"
+                        </label>
+                        <label class="dag-export-target">
+                            <input type="checkbox" prop:checked=move || export_esp32c3.get()
+                                on:change=move |ev| { set_export_esp32c3.set(event_target_checked(&ev)); } />
+                            "ESP32-C3"
+                        </label>
+                    </div>
+                    <button class="btn btn-primary btn-sm" style="width:100%">"Generate & Download"</button>
+                </section>
+
+                // HIL section
+                <section>
+                    <h2 class="dag-section-head">"HIL"</h2>
+                    <div class="dag-hil-url">"ws://169.254.1.61:8080"</div>
+                    <div class="dag-hil-btns">
+                        <button class="btn btn-secondary btn-sm">"Connect"</button>
+                        <button class="btn btn-primary btn-sm" on:click=on_deploy>"Deploy MCU"</button>
+                    </div>
+                </section>
+
+                // Monitor section (collapsible)
+                <section>
+                    <MonitorPanel topics=sim_topics tick_count=sim_tick_count />
+                </section>
+            </div>
+
+            // ── Center canvas ───────────────────────────────────────────────
             <div
                 class="dag-canvas-container"
                 tabindex="0"
                 on:keydown=on_keydown
             >
-                <div class="dag-toolbar">
-                    <button
-                        class=move || if sim_running.get() { "btn btn-danger" } else { "btn btn-primary" }
-                        on:click=on_play_pause
-                    >
-                        {move || if sim_running.get() { "Pause" } else { "Play" }}
-                    </button>
-                    <button class="btn btn-secondary" on:click=on_step>"Step"</button>
-                    <button class="btn btn-secondary" on:click=on_reset>"Reset"</button>
-                    <button class="btn btn-secondary" on:click=on_deploy>"Deploy"</button>
-                    <button class="btn btn-danger" on:click=on_delete>"Delete"</button>
-                    <span class="dag-status">{move || deploy_status.get()}</span>
-                </div>
                 <svg
                     class="dag-canvas"
                     viewBox="0 0 900 500"
@@ -1015,18 +1175,19 @@ pub fn DagEditorPanel() -> impl IntoView {
                 </svg>
             </div>
 
-            // Bottom: live monitor
-            <MonitorPanel topics=sim_topics tick_count=sim_tick_count />
-
-            // Right: config panel
-            <ConfigPanel
-                block_type=selected_block_type
-                config_fields=config_fields
-                config_values=config_values
-                on_change=on_config_change
-                channels_text=channels_text
-                il_text=il_text
-            />
+            // ── Right pane (placeholder for Plot/Pins/I2C) ──────────────────
+            <div class="dag-right-pane">
+                <div class="dag-right-tabs">
+                    <button class="dag-right-tab active">"PLOT"</button>
+                    <button class="dag-right-tab">"PINS"</button>
+                    <button class="dag-right-tab">"I2C"</button>
+                </div>
+                <div class="dag-right-content">
+                    <p class="text-dim" style="font-size: 12px;">
+                        "Plot will appear here during simulation"
+                    </p>
+                </div>
+            </div>
         </div>
     }
 }
@@ -1156,4 +1317,12 @@ async fn tick_mcu() -> Result<String, String> {
         .map_err(|e| format!("{:?}", e))?;
 
     Ok(text.as_string().unwrap_or_default())
+}
+
+/// Extract the checked state from a checkbox change event.
+fn event_target_checked(ev: &leptos::ev::Event) -> bool {
+    ev.target()
+        .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
+        .map(|el| el.checked())
+        .unwrap_or(false)
 }

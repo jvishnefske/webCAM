@@ -25,7 +25,11 @@ pub fn Header() -> impl IntoView {
 
     view! {
         <div class="header">
-            <h1>"RustCAM" <span class="version-badge">{format!("v{VERSION}")}</span></h1>
+            <h1>
+                "RustCAM"
+                <span class="header-subtitle">"Model-Based Dataflow Development"</span>
+                <span class="version-badge">{format!("v{VERSION}")}</span>
+            </h1>
             <div class=conn_class>
                 <span class="status-dot"></span>
                 <span>{conn_text}</span>
