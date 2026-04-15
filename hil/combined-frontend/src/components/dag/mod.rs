@@ -1,7 +1,10 @@
+pub mod board_manager;
 pub mod config_panel;
 pub mod editor;
+pub mod export_panel;
 pub mod monitor;
 pub mod palette;
+pub mod pin_table;
 pub mod plot;
 #[cfg(target_arch = "wasm32")]
 pub mod sidebar;

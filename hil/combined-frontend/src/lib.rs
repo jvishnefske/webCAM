@@ -31,3 +31,4 @@ pub mod theme;
 pub mod types;
 #[cfg(target_arch = "wasm32")]
 pub mod ws_client;
+pub mod zip;
