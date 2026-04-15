@@ -1,3 +1,4 @@
+pub mod cam;
 pub mod dag;
 pub mod deploy;
 pub mod hil;
