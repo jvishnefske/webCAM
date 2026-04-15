@@ -27,6 +27,7 @@ pub mod panel_types;
 pub mod plot_math;
 pub mod sim_move;
 pub mod sim_util;
+pub mod sketch;
 pub mod state_machine_config;
 pub mod theme;
 pub mod types;

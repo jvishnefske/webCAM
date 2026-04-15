@@ -212,7 +212,7 @@ pub fn App() -> impl IntoView {
                         <crate::components::cam::CamPanel />
                     }.into_any(),
                     AppMode::Sketch => view! {
-                        <div>"Sketch mode (coming soon)"</div>
+                        <crate::components::sketch::editor::SketchEditor />
                     }.into_any(),
                     AppMode::Dataflow => view! {
                         <DataflowTabBar />
