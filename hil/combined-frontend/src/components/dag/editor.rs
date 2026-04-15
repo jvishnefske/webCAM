@@ -12,6 +12,7 @@ use crate::types::BlockSet;
 use super::config_panel::ConfigPanel;
 use super::monitor::MonitorPanel;
 use super::palette::BlockPalette;
+use super::state_machine_editor;
 use super::transport::TransportBar;
 
 /// An edge connecting an output port on one block to an input port on another.
@@ -99,6 +100,14 @@ pub fn DagEditorPanel() -> impl IntoView {
         let pb = blks.iter().find(|b| b.id == sel)?;
         let block = pb.reconstruct()?;
         Some(block.display_name().to_string())
+    });
+
+    // Raw block_type string (e.g. "state_machine") for conditional editors.
+    let selected_raw_block_type = Signal::derive(move || {
+        let sel = selected_id.get()?;
+        let blks = blocks.get();
+        let pb = blks.iter().find(|b| b.id == sel)?;
+        Some(pb.block_type.clone())
     });
 
     let config_fields = Signal::derive(move || {
@@ -242,7 +251,7 @@ pub fn DagEditorPanel() -> impl IntoView {
         }
     });
 
-    // Config change handler
+    // Config change handler (per-field update for generic config panel)
     let on_config_change = Callback::new(move |(key, value): (String, serde_json::Value)| {
         let sel = match selected_id.get_untracked() {
             Some(s) => s,
@@ -257,6 +266,29 @@ pub fn DagEditorPanel() -> impl IntoView {
             }
         });
         sync_shared(&blocks.get());
+    });
+
+    // Full config replacement handler (for specialized editors like state_machine)
+    let on_full_config_change = Callback::new(move |new_config: serde_json::Value| {
+        let sel = match selected_id.get_untracked() {
+            Some(s) => s,
+            None => return,
+        };
+        set_blocks.update(|blks| {
+            if let Some(pb) = blks.iter_mut().find(|b| b.id == sel) {
+                pb.config = new_config;
+            }
+        });
+        sync_shared(&blocks.get());
+    });
+
+    // ReadSignal of the selected block's config JSON (for state machine editor).
+    let (sm_config_signal, set_sm_config_signal) =
+        signal(serde_json::Value::Object(Default::default()));
+    // Keep sm_config_signal in sync with the selected block's config.
+    Effect::new(move || {
+        let cfg = config_values.get();
+        set_sm_config_signal.set(cfg);
     });
 
     // Delete selected block
@@ -795,15 +827,36 @@ pub fn DagEditorPanel() -> impl IntoView {
             // Bottom: live monitor
             <MonitorPanel topics=sim_topics tick_count=sim_tick_count />
 
-            // Right: config panel
-            <ConfigPanel
-                block_type=selected_block_type
-                config_fields=config_fields
-                config_values=config_values
-                on_change=on_config_change
-                channels_text=channels_text
-                il_text=il_text
-            />
+            // Right: config panel (state machine gets a specialized editor)
+            {move || {
+                let is_sm = selected_raw_block_type.get().as_deref() == Some("state_machine");
+                if is_sm {
+                    view! {
+                        <div class="dag-config-panel">
+                            <div class="config-panel-title">"State Machine"</div>
+                            <state_machine_editor::StateMachineEditor
+                                config=sm_config_signal
+                                on_config_change=on_full_config_change
+                            />
+                            <div class="config-section-title">"Channels"</div>
+                            <pre class="config-channels">{move || channels_text.get()}</pre>
+                            <div class="config-section-title">"Generated IL"</div>
+                            <pre class="config-il">{move || il_text.get()}</pre>
+                        </div>
+                    }.into_any()
+                } else {
+                    view! {
+                        <ConfigPanel
+                            block_type=selected_block_type
+                            config_fields=config_fields
+                            config_values=config_values
+                            on_change=on_config_change
+                            channels_text=channels_text
+                            il_text=il_text
+                        />
+                    }.into_any()
+                }
+            }}
         </div>
     }
 }

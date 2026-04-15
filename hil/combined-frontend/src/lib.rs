@@ -25,6 +25,7 @@ pub mod hex;
 pub mod messages;
 pub mod panel_types;
 pub mod sim_util;
+pub mod state_machine_config;
 pub mod theme;
 pub mod types;
 #[cfg(target_arch = "wasm32")]

@@ -4,5 +4,6 @@ pub mod monitor;
 pub mod palette;
 #[cfg(target_arch = "wasm32")]
 pub mod sidebar;
+pub mod state_machine_editor;
 pub mod storage;
 pub mod transport;
