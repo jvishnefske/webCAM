@@ -1,6 +1,7 @@
 //! Built-in configurable blocks.
 
 pub mod basic;
+pub mod i2c;
 pub mod pid;
 
 use crate::lower::ConfigurableBlock;
@@ -127,6 +128,14 @@ pub fn registry() -> Vec<BlockEntry> {
             category: BlockCategory::PubSub,
             description: "Subscribe to a topic, apply gain, publish to another topic",
             create: || Box::new(pid::PubSubBridgeBlock::default()),
+        },
+        // I2C
+        BlockEntry {
+            block_type: "i2c_mux",
+            display_name: "I2C Mux (TCA9548A)",
+            category: BlockCategory::Io,
+            description: "Route I2C bus to one of 2/4/8 downstream channels",
+            create: || Box::new(i2c::I2cMuxBlock::default()),
         },
     ]
 }
