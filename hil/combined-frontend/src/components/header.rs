@@ -22,7 +22,7 @@ pub fn Header() -> impl IntoView {
 
     view! {
         <div class="header">
-            <h1>"MCU Control Panel"</h1>
+            <h1>"RustCAM"</h1>
             <div class=conn_class>
                 <span class="status-dot"></span>
                 <span>{conn_text}</span>
