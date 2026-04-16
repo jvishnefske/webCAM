@@ -378,12 +378,59 @@ body {
     color: var(--text-primary);
 }
 
-/* DAG Editor Layout */
+/* DAG Editor Layout (3-column) */
 .dag-editor-layout {
     display: grid;
-    grid-template-columns: 200px 1fr 300px;
-    gap: 1rem;
-    min-height: 500px;
+    grid-template-columns: 240px 1fr 240px;
+    height: calc(100vh - 100px);
+    gap: 0;
+}
+.dag-sidebar {
+    background: #1a1d27;
+    border-right: 1px solid #2a2d3a;
+    padding: 12px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.dag-section-head {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #8888a0;
+    margin-top: 12px;
+    margin-bottom: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #2a2d3a;
+}
+.dag-right-pane {
+    background: #1a1d27;
+    border-left: 1px solid #2a2d3a;
+    display: flex;
+    flex-direction: column;
+}
+.dag-right-tabs {
+    display: flex;
+    border-bottom: 1px solid #2a2d3a;
+}
+.dag-right-tab {
+    flex: 1;
+    padding: 8px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: #8888a0;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+}
+.dag-right-tab.active {
+    color: #4f8cff;
+    border-bottom-color: #4f8cff;
 }
 
 /* Palette */
@@ -496,64 +543,118 @@ body {
     background-size: 20px 20px;
 }
 
-/* SVG nodes */
-.dag-node {
+/* Dataflow Node Styling (HTML div-based) */
+.df-node {
+    position: absolute;
+    background: #1a1d27;
+    border: 1px solid #2a2d3a;
+    border-radius: 6px;
+    min-width: 140px;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+}
+.df-node:active { cursor: grabbing; }
+.df-node.selected {
+    border: 2px solid #4f8cff;
+    box-shadow: 0 0 12px rgba(79, 140, 255, 0.25);
+}
+.df-node-header {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e0e0e8;
+    padding: 10px 10px 2px 10px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.df-node-type {
+    font-size: 10px;
+    font-family: monospace;
+    color: #8888a0;
+    padding: 0 10px 4px 10px;
+}
+
+/* Port Styling */
+.df-port {
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    cursor: crosshair;
+    z-index: 5;
+    transition: width 0.1s, height 0.1s;
+}
+.df-port.input { background: #4f8cff; }
+.df-port.output { background: #4f8cff; }
+.df-port:hover {
+    width: 16px;
+    height: 16px;
+    margin: -2px;
+    filter: brightness(1.3);
+}
+.df-port.drop-target {
+    background: #55ff88 !important;
+    box-shadow: 0 0 6px rgba(85, 255, 136, 0.5);
+}
+.df-port-label {
+    font-size: 10px;
+    font-family: monospace;
+    color: #8888a0;
+    white-space: nowrap;
+    pointer-events: none;
+}
+.df-output-value {
+    font-size: 10px;
+    font-family: monospace;
+    color: #55ff88;
+    position: absolute;
+    white-space: nowrap;
+}
+
+/* Edge Styling */
+.df-edge {
+    transition: stroke-width 0.1s;
+}
+.df-edge-hit {
     cursor: pointer;
 }
-
-.dag-node-rect {
-    fill: var(--bg-card);
-    stroke: var(--border);
-    stroke-width: 1.5;
-    transition: stroke 0.15s;
+.df-edge-hit:hover + .df-edge {
+    stroke: #4f8cff !important;
+    stroke-width: 4px !important;
+    filter: brightness(1.3);
 }
 
-.dag-node:hover .dag-node-rect {
-    stroke: var(--accent-dim);
+/* Workspace Layers */
+.df-workspace {
+    position: relative;
+    overflow: hidden;
+    background: #0f1117;
+    background-image:
+        linear-gradient(to right, #2a2d3a33 1px, transparent 1px),
+        linear-gradient(to bottom, #2a2d3a33 1px, transparent 1px);
+    background-size: 20px 20px;
+    flex: 1;
+    min-height: 500px;
 }
-
-.dag-node.selected .dag-node-rect {
-    stroke: var(--accent);
-    stroke-width: 2;
+.df-edge-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
 }
-
-.dag-node-title {
-    fill: var(--text-primary);
-    font-size: 11px;
-    font-weight: 600;
-    text-anchor: middle;
-    dominant-baseline: auto;
+.df-edge-layer path {
+    pointer-events: stroke;
 }
-
-.dag-node-type {
-    fill: var(--text-secondary);
-    font-size: 9px;
-    font-family: monospace;
-    text-anchor: middle;
-    dominant-baseline: auto;
+.df-node-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
 }
-
-.dag-port {
-    stroke: none;
-}
-
-.dag-port-in {
-    fill: var(--success);
-}
-
-.dag-port-out {
-    fill: var(--accent);
-}
-
-.dag-port-label {
-    fill: var(--text-secondary);
-    font-size: 8px;
-    font-family: monospace;
-    dominant-baseline: auto;
-}
-
-.dag-port-label-right {
-    text-anchor: end;
+.df-node-layer .df-node {
+    pointer-events: auto;
 }
 
 /* Config Panel */
@@ -632,6 +733,21 @@ body {
     }
 }
 
+@media (max-width: 900px) {
+    .dag-editor-layout {
+        grid-template-columns: 1fr;
+        height: auto;
+    }
+    .dag-sidebar {
+        border-right: none;
+        border-bottom: 1px solid #2a2d3a;
+    }
+    .dag-right-pane {
+        border-left: none;
+        border-top: 1px solid #2a2d3a;
+    }
+}
+
 @media (max-width: 768px) {
     .header {
         padding: 0.75rem 1rem;
@@ -657,10 +773,6 @@ body {
 
     .form-row {
         flex-direction: column;
-    }
-
-    .dag-editor-layout {
-        grid-template-columns: 1fr;
     }
 }
 
