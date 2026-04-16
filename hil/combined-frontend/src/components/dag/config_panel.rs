@@ -190,5 +190,30 @@ fn ConfigFieldEditor(
             }
             .into_any()
         }
+        FieldKind::TypeSelector => {
+            let key = field.key.clone();
+            let type_options = vec!["f64", "f32", "i32", "u8", "u16", "bool"];
+            view! {
+                <div class="form-group">
+                    <label>{label}</label>
+                    <select
+                        prop:value=move || {
+                            value.get().as_str().unwrap_or("f64").to_string()
+                        }
+                        on:change=move |ev| {
+                            let val_str = get_input_value(&ev);
+                            on_change.run((key.clone(), serde_json::json!(val_str)));
+                        }
+                    >
+                        {type_options.iter().map(|opt| {
+                            let v = opt.to_string();
+                            let t = opt.to_string();
+                            view! { <option value=v>{t}</option> }
+                        }).collect_view()}
+                    </select>
+                </div>
+            }
+            .into_any()
+        }
     }
 }
