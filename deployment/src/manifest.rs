@@ -109,7 +109,9 @@ mod tests {
     #[test]
     fn protocol_serde_roundtrip() {
         let protocols = vec![
-            Protocol::Spi { clock_hz: 1_000_000 },
+            Protocol::Spi {
+                clock_hz: 1_000_000,
+            },
             Protocol::Uart { baud: 115_200 },
             Protocol::I2c { freq_hz: 400_000 },
             Protocol::Can { bitrate: 250_000 },

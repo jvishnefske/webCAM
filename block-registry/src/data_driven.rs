@@ -27,11 +27,18 @@ pub struct DataDrivenBlock {
 enum BlockState {
     None,
     /// Plot accumulator buffer.
-    PlotBuffer { buffer: Vec<f64>, max_samples: usize },
+    PlotBuffer {
+        buffer: Vec<f64>,
+        max_samples: usize,
+    },
     /// PubSub source: holds current value until overwritten.
-    PubSubSource { current: Option<Value> },
+    PubSubSource {
+        current: Option<Value>,
+    },
     /// PubSub sink: holds last received value.
-    PubSubSink { last: Option<Value> },
+    PubSubSink {
+        last: Option<Value>,
+    },
 }
 
 impl DataDrivenBlock {
@@ -224,9 +231,7 @@ impl Tick for DataDrivenBlock {
                 let a = inputs.get(1).and_then(|i| i.and_then(|v| v.as_float()));
                 let b = inputs.get(2).and_then(|i| i.and_then(|v| v.as_float()));
                 let result = match (cond, a, b) {
-                    (Some(c), Some(a), Some(b)) => {
-                        Some(Value::Float(if c > 0.0 { a } else { b }))
-                    }
+                    (Some(c), Some(a), Some(b)) => Some(Value::Float(if c > 0.0 { a } else { b })),
                     _ => None,
                 };
                 vec![result]
@@ -246,9 +251,7 @@ impl Tick for DataDrivenBlock {
                     max_samples,
                 } = self.state
                 {
-                    if let Some(v) =
-                        inputs.first().and_then(|i| i.and_then(|v| v.as_float()))
-                    {
+                    if let Some(v) = inputs.first().and_then(|i| i.and_then(|v| v.as_float())) {
                         buffer.push(v);
                         if buffer.len() > max_samples {
                             buffer.remove(0);
@@ -333,8 +336,7 @@ mod tests {
     #[test]
     fn gain_legacy_param1() {
         let def = find_def("gain");
-        let mut b =
-            DataDrivenBlock::new(def, r#"{"op":"Gain","param1":2.0}"#).unwrap();
+        let mut b = DataDrivenBlock::new(def, r#"{"op":"Gain","param1":2.0}"#).unwrap();
         let input = Value::Float(5.0);
         let out = b.tick(&[Some(&input)], 0.01);
         assert_eq!(out[0].as_ref().unwrap().as_float(), Some(10.0));
@@ -372,11 +374,8 @@ mod tests {
     #[test]
     fn clamp_legacy_params() {
         let def = find_def("clamp");
-        let mut b = DataDrivenBlock::new(
-            def,
-            r#"{"op":"Clamp","param1":0.0,"param2":1.0}"#,
-        )
-        .unwrap();
+        let mut b =
+            DataDrivenBlock::new(def, r#"{"op":"Clamp","param1":0.0,"param2":1.0}"#).unwrap();
         let input = Value::Float(0.5);
         let out = b.tick(&[Some(&input)], 0.01);
         assert_eq!(out[0].as_ref().unwrap().as_float(), Some(0.5));
@@ -454,8 +453,10 @@ mod tests {
     fn pubsub_source_and_sink() {
         let src_def = find_def("pubsub_source");
         let sink_def = find_def("pubsub_sink");
-        let mut src = DataDrivenBlock::new(src_def, r#"{"topic":"t","port_kind":"Float"}"#).unwrap();
-        let mut sink = DataDrivenBlock::new(sink_def, r#"{"topic":"t","port_kind":"Float"}"#).unwrap();
+        let mut src =
+            DataDrivenBlock::new(src_def, r#"{"topic":"t","port_kind":"Float"}"#).unwrap();
+        let mut sink =
+            DataDrivenBlock::new(sink_def, r#"{"topic":"t","port_kind":"Float"}"#).unwrap();
 
         // Source initially empty
         let out = src.tick(&[], 0.01);
@@ -575,10 +576,7 @@ mod tests {
             op: FunctionOp::Constant,
             inputs: vec![],
             outputs: vec![FuncPortDef::new("out", PortKind::Float)],
-            params: vec![
-                ParamDef::float("value", 0.0),
-                ParamDef::int("count", 5),
-            ],
+            params: vec![ParamDef::float("value", 0.0), ParamDef::int("count", 5)],
             mlir_op: None,
         };
 

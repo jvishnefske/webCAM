@@ -16,9 +16,9 @@
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::ir::IrModule;
 use crate::lower::{self, GraphSnapshot};
 use crate::peripherals;
-use crate::ir::IrModule;
 use crate::{emit_rust, printer};
 
 // Note: the MLIR pipeline preserves .mlir for debugging and optimization
@@ -173,10 +173,7 @@ pub fn generate_mlir_logic_files(
     }
 
     // Emit Cargo.toml (pure Rust, no cc dependency)
-    files.push((
-        "logic/Cargo.toml".to_string(),
-        generate_logic_cargo_toml(),
-    ));
+    files.push(("logic/Cargo.toml".to_string(), generate_logic_cargo_toml()));
 
     // Emit ffi.rs with safe State struct
     let state_fields = collect_state_fields(snap);
@@ -237,7 +234,11 @@ fn generate_logic_lib_rs(state_fields: &[(String, &str)]) -> String {
     writeln!(out, "use dataflow_rt::Peripherals;").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "/// Evaluate one tick of the dataflow graph.").unwrap();
-    writeln!(out, "pub fn tick<P: Peripherals>(hw: &mut P, state: &mut State) {{").unwrap();
+    writeln!(
+        out,
+        "pub fn tick<P: Peripherals>(hw: &mut P, state: &mut State) {{"
+    )
+    .unwrap();
 
     // Generate stub tick body — each output field is set to its default
     for (name, _ty) in state_fields {
@@ -387,7 +388,9 @@ mod tests {
         }
         // No C files or headers in the output
         assert!(
-            !files.iter().any(|(p, _)| p.ends_with(".h") || p.ends_with(".c")),
+            !files
+                .iter()
+                .any(|(p, _)| p.ends_with(".h") || p.ends_with(".c")),
             "logic crate must not contain C files"
         );
     }

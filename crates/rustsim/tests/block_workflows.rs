@@ -9,7 +9,11 @@ use rustsim::dataflow::sim_peripherals::WasmSimPeripherals;
 
 // ── Helpers ───────────────────────────────────────────────────────
 
-fn add(graph: &mut DataflowGraph, block_type: &str, config: &str) -> rustsim::dataflow::block::BlockId {
+fn add(
+    graph: &mut DataflowGraph,
+    block_type: &str,
+    config: &str,
+) -> rustsim::dataflow::block::BlockId {
     let block = blocks::create_block(block_type, config).unwrap();
     graph.add_block(block)
 }
@@ -28,9 +32,21 @@ fn output_value_by_id(graph: &DataflowGraph, id: u32, port: usize) -> Option<Val
 fn adc_gain_pwm_normal_mode() {
     let mut graph = DataflowGraph::new();
 
-    let adc = add(&mut graph, "adc_source", r#"{"channel":0,"resolution_bits":12}"#);
-    let gain = add(&mut graph, "gain", r#"{"op":"Gain","param1":2.0,"param2":0.0}"#);
-    let pwm = add(&mut graph, "pwm_sink", r#"{"channel":0,"frequency_hz":1000}"#);
+    let adc = add(
+        &mut graph,
+        "adc_source",
+        r#"{"channel":0,"resolution_bits":12}"#,
+    );
+    let gain = add(
+        &mut graph,
+        "gain",
+        r#"{"op":"Gain","param1":2.0,"param2":0.0}"#,
+    );
+    let pwm = add(
+        &mut graph,
+        "pwm_sink",
+        r#"{"channel":0,"frequency_hz":1000}"#,
+    );
 
     graph.connect(adc, 0, gain, 0).unwrap();
     graph.connect(gain, 0, pwm, 0).unwrap();
@@ -55,9 +71,21 @@ fn adc_gain_pwm_simulation_mode() {
     peripherals.set_adc_voltage(0, 1.5);
     graph.set_sim_peripherals(peripherals);
 
-    let adc = add(&mut graph, "adc_source", r#"{"channel":0,"resolution_bits":12}"#);
-    let gain = add(&mut graph, "gain", r#"{"op":"Gain","param1":2.0,"param2":0.0}"#);
-    let _pwm = add(&mut graph, "pwm_sink", r#"{"channel":0,"frequency_hz":1000}"#);
+    let adc = add(
+        &mut graph,
+        "adc_source",
+        r#"{"channel":0,"resolution_bits":12}"#,
+    );
+    let gain = add(
+        &mut graph,
+        "gain",
+        r#"{"op":"Gain","param1":2.0,"param2":0.0}"#,
+    );
+    let _pwm = add(
+        &mut graph,
+        "pwm_sink",
+        r#"{"channel":0,"frequency_hz":1000}"#,
+    );
 
     graph.connect(adc, 0, gain, 0).unwrap();
     graph.connect(gain, 0, _pwm, 0).unwrap();
@@ -91,7 +119,11 @@ fn state_machine_transitions_in_graph() {
     graph.tick(0.01);
 
     let snap = graph.snapshot();
-    let sm_block = snap.blocks.iter().find(|b| b.block_type == "state_machine").unwrap();
+    let sm_block = snap
+        .blocks
+        .iter()
+        .find(|b| b.block_type == "state_machine")
+        .unwrap();
     // State machine should have outputs
     assert!(!sm_block.output_values.is_empty());
 
@@ -102,7 +134,11 @@ fn state_machine_transitions_in_graph() {
     // Second tick: state_in is still 0.0 (constant), so it transitions idle→running again
     graph.tick(0.01);
     let snap2 = graph.snapshot();
-    let sm_block2 = snap2.blocks.iter().find(|b| b.block_type == "state_machine").unwrap();
+    let sm_block2 = snap2
+        .blocks
+        .iter()
+        .find(|b| b.block_type == "state_machine")
+        .unwrap();
     assert_eq!(sm_block2.output_values[0], Some(Value::Float(1.0)));
 }
 
@@ -112,8 +148,16 @@ fn state_machine_transitions_in_graph() {
 fn pubsub_source_sink_workflow() {
     let mut graph = DataflowGraph::new();
 
-    let source = add(&mut graph, "pubsub_source", r#"{"topic":"test/val","port_kind":"Float"}"#);
-    let sink = add(&mut graph, "pubsub_sink", r#"{"topic":"test/out","port_kind":"Float"}"#);
+    let source = add(
+        &mut graph,
+        "pubsub_source",
+        r#"{"topic":"test/val","port_kind":"Float"}"#,
+    );
+    let sink = add(
+        &mut graph,
+        "pubsub_sink",
+        r#"{"topic":"test/out","port_kind":"Float"}"#,
+    );
 
     graph.connect(source, 0, sink, 0).unwrap();
     graph.tick(0.01);
@@ -148,7 +192,11 @@ fn encoder_to_gain_workflow() {
     let mut graph = DataflowGraph::new();
 
     let encoder = add(&mut graph, "encoder", r#"{"channel":0}"#);
-    let gain = add(&mut graph, "gain", r#"{"op":"Gain","param1":0.5,"param2":0.0}"#);
+    let gain = add(
+        &mut graph,
+        "gain",
+        r#"{"op":"Gain","param1":0.5,"param2":0.0}"#,
+    );
 
     // Encoder position (port 0) → gain
     graph.connect(encoder, 0, gain, 0).unwrap();
@@ -194,7 +242,11 @@ fn math_pipeline_add_clamp() {
     let c1 = add(&mut graph, "constant", r#"{"value":3.0}"#);
     let c2 = add(&mut graph, "constant", r#"{"value":4.0}"#);
     let sum = add(&mut graph, "add", "{}");
-    let clamp = add(&mut graph, "clamp", r#"{"op":"Clamp","param1":0.0,"param2":5.0}"#);
+    let clamp = add(
+        &mut graph,
+        "clamp",
+        r#"{"op":"Clamp","param1":0.0,"param2":5.0}"#,
+    );
 
     graph.connect(c1, 0, sum, 0).unwrap();
     graph.connect(c2, 0, sum, 1).unwrap();
@@ -215,10 +267,26 @@ fn mixed_embedded_math_simulation() {
     peripherals.set_adc_voltage(0, 0.75);
     graph.set_sim_peripherals(peripherals);
 
-    let adc = add(&mut graph, "adc_source", r#"{"channel":0,"resolution_bits":12}"#);
-    let gain = add(&mut graph, "gain", r#"{"op":"Gain","param1":2.0,"param2":0.0}"#);
-    let clamp = add(&mut graph, "clamp", r#"{"op":"Clamp","param1":0.0,"param2":100.0}"#);
-    let _pwm = add(&mut graph, "pwm_sink", r#"{"channel":0,"frequency_hz":1000}"#);
+    let adc = add(
+        &mut graph,
+        "adc_source",
+        r#"{"channel":0,"resolution_bits":12}"#,
+    );
+    let gain = add(
+        &mut graph,
+        "gain",
+        r#"{"op":"Gain","param1":2.0,"param2":0.0}"#,
+    );
+    let clamp = add(
+        &mut graph,
+        "clamp",
+        r#"{"op":"Clamp","param1":0.0,"param2":100.0}"#,
+    );
+    let _pwm = add(
+        &mut graph,
+        "pwm_sink",
+        r#"{"channel":0,"frequency_hz":1000}"#,
+    );
 
     graph.connect(adc, 0, gain, 0).unwrap();
     graph.connect(gain, 0, clamp, 0).unwrap();
@@ -244,7 +312,11 @@ fn simulation_mode_produces_real_values() {
     peripherals.set_gpio_state(5, true);
     graph.set_sim_peripherals(peripherals);
 
-    let adc = add(&mut graph, "adc_source", r#"{"channel":0,"resolution_bits":12}"#);
+    let adc = add(
+        &mut graph,
+        "adc_source",
+        r#"{"channel":0,"resolution_bits":12}"#,
+    );
     let gpio_in = add(&mut graph, "gpio_in", r#"{"pin":5}"#);
 
     graph.tick(0.01);
@@ -330,8 +402,16 @@ fn register_state_machine_feedback_loop() {
     // active_idle (port 1) should be 0.0, active_running (port 2) should be 1.0
     let active_idle = output_value_by_id(&graph, sm.0, 1);
     let active_running = output_value_by_id(&graph, sm.0, 2);
-    assert_eq!(active_idle, Some(Value::Float(0.0)), "Tick 1: active_idle=0");
-    assert_eq!(active_running, Some(Value::Float(1.0)), "Tick 1: active_running=1");
+    assert_eq!(
+        active_idle,
+        Some(Value::Float(0.0)),
+        "Tick 1: active_idle=0"
+    );
+    assert_eq!(
+        active_running,
+        Some(Value::Float(1.0)),
+        "Tick 1: active_running=1"
+    );
 
     // Tick 2:
     // Register outputs 1.0 (stored from tick 1) → SM state_in=1 (running).
@@ -346,7 +426,11 @@ fn register_state_machine_feedback_loop() {
     );
 
     let active_running2 = output_value_by_id(&graph, sm.0, 2);
-    assert_eq!(active_running2, Some(Value::Float(1.0)), "Tick 2: active_running=1");
+    assert_eq!(
+        active_running2,
+        Some(Value::Float(1.0)),
+        "Tick 2: active_running=1"
+    );
 
     // Tick 3: still running
     graph.tick(0.01);

@@ -541,10 +541,7 @@ mod tests {
         let input = "@target(\"stm32f4\")\nblock s: adc_source(channel = 0)\n";
         let graph = parser::parse(input).unwrap();
         let snapshot = ast_to_snapshot(&graph).unwrap();
-        assert_eq!(
-            snapshot.blocks[0].target,
-            Some(TargetFamily::Stm32f4)
-        );
+        assert_eq!(snapshot.blocks[0].target, Some(TargetFamily::Stm32f4));
     }
 
     #[test]

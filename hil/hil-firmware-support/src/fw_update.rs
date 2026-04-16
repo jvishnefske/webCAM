@@ -379,7 +379,8 @@ fn encode_fw_ready(buf: &mut [u8]) -> Result<usize, EncodeError> {
     enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
     enc.u32(20).map_err(|_| EncodeError::BufferTooSmall)?;
     enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
-    enc.u16(MAX_CHUNK_SIZE).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u16(MAX_CHUNK_SIZE)
+        .map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -396,7 +397,8 @@ fn encode_fw_chunk_ack(buf: &mut [u8], next_offset: u32) -> Result<usize, Encode
     enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
     enc.u32(21).map_err(|_| EncodeError::BufferTooSmall)?;
     enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
-    enc.u32(next_offset).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(next_offset)
+        .map_err(|_| EncodeError::BufferTooSmall)?;
 
     drop(enc);
     let remaining = writer.len();
@@ -445,7 +447,8 @@ pub fn encode_fw_begin(buf: &mut [u8], total_size: u32, crc: u32) -> Result<usiz
     enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
     enc.u32(20).map_err(|_| EncodeError::BufferTooSmall)?;
     enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
-    enc.u32(total_size).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.u32(total_size)
+        .map_err(|_| EncodeError::BufferTooSmall)?;
     enc.u32(2).map_err(|_| EncodeError::BufferTooSmall)?;
     enc.u32(crc).map_err(|_| EncodeError::BufferTooSmall)?;
 

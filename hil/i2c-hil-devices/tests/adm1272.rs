@@ -87,7 +87,11 @@ fn computed_status_byte_off_bit() {
     // Set OPERATION to 0x00 (OFF)
     bus.write(ADDR, &[0x01, 0x00]).unwrap();
     bus.write_read(ADDR, &[0x78], &mut buf).unwrap();
-    assert_ne!(buf[0] & (1 << 6), 0, "OFF should be set when OPERATION=0x00");
+    assert_ne!(
+        buf[0] & (1 << 6),
+        0,
+        "OFF should be set when OPERATION=0x00"
+    );
 }
 
 #[test]

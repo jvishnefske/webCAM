@@ -62,7 +62,11 @@ async fn constant_publishes_to_topic() {
     assert_eq!(body["nodes"], 2);
 
     // Tick once
-    let resp = app.clone().oneshot(post("/api/tick", vec![])).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(post("/api/tick", vec![]))
+        .await
+        .unwrap();
     let body = json_body(resp).await;
     assert_eq!(body["ok"], true);
 
@@ -90,7 +94,11 @@ async fn add_constants_publish_sum() {
     let resp = app.clone().oneshot(post("/api/dag", cbor)).await.unwrap();
     assert_eq!(json_body(resp).await["ok"], true);
 
-    let resp = app.clone().oneshot(post("/api/tick", vec![])).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(post("/api/tick", vec![]))
+        .await
+        .unwrap();
     assert_eq!(json_body(resp).await["ok"], true);
 
     let resp = app.clone().oneshot(get("/api/pubsub")).await.unwrap();
@@ -116,7 +124,11 @@ async fn multiply_constants_publish() {
     let resp = app.clone().oneshot(post("/api/dag", cbor)).await.unwrap();
     assert_eq!(json_body(resp).await["ok"], true);
 
-    let resp = app.clone().oneshot(post("/api/tick", vec![])).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(post("/api/tick", vec![]))
+        .await
+        .unwrap();
     assert_eq!(json_body(resp).await["ok"], true);
 
     let resp = app.clone().oneshot(get("/api/pubsub")).await.unwrap();
@@ -141,7 +153,11 @@ async fn multiple_ticks_update_pubsub() {
 
     // Tick 3 times
     for _ in 0..3 {
-        let resp = app.clone().oneshot(post("/api/tick", vec![])).await.unwrap();
+        let resp = app
+            .clone()
+            .oneshot(post("/api/tick", vec![]))
+            .await
+            .unwrap();
         assert_eq!(json_body(resp).await["ok"], true);
     }
 
@@ -173,7 +189,11 @@ async fn subscribe_reads_injected_value() {
     assert_eq!(json_body(resp).await["ok"], true);
 
     // Tick without injecting — output should be 0
-    let resp = app.clone().oneshot(post("/api/tick", vec![])).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(post("/api/tick", vec![]))
+        .await
+        .unwrap();
     assert_eq!(json_body(resp).await["ok"], true);
 
     let resp = app.clone().oneshot(get("/api/pubsub")).await.unwrap();
@@ -193,10 +213,18 @@ async fn redeploy_clears_state() {
     let mut dag1 = Dag::new();
     let c = dag1.constant(99.0).unwrap();
     dag1.publish("a", c).unwrap();
-    let resp = app.clone().oneshot(post("/api/dag", encode_dag(&dag1))).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(post("/api/dag", encode_dag(&dag1)))
+        .await
+        .unwrap();
     assert_eq!(json_body(resp).await["ok"], true);
 
-    let resp = app.clone().oneshot(post("/api/tick", vec![])).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(post("/api/tick", vec![]))
+        .await
+        .unwrap();
     assert_eq!(json_body(resp).await["ok"], true);
 
     let resp = app.clone().oneshot(get("/api/pubsub")).await.unwrap();
@@ -206,10 +234,18 @@ async fn redeploy_clears_state() {
     let mut dag2 = Dag::new();
     let c = dag2.constant(1.0).unwrap();
     dag2.publish("b", c).unwrap();
-    let resp = app.clone().oneshot(post("/api/dag", encode_dag(&dag2))).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(post("/api/dag", encode_dag(&dag2)))
+        .await
+        .unwrap();
     assert_eq!(json_body(resp).await["ok"], true);
 
-    let resp = app.clone().oneshot(post("/api/tick", vec![])).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(post("/api/tick", vec![]))
+        .await
+        .unwrap();
     assert_eq!(json_body(resp).await["ok"], true);
 
     // Old topic should be gone, new topic present
@@ -237,7 +273,11 @@ async fn telemetry_events_via_websocket() {
 
     // We can't easily send WebSocket messages through tower::oneshot,
     // but we can verify the telemetry endpoint works with the since param
-    let resp = app.clone().oneshot(get("/api/telemetry?since=0")).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(get("/api/telemetry?since=0"))
+        .await
+        .unwrap();
     let body = json_body(resp).await;
     assert!(body.is_array());
 }
@@ -250,12 +290,20 @@ async fn debug_mode_toggle() {
     let app = app(dir.path());
 
     // Toggle debug on
-    let resp = app.clone().oneshot(post("/api/debug", vec![])).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(post("/api/debug", vec![]))
+        .await
+        .unwrap();
     let body = json_body(resp).await;
     assert_eq!(body["debug"], true);
 
     // Toggle debug off
-    let resp = app.clone().oneshot(post("/api/debug", vec![])).await.unwrap();
+    let resp = app
+        .clone()
+        .oneshot(post("/api/debug", vec![]))
+        .await
+        .unwrap();
     let body = json_body(resp).await;
     assert_eq!(body["debug"], false);
 }

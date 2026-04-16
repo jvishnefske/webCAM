@@ -418,7 +418,7 @@ mod tests {
         drop(e);
         // Key 2 with indefinite-length array: CBOR 0x9F ... 0xFF
         buf.extend_from_slice(&[0x02, 0x9F, 0xFF]); // key=2, indef array, break
-        // Key 3 with empty definite array
+                                                    // Key 3 with empty definite array
         buf.extend_from_slice(&[0x03]);
         // Patch to use raw CBOR -- we need to manually construct the invalid payload
         // Actually, let's use minicbor to build a valid map but patch the array type

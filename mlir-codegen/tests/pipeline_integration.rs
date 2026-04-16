@@ -1,6 +1,8 @@
 //! Integration tests for the MLIR pipeline entry points.
 
-use mlir_codegen::lower::{BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef, PortKind};
+use mlir_codegen::lower::{
+    BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef, PortKind,
+};
 use mlir_codegen::pipeline::{PipelineConfig, PipelineOutput};
 
 // ---------------------------------------------------------------------------
@@ -33,10 +35,7 @@ fn make_channel(id: u32, from: u32, from_port: usize, to: u32, to_port: usize) -
 }
 
 fn make_snap(blocks: Vec<BlockSnapshot>, channels: Vec<Channel>) -> GraphSnapshot {
-    GraphSnapshot {
-        blocks,
-        channels,
-    }
+    GraphSnapshot { blocks, channels }
 }
 
 // ---------------------------------------------------------------------------

@@ -182,7 +182,8 @@ mod tests {
             "target": "RP2040",
             "custom_codegen": "something"
         }"#;
-        let snap: BlockSnapshot = serde_json::from_str(json).expect("deserialize with extra fields");
+        let snap: BlockSnapshot =
+            serde_json::from_str(json).expect("deserialize with extra fields");
         assert_eq!(snap.id, BlockId(1));
         assert_eq!(snap.block_type, "constant");
     }

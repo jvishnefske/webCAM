@@ -19,18 +19,28 @@ pub struct WasmDagHandle {
 impl WasmDagHandle {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        Self { inner: DagHandle::new() }
+        Self {
+            inner: DagHandle::new(),
+        }
     }
-    pub fn len(&self) -> usize { self.inner.len() }
-    pub fn is_empty(&self) -> bool { self.inner.is_empty() }
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
     pub fn constant(&mut self, value: f64) -> Result<u16, JsValue> {
-        self.inner.constant(value).map_err(|e| JsValue::from_str(&e))
+        self.inner
+            .constant(value)
+            .map_err(|e| JsValue::from_str(&e))
     }
     pub fn input(&mut self, name: &str) -> Result<u16, JsValue> {
         self.inner.input(name).map_err(|e| JsValue::from_str(&e))
     }
     pub fn output(&mut self, name: &str, src: u16) -> Result<u16, JsValue> {
-        self.inner.output(name, src).map_err(|e| JsValue::from_str(&e))
+        self.inner
+            .output(name, src)
+            .map_err(|e| JsValue::from_str(&e))
     }
     pub fn add(&mut self, a: u16, b: u16) -> Result<u16, JsValue> {
         self.inner.add(a, b).map_err(|e| JsValue::from_str(&e))
@@ -54,20 +64,32 @@ impl WasmDagHandle {
         self.inner.relu(a).map_err(|e| JsValue::from_str(&e))
     }
     pub fn subscribe(&mut self, topic: &str) -> Result<u16, JsValue> {
-        self.inner.subscribe(topic).map_err(|e| JsValue::from_str(&e))
+        self.inner
+            .subscribe(topic)
+            .map_err(|e| JsValue::from_str(&e))
     }
     pub fn publish(&mut self, topic: &str, src: u16) -> Result<u16, JsValue> {
-        self.inner.publish(topic, src).map_err(|e| JsValue::from_str(&e))
+        self.inner
+            .publish(topic, src)
+            .map_err(|e| JsValue::from_str(&e))
     }
-    pub fn evaluate(&self) -> Vec<f64> { self.inner.evaluate() }
-    pub fn evaluate_node(&self, node_id: u16) -> f64 { self.inner.evaluate_node(node_id) }
-    pub fn to_cbor(&self) -> Vec<u8> { self.inner.to_cbor() }
+    pub fn evaluate(&self) -> Vec<f64> {
+        self.inner.evaluate()
+    }
+    pub fn evaluate_node(&self, node_id: u16) -> f64 {
+        self.inner.evaluate_node(node_id)
+    }
+    pub fn to_cbor(&self) -> Vec<u8> {
+        self.inner.to_cbor()
+    }
     pub fn from_cbor(bytes: &[u8]) -> Result<WasmDagHandle, JsValue> {
         DagHandle::from_cbor(bytes)
             .map(|inner| WasmDagHandle { inner })
             .map_err(|e| JsValue::from_str(&e))
     }
-    pub fn to_json(&self) -> String { self.inner.to_json_impl() }
+    pub fn to_json(&self) -> String {
+        self.inner.to_json_impl()
+    }
 }
 
 // ── Dataflow graph lifecycle ───────────────────────────────────────────
@@ -88,14 +110,12 @@ pub fn dataflow_add_block(
     block_type: &str,
     config_json: &str,
 ) -> Result<u32, JsValue> {
-    super::add_block_impl(graph_id, block_type, config_json)
-        .map_err(|e| JsValue::from_str(&e))
+    super::add_block_impl(graph_id, block_type, config_json).map_err(|e| JsValue::from_str(&e))
 }
 
 #[wasm_bindgen]
 pub fn dataflow_remove_block(graph_id: u32, block_id: u32) -> Result<(), JsValue> {
-    super::remove_block_impl(graph_id, block_id)
-        .map_err(|e| JsValue::from_str(&e))
+    super::remove_block_impl(graph_id, block_id).map_err(|e| JsValue::from_str(&e))
 }
 
 #[wasm_bindgen]
@@ -123,38 +143,30 @@ pub fn dataflow_connect(
 
 #[wasm_bindgen]
 pub fn dataflow_disconnect(graph_id: u32, channel_id: u32) -> Result<(), JsValue> {
-    super::disconnect_impl(graph_id, channel_id)
-        .map_err(|e| JsValue::from_str(&e))
+    super::disconnect_impl(graph_id, channel_id).map_err(|e| JsValue::from_str(&e))
 }
 
 #[wasm_bindgen]
 pub fn dataflow_advance(graph_id: u32, elapsed: f64) -> Result<JsValue, JsValue> {
-    let snap = super::advance_impl(graph_id, elapsed)
-        .map_err(|e| JsValue::from_str(&e))?;
-    serde_wasm_bindgen::to_value(&snap)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+    let snap = super::advance_impl(graph_id, elapsed).map_err(|e| JsValue::from_str(&e))?;
+    serde_wasm_bindgen::to_value(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[wasm_bindgen]
 pub fn dataflow_run(graph_id: u32, steps: u32, dt: f64) -> Result<JsValue, JsValue> {
-    let snap = super::run_impl(graph_id, steps, dt)
-        .map_err(|e| JsValue::from_str(&e))?;
-    serde_wasm_bindgen::to_value(&snap)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+    let snap = super::run_impl(graph_id, steps, dt).map_err(|e| JsValue::from_str(&e))?;
+    serde_wasm_bindgen::to_value(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[wasm_bindgen]
 pub fn dataflow_set_speed(graph_id: u32, speed: f64) -> Result<(), JsValue> {
-    super::set_speed_impl(graph_id, speed)
-        .map_err(|e| JsValue::from_str(&e))
+    super::set_speed_impl(graph_id, speed).map_err(|e| JsValue::from_str(&e))
 }
 
 #[wasm_bindgen]
 pub fn dataflow_snapshot(graph_id: u32) -> Result<JsValue, JsValue> {
-    let snap = super::snapshot_impl(graph_id)
-        .map_err(|e| JsValue::from_str(&e))?;
-    serde_wasm_bindgen::to_value(&snap)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+    let snap = super::snapshot_impl(graph_id).map_err(|e| JsValue::from_str(&e))?;
+    serde_wasm_bindgen::to_value(&snap).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 #[wasm_bindgen]
@@ -192,8 +204,7 @@ pub fn mcu_pins(family: &str) -> Result<JsValue, JsValue> {
 #[wasm_bindgen]
 pub fn mcu_peripherals(family: &str) -> Result<JsValue, JsValue> {
     let periphs = super::get_mcu_peripherals(family).map_err(|e| JsValue::from_str(&e))?;
-    serde_wasm_bindgen::to_value(&periphs)
-        .map_err(|e| JsValue::from_str(&e.to_string()))
+    serde_wasm_bindgen::to_value(&periphs).map_err(|e| JsValue::from_str(&e.to_string()))
 }
 
 // ── Code generation ────────────────────────────────────────────────────

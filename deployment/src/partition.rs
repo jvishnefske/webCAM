@@ -75,15 +75,18 @@ pub fn partition_graph(
     let mut target_blocks: HashMap<String, Vec<BlockSnapshot>> = HashMap::new();
     for b in &snap.blocks {
         let t = &block_target[&b.id.0];
-        target_blocks.entry(t.clone()).or_default().push(BlockSnapshot {
-            id: b.id,
-            block_type: b.block_type.clone(),
-            name: b.name.clone(),
-            inputs: b.inputs.clone(),
-            outputs: b.outputs.clone(),
-            config: b.config.clone(),
-            is_delay: b.is_delay,
-        });
+        target_blocks
+            .entry(t.clone())
+            .or_default()
+            .push(BlockSnapshot {
+                id: b.id,
+                block_type: b.block_type.clone(),
+                name: b.name.clone(),
+                inputs: b.inputs.clone(),
+                outputs: b.outputs.clone(),
+                config: b.config.clone(),
+                is_delay: b.is_delay,
+            });
     }
 
     // Determine max block ID for bridge ID allocation.
@@ -114,7 +117,10 @@ pub fn partition_graph(
                 .iter()
                 .find(|b| b.id == ch.from_block)
                 .and_then(|source_block| {
-                    source_block.outputs.get(ch.from_port).map(|p| p.kind.clone())
+                    source_block
+                        .outputs
+                        .get(ch.from_port)
+                        .map(|p| p.kind.clone())
                 })
                 .unwrap_or(PortKind::Any);
 
@@ -193,10 +199,7 @@ pub fn partition_graph(
     let mut partitions: HashMap<String, GraphSnapshot> = HashMap::new();
     for (target, blocks) in target_blocks {
         let channels = target_channels.remove(&target).unwrap_or_default();
-        partitions.insert(
-            target,
-            GraphSnapshot { blocks, channels },
-        );
+        partitions.insert(target, GraphSnapshot { blocks, channels });
     }
 
     Ok(PartitionResult {
@@ -311,10 +314,7 @@ mod tests {
     #[test]
     fn single_target_no_bridges() {
         let (snap, assignments) = make_graph(
-            vec![
-                make_source_block(1, "rp2040"),
-                make_block(2, "rp2040"),
-            ],
+            vec![make_source_block(1, "rp2040"), make_block(2, "rp2040")],
             vec![make_channel(1, 1, 0, 2, 0)],
         );
 

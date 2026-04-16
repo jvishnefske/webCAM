@@ -858,20 +858,38 @@ mod tests {
 
     #[test]
     fn axis_mask_any() {
-        assert!(!AxisMask { x: false, y: false, z: false }.any());
-        assert!(AxisMask { x: true, y: false, z: false }.any());
+        assert!(!AxisMask {
+            x: false,
+            y: false,
+            z: false
+        }
+        .any());
+        assert!(AxisMask {
+            x: true,
+            y: false,
+            z: false
+        }
+        .any());
     }
 
     #[test]
     fn gcode_command_is_modal() {
         assert!(GCodeCommand::SetUnits(UnitMode::Millimeters).is_modal());
-        let rapid = GCodeCommand::RapidMove { x: None, y: None, z: None };
+        let rapid = GCodeCommand::RapidMove {
+            x: None,
+            y: None,
+            z: None,
+        };
         assert!(!rapid.is_modal());
     }
 
     #[test]
     fn gcode_command_motion_mode() {
-        let rapid = GCodeCommand::RapidMove { x: None, y: None, z: None };
+        let rapid = GCodeCommand::RapidMove {
+            x: None,
+            y: None,
+            z: None,
+        };
         assert_eq!(rapid.motion_mode(), Some(MotionMode::Rapid));
         assert_eq!(GCodeCommand::ProgramEnd.motion_mode(), None);
     }

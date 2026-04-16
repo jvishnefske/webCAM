@@ -10,7 +10,9 @@
 
 use std::cell::RefCell;
 
-use mlir_codegen::lower::{BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef, PortKind};
+use mlir_codegen::lower::{
+    BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef, PortKind,
+};
 use mlir_codegen::{build_runtime_graph, HwBridge, NullHw};
 
 // ---------------------------------------------------------------------------
@@ -104,10 +106,7 @@ fn make_channel(id: u32, from: u32, from_port: usize, to: u32, to_port: usize) -
 }
 
 fn make_snap(blocks: Vec<BlockSnapshot>, channels: Vec<Channel>) -> GraphSnapshot {
-    GraphSnapshot {
-        blocks,
-        channels,
-    }
+    GraphSnapshot { blocks, channels }
 }
 
 /// Build a JSON block object string for use in runtime tests.

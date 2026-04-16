@@ -142,9 +142,7 @@ fn infer_arg_value_ids(
             .collect()
     } else {
         // No ops at all — args start from 0.
-        (0..func.args.len() as u32)
-            .map(ValueId)
-            .collect()
+        (0..func.args.len() as u32).map(ValueId).collect()
     }
 }
 

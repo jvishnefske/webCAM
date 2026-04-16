@@ -148,8 +148,8 @@ fn bus_error_debug() {
 
 #[test]
 fn device_set_contains_address_for_switch_on_bus() {
-    use i2c_hil_sim::devices::{I2cSwitchBuilder, Tmp1075};
     use i2c_hil_sim::device_set::DeviceSet;
+    use i2c_hil_sim::devices::{I2cSwitchBuilder, Tmp1075};
 
     let switch = I2cSwitchBuilder::new(Address::new(0x70).unwrap())
         .channel(Tmp1075::new(Address::new(0x48).unwrap()))

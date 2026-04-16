@@ -660,7 +660,11 @@ fn status_word_power_good_bit() {
     let mut bus = SimBusBuilder::new().with_device(dev).build();
     let sw = read_word_le(&mut bus, 0x44, 0x79);
     let high = (sw >> 8) as u8;
-    assert_ne!(high & (1 << 3), 0, "POWER_GOOD# should set STATUS_WORD bit 11");
+    assert_ne!(
+        high & (1 << 3),
+        0,
+        "POWER_GOOD# should set STATUS_WORD bit 11"
+    );
 }
 
 #[test]
@@ -1177,7 +1181,9 @@ fn block_read_ic_device_rev() {
 fn status_byte_on_no_faults() {
     // No faults, but OPERATION defaults to 0x00 so OFF bit is set.
     // We need to write OPERATION=0x80 to clear OFF bit.
-    let mut bus = SimBusBuilder::new().with_device(Ltc4287::new(addr())).build();
+    let mut bus = SimBusBuilder::new()
+        .with_device(Ltc4287::new(addr()))
+        .build();
     write_byte(&mut bus, 0x44, 0x01, 0x80);
 
     let sb = read_byte(&mut bus, 0x44, 0x78);

@@ -2,7 +2,9 @@
 //!
 //! Tests the complete flow: GraphSnapshot → typed IR → MLIR text → Rust source.
 
-use mlir_codegen::lower::{BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef, PortKind};
+use mlir_codegen::lower::{
+    BlockId, BlockSnapshot, Channel, ChannelId, GraphSnapshot, PortDef, PortKind,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,10 +46,7 @@ fn wire(id: u32, from_block: u32, from_port: usize, to_block: u32, to_port: usiz
 }
 
 fn make_snap(blocks: Vec<BlockSnapshot>, channels: Vec<Channel>) -> GraphSnapshot {
-    GraphSnapshot {
-        blocks,
-        channels,
-    }
+    GraphSnapshot { blocks, channels }
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +335,11 @@ fn test_ir_pipeline_round_trip() {
                 vec![float_port("out")],
             ),
         ],
-        vec![wire(1, 1, 0, 2, 0), wire(2, 2, 0, 4, 0), wire(3, 3, 0, 4, 1)],
+        vec![
+            wire(1, 1, 0, 2, 0),
+            wire(2, 2, 0, 4, 0),
+            wire(3, 3, 0, 4, 1),
+        ],
     );
 
     let output = mlir_codegen::run_ir_pipeline(&snap).unwrap();

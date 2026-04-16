@@ -528,7 +528,7 @@ fn read_register_all_valid_pointers() {
     assert_eq!(dev.read_register(0x03), 0); // power (cal=0)
     assert_eq!(dev.read_register(0x04), 0); // current (cal=0)
     assert_eq!(dev.read_register(0x05), 0); // calibration
-    // 0x06 has side effect (CVRF clear) -- already tested
+                                            // 0x06 has side effect (CVRF clear) -- already tested
     assert_eq!(dev.read_register(0x07), 0); // alert_limit
     assert_eq!(dev.read_register(0xFF), 0x2260); // die_id
 }
@@ -547,14 +547,8 @@ fn read_register_unknown_returns_zero() {
 fn write_register_unknown_returns_nak() {
     use i2c_hil_sim::smbus::SmBusWordDevice;
     let mut dev = Ina230::new(addr());
-    assert_eq!(
-        dev.write_register(0x08, 0x1234),
-        Err(BusError::DataNak)
-    );
-    assert_eq!(
-        dev.write_register(0x10, 0x1234),
-        Err(BusError::DataNak)
-    );
+    assert_eq!(dev.write_register(0x08, 0x1234), Err(BusError::DataNak));
+    assert_eq!(dev.write_register(0x10, 0x1234), Err(BusError::DataNak));
 }
 
 #[test]

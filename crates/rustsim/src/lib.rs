@@ -35,11 +35,7 @@ pub fn dataflow_destroy(graph_id: u32) {
 }
 
 /// Add a block to a graph (testable helper). Returns block id.
-pub fn add_block_impl(
-    graph_id: u32,
-    block_type: &str,
-    config_json: &str,
-) -> Result<u32, String> {
+pub fn add_block_impl(graph_id: u32, block_type: &str, config_json: &str) -> Result<u32, String> {
     let block = dataflow::blocks::create_block(block_type, config_json)?;
     DATAFLOW_GRAPHS.with(|g| {
         let mut graphs = g.borrow_mut();
@@ -131,8 +127,7 @@ pub fn advance_impl(graph_id: u32, elapsed: f64) -> Result<serde_json::Value, St
             let ticks = sched.advance(elapsed);
             graph.run(ticks, sched.dt);
             let snap = graph.snapshot();
-            serde_json::to_value(&snap)
-                .map_err(|e| e.to_string())
+            serde_json::to_value(&snap).map_err(|e| e.to_string())
         })
     })
 }
@@ -147,8 +142,7 @@ pub fn run_impl(graph_id: u32, steps: u32, dt: f64) -> Result<serde_json::Value,
             .ok_or_else(|| "graph not found".to_string())?;
         graph.run(steps as u64, dt);
         let snap = graph.snapshot();
-        serde_json::to_value(&snap)
-            .map_err(|e| e.to_string())
+        serde_json::to_value(&snap).map_err(|e| e.to_string())
     })
 }
 
@@ -172,8 +166,7 @@ pub fn snapshot_impl(graph_id: u32) -> Result<serde_json::Value, String> {
             .get(&graph_id)
             .ok_or_else(|| "graph not found".to_string())?;
         let snap = graph.snapshot();
-        serde_json::to_value(&snap)
-            .map_err(|e| e.to_string())
+        serde_json::to_value(&snap).map_err(|e| e.to_string())
     })
 }
 
@@ -198,8 +191,7 @@ pub fn mcu_families_list() -> Vec<&'static str> {
 
 /// Look up an MCU definition by family name (non-WASM helper).
 pub fn get_mcu_definition(family: &str) -> Result<module_traits::inventory::McuDef, String> {
-    module_traits::inventory::mcu_for(family)
-        .ok_or_else(|| format!("unknown MCU family: {family}"))
+    module_traits::inventory::mcu_for(family).ok_or_else(|| format!("unknown MCU family: {family}"))
 }
 
 /// Return MCU pin definitions for a family (non-WASM helper).
@@ -239,8 +231,7 @@ pub fn codegen_multi_impl(graph_id: u32, dt: f64, targets_json: &str) -> Result<
             .ok_or_else(|| "graph not found".to_string())?;
         let snap = graph.snapshot().to_codegen_snapshot();
         let targets: Vec<dataflow::codegen::binding::TargetWithBinding> =
-            serde_json::from_str(targets_json)
-                .map_err(|e| format!("invalid targets JSON: {e}"))?;
+            serde_json::from_str(targets_json).map_err(|e| format!("invalid targets JSON: {e}"))?;
         let ws = dataflow::codegen::generate_workspace(&snap, dt, &targets)?;
         serde_json::to_string(&ws.files).map_err(|e| e.to_string())
     })
@@ -749,7 +740,7 @@ mod tests {
         let gid = dataflow_new(0.01);
         set_simulation_mode_impl(gid, true).unwrap();
         configure_serial_impl(gid, 0, 9600, 8, 0, 1).unwrap(); // parity=0 (None)
-        // Verify via internal API
+                                                               // Verify via internal API
         DATAFLOW_GRAPHS.with(|g| {
             let graphs = g.borrow();
             let graph = graphs.get(&gid).unwrap();
@@ -919,8 +910,7 @@ mod tests {
     #[test]
     fn test_panel_load_invalid_json() {
         // Verify that invalid JSON fails deserialization
-        let result: Result<dataflow::panel::PanelModel, _> =
-            serde_json::from_str("not valid json");
+        let result: Result<dataflow::panel::PanelModel, _> = serde_json::from_str("not valid json");
         assert!(result.is_err());
     }
 
@@ -1752,7 +1742,10 @@ mod tests {
 
     #[test]
     fn test_panel_add_widget_impl_panel_not_found() {
-        let result = panel_add_widget_impl(99999, r#"{"id":0,"kind":{"type":"Toggle"},"label":"W","position":{"x":0,"y":0},"size":{"width":50,"height":50},"channels":[]}"#);
+        let result = panel_add_widget_impl(
+            99999,
+            r#"{"id":0,"kind":{"type":"Toggle"},"label":"W","position":{"x":0,"y":0},"size":{"width":50,"height":50},"channels":[]}"#,
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("panel not found"));
     }
@@ -1815,7 +1808,11 @@ mod tests {
 
     #[test]
     fn test_panel_update_widget_impl_panel_not_found() {
-        let result = panel_update_widget_impl(99999, 1, r#"{"id":0,"kind":{"type":"Toggle"},"label":"W","position":{"x":0,"y":0},"size":{"width":50,"height":50},"channels":[]}"#);
+        let result = panel_update_widget_impl(
+            99999,
+            1,
+            r#"{"id":0,"kind":{"type":"Toggle"},"label":"W","position":{"x":0,"y":0},"size":{"width":50,"height":50},"channels":[]}"#,
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("panel not found"));
     }
@@ -1823,7 +1820,11 @@ mod tests {
     #[test]
     fn test_panel_update_widget_impl_widget_not_found() {
         let id = panel_new("Update Widget Not Found");
-        let result = panel_update_widget_impl(id, 9999, r#"{"id":0,"kind":{"type":"Toggle"},"label":"W","position":{"x":0,"y":0},"size":{"width":50,"height":50},"channels":[]}"#);
+        let result = panel_update_widget_impl(
+            id,
+            9999,
+            r#"{"id":0,"kind":{"type":"Toggle"},"label":"W","position":{"x":0,"y":0},"size":{"width":50,"height":50},"channels":[]}"#,
+        );
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("widget not found"));
         panel_destroy(id);

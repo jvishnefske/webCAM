@@ -463,7 +463,10 @@ fn computed_status_byte_on_no_faults() {
     let mut bus = make_bus();
     let mut buf = [0u8; 1];
     bus.write_read(ADDR, &[0x78], &mut buf).unwrap();
-    assert_eq!(buf[0], 0x00, "STATUS_BYTE should be 0 when ON and no faults");
+    assert_eq!(
+        buf[0], 0x00,
+        "STATUS_BYTE should be 0 when ON and no faults"
+    );
 }
 
 #[test]
@@ -471,7 +474,11 @@ fn computed_status_word_on_no_faults() {
     let mut bus = make_bus();
     let mut buf = [0u8; 2];
     bus.write_read(ADDR, &[0x79], &mut buf).unwrap();
-    assert_eq!(u16::from_le_bytes(buf), 0x0000, "STATUS_WORD should be 0 when ON and no faults");
+    assert_eq!(
+        u16::from_le_bytes(buf),
+        0x0000,
+        "STATUS_WORD should be 0 when ON and no faults"
+    );
 }
 
 #[test]

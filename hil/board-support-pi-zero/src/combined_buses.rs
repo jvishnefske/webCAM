@@ -131,7 +131,9 @@ impl I2cBusSet for CombinedBusSet {
             None
         } else {
             let idx = self.sim_index(bus)?;
-            self.sim_buses[idx].device_registers(addr).map(|r| r.as_slice())
+            self.sim_buses[idx]
+                .device_registers(addr)
+                .map(|r| r.as_slice())
         }
     }
 
@@ -188,7 +190,9 @@ impl I2cBusSet for CombinedBusSet {
 
     fn set_bus_count(&mut self, count: u8) -> Result<(), BusSetError> {
         let linux_count = self.linux_buses.len() as u8;
-        let new_sim_count = count.checked_sub(linux_count).ok_or(BusSetError::InvalidBus)?;
+        let new_sim_count = count
+            .checked_sub(linux_count)
+            .ok_or(BusSetError::InvalidBus)?;
         if new_sim_count as usize > self.sim_buses.len() {
             return Err(BusSetError::InvalidBus);
         }
