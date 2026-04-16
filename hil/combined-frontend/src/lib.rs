@@ -2,7 +2,7 @@
 //!
 //! Consolidates three separate frontends into one Leptos 0.7 CSR application
 //! served from the Pico2 MCU's HTTP server. Shares `module-traits` and
-//! `dag-core` types directly in Rust — no TypeScript mirror types.
+//! `dag-core` types directly in Rust -- no TypeScript mirror types.
 
 #![forbid(unsafe_code)]
 

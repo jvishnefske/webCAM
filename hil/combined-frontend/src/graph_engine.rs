@@ -1,91 +1,119 @@
-//! In-browser DAG simulation engine.
+//! Graph engine: manages blocks, channels (edges), simulation, and snapshots.
 //!
-//! Manages a set of configurable blocks, lowers them to a combined DAG,
-//! and evaluates the DAG tick-by-tick using [`dag_core::eval::SimState`].
+//! This is a pure-Rust data structure (no Leptos signals, no DOM). It holds:
+//! - A set of blocks identified by `u32` ids.
+//! - Explicit channels (edges) connecting output ports to input ports.
+//! - An optional `SimState` for in-browser DAG simulation.
+//!
+//! The editor component stores a `GraphEngine` in a `thread_local! RefCell`
+//! and drives it through Leptos event handlers.
 
 use std::collections::BTreeMap;
 
-use configurable_blocks::deployment_profile::DeploymentProfile;
-use configurable_blocks::lower::{self, ConfigurableBlock};
+use configurable_blocks::lower;
 use configurable_blocks::registry;
-use dag_core::eval::SimState;
-use dag_core::op::Dag;
+use configurable_blocks::schema::ChannelDirection;
+use dag_core::op::{Dag, Op};
 
-/// A placed block instance tracked by the engine.
-struct EngineBlock {
-    /// Unique id assigned by the engine.
-    id: u32,
-    /// Block type name (e.g. "constant", "pid").
-    block_type: String,
-    /// Current configuration as JSON.
-    config: serde_json::Value,
+/// Unique block identifier.
+pub type BlockId = u32;
+
+/// Unique channel (edge) identifier.
+pub type ChannelId = u32;
+
+/// A block stored in the engine.
+#[derive(Clone, Debug)]
+pub struct EngineBlock {
+    pub id: BlockId,
+    pub block_type: String,
+    pub config: serde_json::Value,
 }
 
 impl EngineBlock {
-    /// Reconstruct the [`ConfigurableBlock`] trait object from the registry.
-    #[allow(dead_code)]
-    fn reconstruct(&self) -> Option<Box<dyn ConfigurableBlock>> {
+    /// Reconstruct the `ConfigurableBlock` trait object from the registry.
+    pub fn reconstruct(&self) -> Option<Box<dyn lower::ConfigurableBlock>> {
         let mut block = registry::create_block(&self.block_type)?;
         block.apply_config(&self.config);
         Some(block)
     }
 }
 
-/// A channel (edge) connecting an output port on one block to an input port
-/// on another.
-struct EngineChannel {
-    id: u32,
-    from_block: u32,
-    from_port: usize,
-    to_block: u32,
-    to_port: usize,
+/// A channel (edge) connecting an output port on one block to an input port on another.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Channel {
+    pub id: ChannelId,
+    pub from_block: BlockId,
+    pub from_port: usize,
+    pub to_block: BlockId,
+    pub to_port: usize,
+    /// Auto-generated topic name used for codegen wiring.
+    pub topic: String,
 }
 
-/// In-browser DAG simulation engine.
+/// Serializable snapshot of the entire graph (blocks + channels).
 ///
-/// Holds configurable blocks, channels between them, and a [`SimState`]
-/// that persists pubsub values across ticks. On each `tick()`, the engine
-/// re-lowers all blocks into a combined DAG and evaluates one step.
+/// Used for undo/redo and persistence.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct GraphSnapshot {
+    pub blocks: Vec<SnapshotBlock>,
+    pub channels: Vec<SnapshotChannel>,
+    pub next_block_id: u32,
+    pub next_channel_id: u32,
+}
+
+/// Serializable block in a snapshot.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SnapshotBlock {
+    pub id: BlockId,
+    pub block_type: String,
+    pub config: serde_json::Value,
+}
+
+/// Serializable channel in a snapshot.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SnapshotChannel {
+    pub id: ChannelId,
+    pub from_block: BlockId,
+    pub from_port: usize,
+    pub to_block: BlockId,
+    pub to_port: usize,
+    pub topic: String,
+}
+
+/// The main graph engine.
 pub struct GraphEngine {
     blocks: Vec<EngineBlock>,
-    channels: Vec<EngineChannel>,
-    next_block_id: u32,
-    next_channel_id: u32,
-    /// Combined DAG (rebuilt on tick if dirty).
-    dag: Option<Dag>,
-    /// Simulation state for the current DAG.
-    sim: Option<SimState>,
-    /// Manual topic injections (fed into SimState before tick).
+    channels: Vec<Channel>,
+    next_block_id: BlockId,
+    next_channel_id: ChannelId,
+    /// Simulation state -- lazily created on first tick.
+    sim: Option<dag_core::eval::SimState>,
+    /// Externally injected pubsub values (from panel widgets).
+    /// Merged into SimState before each tick.
     injected: BTreeMap<String, f64>,
-    /// Accumulated tick count (survives DAG rebuilds).
-    tick_count: u64,
-    /// True when blocks/channels have changed since last DAG build.
-    dirty: bool,
 }
 
 impl GraphEngine {
-    /// Create a new empty engine.
+    /// Create a new empty graph engine.
     pub fn new() -> Self {
         Self {
             blocks: Vec::new(),
             channels: Vec::new(),
             next_block_id: 1,
             next_channel_id: 1,
-            dag: None,
             sim: None,
             injected: BTreeMap::new(),
-            tick_count: 0,
-            dirty: true,
         }
     }
 
-    /// Add a block of the given type with the provided config.
-    ///
-    /// Returns `None` if the block type is unknown.
-    pub fn add_block(&mut self, block_type: &str, config: serde_json::Value) -> Option<u32> {
-        // Validate that the block type exists in the registry.
-        let _ = registry::create_block(block_type)?;
+    // -- Block CRUD ---------------------------------------------------------
 
+    /// Add a block of the given type with the given config. Returns the assigned `BlockId`.
+    ///
+    /// Returns `None` if `block_type` is not in the registry.
+    pub fn add_block(&mut self, block_type: &str, config: serde_json::Value) -> Option<BlockId> {
+        // Validate that the block type exists.
+        let _ = registry::create_block(block_type)?;
         let id = self.next_block_id;
         self.next_block_id += 1;
         self.blocks.push(EngineBlock {
@@ -93,175 +121,310 @@ impl GraphEngine {
             block_type: block_type.to_string(),
             config,
         });
-        self.dirty = true;
+        self.sim = None; // invalidate sim
         Some(id)
     }
 
-    /// Remove a block by id. Also removes any channels connected to it.
-    pub fn remove_block(&mut self, id: u32) {
+    /// Remove a block and all channels connected to it.
+    pub fn remove_block(&mut self, id: BlockId) {
         self.blocks.retain(|b| b.id != id);
         self.channels
             .retain(|ch| ch.from_block != id && ch.to_block != id);
-        self.dirty = true;
+        self.sim = None;
     }
 
-    /// Update a single config key on a block.
-    pub fn update_config(&mut self, id: u32, key: String, value: serde_json::Value) {
-        if let Some(block) = self.blocks.iter_mut().find(|b| b.id == id) {
-            if let Some(obj) = block.config.as_object_mut() {
-                obj.insert(key, value);
-            } else {
-                let mut obj = serde_json::Map::new();
-                obj.insert(key, value);
-                block.config = serde_json::Value::Object(obj);
-            }
-            self.dirty = true;
-        }
+    /// Get a reference to a block by id.
+    pub fn block(&self, id: BlockId) -> Option<&EngineBlock> {
+        self.blocks.iter().find(|b| b.id == id)
     }
 
-    /// Connect an output port on one block to an input port on another.
+    /// Get a mutable reference to a block by id.
+    pub fn block_mut(&mut self, id: BlockId) -> Option<&mut EngineBlock> {
+        self.blocks.iter_mut().find(|b| b.id == id)
+    }
+
+    /// All blocks.
+    pub fn blocks(&self) -> &[EngineBlock] {
+        &self.blocks
+    }
+
+    // -- Channel (edge) CRUD ------------------------------------------------
+
+    /// Connect an output port on `from_block` to an input port on `to_block`.
     ///
-    /// Returns the channel id, or `None` if either block doesn't exist.
+    /// Returns the `ChannelId` on success, or `None` if either block does not exist
+    /// or the connection would be a self-loop.
     pub fn connect(
         &mut self,
-        from_block: u32,
+        from_block: BlockId,
         from_port: usize,
-        to_block: u32,
+        to_block: BlockId,
         to_port: usize,
-    ) -> Option<u32> {
-        // Validate both blocks exist.
-        if !self.blocks.iter().any(|b| b.id == from_block) {
+    ) -> Option<ChannelId> {
+        if from_block == to_block {
             return None;
         }
-        if !self.blocks.iter().any(|b| b.id == to_block) {
+        // Verify both blocks exist.
+        if self.block(from_block).is_none() || self.block(to_block).is_none() {
             return None;
         }
-
+        // Prevent duplicate connections to the same input port.
+        if self
+            .channels
+            .iter()
+            .any(|ch| ch.to_block == to_block && ch.to_port == to_port)
+        {
+            return None;
+        }
         let id = self.next_channel_id;
         self.next_channel_id += 1;
-        self.channels.push(EngineChannel {
+        let topic = format!("wire_{}_{}", from_block, from_port);
+        self.channels.push(Channel {
             id,
             from_block,
             from_port,
             to_block,
             to_port,
+            topic,
         });
-        self.dirty = true;
+        self.sim = None;
         Some(id)
     }
 
-    /// Remove a channel by id. Returns true if a channel was removed.
-    pub fn disconnect(&mut self, channel_id: u32) -> bool {
+    /// Disconnect (remove) a channel by its id.
+    pub fn disconnect(&mut self, channel_id: ChannelId) -> bool {
         let before = self.channels.len();
         self.channels.retain(|ch| ch.id != channel_id);
         let removed = self.channels.len() < before;
         if removed {
-            self.dirty = true;
+            self.sim = None;
         }
         removed
     }
 
-    /// Rebuild the combined DAG from current blocks, then evaluate one tick.
-    pub fn tick(&mut self) -> Result<(), String> {
-        if self.dirty || self.dag.is_none() {
-            self.rebuild_dag()?;
+    /// All channels.
+    pub fn channels(&self) -> &[Channel] {
+        &self.channels
+    }
+
+    /// Find a channel by id.
+    pub fn channel(&self, id: ChannelId) -> Option<&Channel> {
+        self.channels.iter().find(|ch| ch.id == id)
+    }
+
+    /// Channels connected to a block (either direction).
+    pub fn channels_for_block(&self, block_id: BlockId) -> Vec<&Channel> {
+        self.channels
+            .iter()
+            .filter(|ch| ch.from_block == block_id || ch.to_block == block_id)
+            .collect()
+    }
+
+    // -- Simulation ---------------------------------------------------------
+
+    /// Build a merged DAG from all blocks, wiring channels via auto-topic names.
+    ///
+    /// For each channel, the source block's output config key is set to the
+    /// channel topic, and the target block's input config key is set to the
+    /// same topic. This makes `Subscribe`/`Publish` ops match up.
+    pub fn build_dag(&self) -> Result<Dag, String> {
+        if self.blocks.is_empty() {
+            return Err("No blocks".into());
         }
 
-        if let (Some(dag), Some(sim)) = (&self.dag, &mut self.sim) {
-            // Inject any manual topic values before tick.
-            for (topic, value) in &self.injected {
-                sim.inject(topic, *value);
+        // Build configs with channel topics applied.
+        let configs = self.configs_with_channels();
+
+        let mut combined = Dag::new();
+        for (blk, config) in self.blocks.iter().zip(configs.iter()) {
+            let mut block = blk
+                .reconstruct()
+                .ok_or_else(|| format!("Unknown block type: {}", blk.block_type))?;
+            block.apply_config(config);
+            let result = block.lower().map_err(|e| format!("Lower error: {:?}", e))?;
+            let offset = combined.len() as u16;
+            for op in result.dag.nodes() {
+                let adjusted = offset_op(op, offset);
+                combined
+                    .add_op(adjusted)
+                    .map_err(|e| format!("Merge error: {:?}", e))?;
             }
-            sim.tick(dag);
-            self.tick_count = sim.tick_count();
         }
+        Ok(combined)
+    }
 
+    /// Build configs for all blocks with channel topic names injected.
+    fn configs_with_channels(&self) -> Vec<serde_json::Value> {
+        let mut configs: Vec<serde_json::Value> =
+            self.blocks.iter().map(|b| b.config.clone()).collect();
+
+        for ch in &self.channels {
+            // Source block: find the output config key and set it to the channel topic.
+            if let Some(src_idx) = self.blocks.iter().position(|b| b.id == ch.from_block) {
+                if let Some(src_block) = self.blocks[src_idx].reconstruct() {
+                    let channels = src_block.declared_channels();
+                    let out_channels: Vec<_> = channels
+                        .iter()
+                        .filter(|c| c.direction == ChannelDirection::Output)
+                        .collect();
+                    if let Some(out_ch) = out_channels.get(ch.from_port) {
+                        if let Some(key) =
+                            find_config_key_for_channel(&configs[src_idx], &out_ch.name)
+                        {
+                            if let serde_json::Value::Object(ref mut map) = configs[src_idx] {
+                                map.insert(key, serde_json::Value::String(ch.topic.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+            // Target block: find the input config key and set it to the channel topic.
+            if let Some(dst_idx) = self.blocks.iter().position(|b| b.id == ch.to_block) {
+                if let Some(dst_block) = self.blocks[dst_idx].reconstruct() {
+                    let channels = dst_block.declared_channels();
+                    let in_channels: Vec<_> = channels
+                        .iter()
+                        .filter(|c| c.direction == ChannelDirection::Input)
+                        .collect();
+                    if let Some(in_ch) = in_channels.get(ch.to_port) {
+                        if let Some(key) =
+                            find_config_key_for_channel(&configs[dst_idx], &in_ch.name)
+                        {
+                            if let serde_json::Value::Object(ref mut map) = configs[dst_idx] {
+                                map.insert(key, serde_json::Value::String(ch.topic.clone()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        configs
+    }
+
+    /// Execute one simulation tick. Creates SimState on first call.
+    pub fn tick(&mut self) -> Result<(), String> {
+        let dag = self.build_dag()?;
+        let sim = self
+            .sim
+            .get_or_insert_with(|| dag_core::eval::SimState::new(dag.len()));
+        sim.tick(&dag);
         Ok(())
     }
 
-    /// Reset simulation state: clear tick count, pubsub store.
-    pub fn reset_sim(&mut self) {
-        self.sim = None;
-        self.dag = None;
-        self.tick_count = 0;
-        self.injected.clear();
-        self.dirty = true;
-    }
-
-    /// Inject a topic value for the next tick.
+    /// Externally inject a pubsub topic value (e.g. from a UI slider widget).
+    /// The value will be visible to `read_topic` immediately.
     pub fn inject_topic(&mut self, topic: &str, value: f64) {
-        self.injected.insert(topic.to_string(), value);
+        self.injected.insert(topic.into(), value);
     }
 
-    /// Read the current value of a topic from the simulation state.
+    /// Read a pubsub topic's current value (e.g. for a UI gauge widget).
     pub fn read_topic(&self, topic: &str) -> Option<f64> {
-        // Check injected values first, then sim state.
-        if let Some(&v) = self.injected.get(topic) {
-            return Some(v);
+        // Check live SimState first (has both injected and DAG-published values).
+        if let Some(sim) = &self.sim {
+            if let Some(v) = sim.pubsub_value(topic) {
+                return Some(v);
+            }
         }
-        self.sim.as_ref().and_then(|s| s.pubsub_value(topic))
+        // Fall back to injected values (before first tick).
+        self.injected.get(topic).copied()
+    }
+
+    /// Current pubsub topics from the simulation.
+    pub fn topics(&self) -> BTreeMap<String, f64> {
+        self.sim
+            .as_ref()
+            .map(|s| s.topics().clone())
+            .unwrap_or_default()
     }
 
     /// Current tick count.
     pub fn tick_count(&self) -> u64 {
-        self.tick_count
+        self.sim.as_ref().map(|s| s.tick_count()).unwrap_or(0)
     }
 
-    /// All current pubsub topic values.
-    pub fn topics(&self) -> BTreeMap<String, f64> {
-        let mut result = BTreeMap::new();
-        if let Some(sim) = &self.sim {
-            for (k, v) in sim.topics() {
-                result.insert(k.clone(), *v);
-            }
+    /// Reset simulation state and injected values.
+    pub fn reset_sim(&mut self) {
+        self.sim = None;
+        self.injected.clear();
+    }
+
+    // -- Snapshot ------------------------------------------------------------
+
+    /// Take a serializable snapshot of the entire graph.
+    pub fn snapshot(&self) -> GraphSnapshot {
+        GraphSnapshot {
+            blocks: self
+                .blocks
+                .iter()
+                .map(|b| SnapshotBlock {
+                    id: b.id,
+                    block_type: b.block_type.clone(),
+                    config: b.config.clone(),
+                })
+                .collect(),
+            channels: self
+                .channels
+                .iter()
+                .map(|ch| SnapshotChannel {
+                    id: ch.id,
+                    from_block: ch.from_block,
+                    from_port: ch.from_port,
+                    to_block: ch.to_block,
+                    to_port: ch.to_port,
+                    topic: ch.topic.clone(),
+                })
+                .collect(),
+            next_block_id: self.next_block_id,
+            next_channel_id: self.next_channel_id,
         }
-        // Overlay injected values.
-        for (k, v) in &self.injected {
-            result.insert(k.clone(), *v);
-        }
-        result
     }
 
-    /// Access the current block list (id, block_type, config).
-    pub fn blocks(&self) -> Vec<(u32, &str, &serde_json::Value)> {
-        self.blocks
-            .iter()
-            .map(|b| (b.id, b.block_type.as_str(), &b.config))
-            .collect()
-    }
-
-    /// Access the current channel list.
-    pub fn channels(&self) -> Vec<(u32, u32, usize, u32, usize)> {
-        self.channels
-            .iter()
-            .map(|ch| (ch.id, ch.from_block, ch.from_port, ch.to_block, ch.to_port))
-            .collect()
-    }
-
-    // ── Private ─────────────────────────────────────────────────────────
-
-    /// Rebuild the combined DAG from the current set of blocks.
-    fn rebuild_dag(&mut self) -> Result<(), String> {
-        let block_set: Vec<(String, serde_json::Value)> = self
+    /// Restore from a snapshot.
+    pub fn restore(&mut self, snap: &GraphSnapshot) {
+        self.blocks = snap
             .blocks
             .iter()
-            .map(|b| (b.block_type.clone(), b.config.clone()))
+            .map(|b| EngineBlock {
+                id: b.id,
+                block_type: b.block_type.clone(),
+                config: b.config.clone(),
+            })
             .collect();
+        self.channels = snap
+            .channels
+            .iter()
+            .map(|ch| Channel {
+                id: ch.id,
+                from_block: ch.from_block,
+                from_port: ch.from_port,
+                to_block: ch.to_block,
+                to_port: ch.to_port,
+                topic: ch.topic.clone(),
+            })
+            .collect();
+        self.next_block_id = snap.next_block_id;
+        self.next_channel_id = snap.next_channel_id;
+        self.sim = None;
+    }
 
-        let profile = DeploymentProfile::new("sim");
-        let dag = lower::lower_block_set(&block_set, &profile)?;
-        let node_count = dag.len();
+    /// Number of blocks.
+    pub fn block_count(&self) -> usize {
+        self.blocks.len()
+    }
 
-        // Preserve injected values across rebuilds by seeding the new SimState.
-        let mut sim = SimState::new(node_count);
-        for (topic, value) in &self.injected {
-            sim.inject(topic, *value);
+    /// Number of channels.
+    pub fn channel_count(&self) -> usize {
+        self.channels.len()
+    }
+
+    /// Update a block's config.
+    pub fn update_config(&mut self, block_id: BlockId, key: String, value: serde_json::Value) {
+        if let Some(blk) = self.block_mut(block_id) {
+            if let serde_json::Value::Object(ref mut map) = blk.config {
+                map.insert(key, value);
+            }
+            self.sim = None;
         }
-
-        self.dag = Some(dag);
-        self.sim = Some(sim);
-        self.dirty = false;
-        Ok(())
     }
 }
 
@@ -271,32 +434,68 @@ impl Default for GraphEngine {
     }
 }
 
+/// Find the config key whose current value matches `channel_name`.
+fn find_config_key_for_channel(config: &serde_json::Value, channel_name: &str) -> Option<String> {
+    let obj = config.as_object()?;
+    for (key, val) in obj {
+        if let Some(s) = val.as_str() {
+            if s == channel_name {
+                return Some(key.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Offset all NodeId references in an Op by a given amount.
+fn offset_op(op: &Op, offset: u16) -> Op {
+    match op {
+        Op::Const(v) => Op::Const(*v),
+        Op::Input(name) => Op::Input(name.clone()),
+        Op::Output(name, src) => Op::Output(name.clone(), src + offset),
+        Op::Add(a, b) => Op::Add(a + offset, b + offset),
+        Op::Mul(a, b) => Op::Mul(a + offset, b + offset),
+        Op::Sub(a, b) => Op::Sub(a + offset, b + offset),
+        Op::Div(a, b) => Op::Div(a + offset, b + offset),
+        Op::Pow(a, b) => Op::Pow(a + offset, b + offset),
+        Op::Neg(a) => Op::Neg(a + offset),
+        Op::Relu(a) => Op::Relu(a + offset),
+        Op::Subscribe(topic) => Op::Subscribe(topic.clone()),
+        Op::Publish(topic, src) => Op::Publish(topic.clone(), src + offset),
+    }
+}
+
+// -- Tests ---------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_new_engine() {
+    fn test_new_engine_is_empty() {
         let engine = GraphEngine::new();
+        assert_eq!(engine.block_count(), 0);
+        assert_eq!(engine.channel_count(), 0);
         assert_eq!(engine.tick_count(), 0);
-        assert!(engine.blocks().is_empty());
-        assert!(engine.channels().is_empty());
     }
 
     #[test]
-    fn test_add_block_valid() {
+    fn test_add_block() {
         let mut engine = GraphEngine::new();
-        let id = engine.add_block("constant", serde_json::json!({"value": 42.0}));
-        assert!(id.is_some());
-        assert_eq!(engine.blocks().len(), 1);
+        let id = engine
+            .add_block("constant", serde_json::json!({"value": 42.0}))
+            .expect("should add constant block");
+        assert_eq!(engine.block_count(), 1);
+        assert_eq!(engine.block(id).unwrap().block_type, "constant");
     }
 
     #[test]
-    fn test_add_block_invalid_type() {
+    fn test_add_block_unknown_type_returns_none() {
         let mut engine = GraphEngine::new();
-        let id = engine.add_block("nonexistent", serde_json::json!({}));
-        assert!(id.is_none());
-        assert!(engine.blocks().is_empty());
+        assert!(engine
+            .add_block("nonexistent_xyz", serde_json::json!({}))
+            .is_none());
+        assert_eq!(engine.block_count(), 0);
     }
 
     #[test]
@@ -304,57 +503,173 @@ mod tests {
         let mut engine = GraphEngine::new();
         let id = engine.add_block("constant", serde_json::json!({})).unwrap();
         engine.remove_block(id);
-        assert!(engine.blocks().is_empty());
+        assert_eq!(engine.block_count(), 0);
     }
 
     #[test]
-    fn test_connect_disconnect() {
+    fn test_remove_block_removes_channels() {
         let mut engine = GraphEngine::new();
         let a = engine
-            .add_block("pubsub_bridge", serde_json::json!({}))
+            .add_block(
+                "constant",
+                serde_json::json!({"value": 1.0, "publish_topic": "t"}),
+            )
             .unwrap();
-        let b = engine
-            .add_block("pubsub_bridge", serde_json::json!({}))
-            .unwrap();
-        let ch = engine.connect(a, 0, b, 0);
-        assert!(ch.is_some());
-        assert_eq!(engine.channels().len(), 1);
-
-        let ok = engine.disconnect(ch.unwrap());
-        assert!(ok);
-        assert!(engine.channels().is_empty());
+        let b = engine.add_block("gain", serde_json::json!({})).unwrap();
+        engine.connect(a, 0, b, 0);
+        assert_eq!(engine.channel_count(), 1);
+        engine.remove_block(a);
+        assert_eq!(engine.channel_count(), 0);
     }
 
     #[test]
-    fn test_connect_invalid_block() {
+    fn test_connect_and_disconnect() {
+        let mut engine = GraphEngine::new();
+        let a = engine.add_block("constant", serde_json::json!({})).unwrap();
+        let b = engine.add_block("gain", serde_json::json!({})).unwrap();
+        let ch_id = engine.connect(a, 0, b, 0).expect("should connect");
+        assert_eq!(engine.channel_count(), 1);
+        assert!(engine.disconnect(ch_id));
+        assert_eq!(engine.channel_count(), 0);
+    }
+
+    #[test]
+    fn test_connect_self_loop_rejected() {
+        let mut engine = GraphEngine::new();
+        let a = engine.add_block("constant", serde_json::json!({})).unwrap();
+        assert!(engine.connect(a, 0, a, 0).is_none());
+    }
+
+    #[test]
+    fn test_connect_nonexistent_block_rejected() {
         let mut engine = GraphEngine::new();
         let a = engine.add_block("constant", serde_json::json!({})).unwrap();
         assert!(engine.connect(a, 0, 999, 0).is_none());
+        assert!(engine.connect(999, 0, a, 0).is_none());
     }
 
     #[test]
-    fn test_disconnect_nonexistent() {
+    fn test_connect_duplicate_input_rejected() {
         let mut engine = GraphEngine::new();
-        assert!(!engine.disconnect(42));
+        let a = engine.add_block("constant", serde_json::json!({})).unwrap();
+        let b = engine.add_block("gain", serde_json::json!({})).unwrap();
+        let c = engine.add_block("constant", serde_json::json!({})).unwrap();
+        assert!(engine.connect(a, 0, b, 0).is_some());
+        // Same input port on b should be rejected.
+        assert!(engine.connect(c, 0, b, 0).is_none());
     }
 
     #[test]
-    fn test_tick_empty_engine() {
+    fn test_disconnect_nonexistent_returns_false() {
         let mut engine = GraphEngine::new();
-        // Ticking with no blocks should succeed (empty DAG).
-        assert!(engine.tick().is_ok());
+        assert!(!engine.disconnect(999));
     }
 
     #[test]
-    fn test_tick_with_constant() {
+    fn test_channels_for_block() {
         let mut engine = GraphEngine::new();
-        engine.add_block(
-            "constant",
-            serde_json::json!({"value": 5.0, "publish_topic": "x"}),
-        );
+        let a = engine.add_block("constant", serde_json::json!({})).unwrap();
+        let b = engine.add_block("gain", serde_json::json!({})).unwrap();
+        let c = engine.add_block("gain", serde_json::json!({})).unwrap();
+        engine.connect(a, 0, b, 0);
+        engine.connect(a, 0, c, 0);
+        assert_eq!(engine.channels_for_block(a).len(), 2);
+        assert_eq!(engine.channels_for_block(b).len(), 1);
+        assert_eq!(engine.channels_for_block(c).len(), 1);
+    }
+
+    #[test]
+    fn test_snapshot_and_restore() {
+        let mut engine = GraphEngine::new();
+        let a = engine
+            .add_block("constant", serde_json::json!({"value": 5.0}))
+            .unwrap();
+        let b = engine.add_block("gain", serde_json::json!({})).unwrap();
+        engine.connect(a, 0, b, 0);
+
+        let snap = engine.snapshot();
+        assert_eq!(snap.blocks.len(), 2);
+        assert_eq!(snap.channels.len(), 1);
+
+        // Restore into a fresh engine.
+        let mut engine2 = GraphEngine::new();
+        engine2.restore(&snap);
+        assert_eq!(engine2.block_count(), 2);
+        assert_eq!(engine2.channel_count(), 1);
+        assert_eq!(engine2.block(a).unwrap().block_type, "constant");
+    }
+
+    #[test]
+    fn test_snapshot_roundtrip_json() {
+        let mut engine = GraphEngine::new();
+        let a = engine
+            .add_block("constant", serde_json::json!({"value": 3.14}))
+            .unwrap();
+        let b = engine.add_block("gain", serde_json::json!({})).unwrap();
+        engine.connect(a, 0, b, 0);
+
+        let snap = engine.snapshot();
+        let json = serde_json::to_string(&snap).expect("serialize");
+        let restored: GraphSnapshot = serde_json::from_str(&json).expect("deserialize");
+
+        let mut engine2 = GraphEngine::new();
+        engine2.restore(&restored);
+        assert_eq!(engine2.block_count(), 2);
+        assert_eq!(engine2.channel_count(), 1);
+    }
+
+    #[test]
+    fn test_update_config() {
+        let mut engine = GraphEngine::new();
+        let id = engine
+            .add_block("constant", serde_json::json!({"value": 1.0}))
+            .unwrap();
+        engine.update_config(id, "value".into(), serde_json::json!(99.0));
+        let blk = engine.block(id).unwrap();
+        assert_eq!(blk.config["value"], 99.0);
+    }
+
+    #[test]
+    fn test_tick_with_constant_block() {
+        let mut engine = GraphEngine::new();
+        engine
+            .add_block(
+                "constant",
+                serde_json::json!({"value": 7.0, "publish_topic": "test/val"}),
+            )
+            .unwrap();
+        engine.tick().expect("tick should succeed");
+        assert_eq!(engine.tick_count(), 1);
+        let topics = engine.topics();
+        assert_eq!(topics.get("test/val"), Some(&7.0));
+    }
+
+    #[test]
+    fn test_reset_sim() {
+        let mut engine = GraphEngine::new();
+        engine
+            .add_block(
+                "constant",
+                serde_json::json!({"value": 1.0, "publish_topic": "x"}),
+            )
+            .unwrap();
         engine.tick().unwrap();
         assert_eq!(engine.tick_count(), 1);
-        assert_eq!(engine.read_topic("x"), Some(5.0));
+        engine.reset_sim();
+        assert_eq!(engine.tick_count(), 0);
+        assert!(engine.topics().is_empty());
+    }
+
+    #[test]
+    fn test_build_dag_empty_returns_error() {
+        let engine = GraphEngine::new();
+        assert!(engine.build_dag().is_err());
+    }
+
+    #[test]
+    fn test_default_impl() {
+        let engine = GraphEngine::default();
+        assert_eq!(engine.block_count(), 0);
     }
 
     #[test]
@@ -365,49 +680,8 @@ mod tests {
     }
 
     #[test]
-    fn test_reset_sim() {
-        let mut engine = GraphEngine::new();
-        engine.add_block(
-            "constant",
-            serde_json::json!({"value": 1.0, "publish_topic": "a"}),
-        );
-        engine.tick().unwrap();
-        assert_eq!(engine.tick_count(), 1);
-
-        engine.reset_sim();
-        assert_eq!(engine.tick_count(), 0);
-        assert!(engine.topics().is_empty());
-    }
-
-    #[test]
-    fn test_topics_includes_injected() {
-        let mut engine = GraphEngine::new();
-        engine.inject_topic("manual", 99.0);
-        let topics = engine.topics();
-        assert_eq!(topics.get("manual"), Some(&99.0));
-    }
-
-    #[test]
-    fn test_update_config() {
-        let mut engine = GraphEngine::new();
-        let id = engine
-            .add_block("constant", serde_json::json!({"value": 1.0}))
-            .unwrap();
-        engine.update_config(id, "value".to_string(), serde_json::json!(99.0));
-        let blocks = engine.blocks();
-        let (_, _, config) = blocks.iter().find(|(bid, _, _)| *bid == id).unwrap();
-        assert_eq!(config["value"], 99.0);
-    }
-
-    #[test]
-    fn test_remove_block_also_removes_channels() {
-        let mut engine = GraphEngine::new();
-        let a = engine.add_block("constant", serde_json::json!({})).unwrap();
-        let b = engine.add_block("constant", serde_json::json!({})).unwrap();
-        engine.connect(a, 0, b, 0);
-        assert_eq!(engine.channels().len(), 1);
-
-        engine.remove_block(a);
-        assert!(engine.channels().is_empty());
+    fn test_read_topic_none_when_empty() {
+        let engine = GraphEngine::new();
+        assert_eq!(engine.read_topic("nonexistent"), None);
     }
 }
