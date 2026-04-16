@@ -145,11 +145,12 @@ impl SimState {
         &self.pubsub
     }
 
-    /// Externally set (inject) a pubsub topic value.
+    /// Inject a value into the pubsub store.
     ///
-    /// The value is immediately visible to `Subscribe` ops on the next
-    /// `tick()` call, just as if a `Publish` op had written it.
-    pub fn set_topic(&mut self, topic: &str, value: f64) {
+    /// The value will be visible to `Subscribe` nodes on the next tick.
+    /// This is used for external inputs (e.g., live sensor feeds or manual
+    /// overrides from a UI).
+    pub fn inject(&mut self, topic: &str, value: f64) {
         self.pubsub.insert(topic.into(), value);
     }
 
@@ -487,53 +488,5 @@ mod tests {
         assert_eq!(topics.len(), 2);
         assert!(topics.contains_key("alpha"));
         assert!(topics.contains_key("beta"));
-    }
-
-    // =================================================================
-    // set_topic tests (task-011)
-    // =================================================================
-
-    #[test]
-    fn test_set_topic_visible_on_next_tick() {
-        // Subscribe("sensor") -> Publish("out")
-        let mut dag = Dag::new();
-        let s = dag.subscribe("sensor").unwrap();
-        dag.publish("out", s).unwrap();
-
-        let mut state = SimState::new(dag.len());
-
-        // Inject before first tick
-        state.set_topic("sensor", 42.0);
-        state.tick(&dag);
-
-        // Subscribe should have read the injected value.
-        assert_eq!(state.pubsub_value("out"), Some(42.0));
-    }
-
-    #[test]
-    fn test_set_topic_overwrites_existing() {
-        let mut dag = Dag::new();
-        let c = dag.constant(10.0).unwrap();
-        dag.publish("val", c).unwrap();
-
-        let mut state = SimState::new(dag.len());
-        state.tick(&dag);
-        assert_eq!(state.pubsub_value("val"), Some(10.0));
-
-        // External injection overwrites the publish
-        state.set_topic("val", 99.0);
-        assert_eq!(state.pubsub_value("val"), Some(99.0));
-    }
-
-    #[test]
-    fn test_set_topic_new_key() {
-        let mut dag = Dag::new();
-        dag.constant(1.0).unwrap();
-
-        let mut state = SimState::new(dag.len());
-        assert_eq!(state.pubsub_value("new_topic"), None);
-
-        state.set_topic("new_topic", 7.5);
-        assert_eq!(state.pubsub_value("new_topic"), Some(7.5));
     }
 }

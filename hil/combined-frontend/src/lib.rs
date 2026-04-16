@@ -21,6 +21,7 @@ pub mod storage;
 pub mod components;
 pub mod firmware_util;
 pub mod graph_engine;
+pub mod graph_state;
 pub mod hex;
 pub mod messages;
 pub mod panel_types;
