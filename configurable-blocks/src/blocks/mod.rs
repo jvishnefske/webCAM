@@ -82,7 +82,8 @@ pub fn registry() -> Vec<BlockEntry> {
             block_type: "map_scale",
             display_name: "Map/Scale",
             category: BlockCategory::Math,
-            description: "Linear mapping: (in - in_min)/(in_max - in_min) * (out_max - out_min) + out_min",
+            description:
+                "Linear mapping: (in - in_min)/(in_max - in_min) * (out_max - out_min) + out_min",
             create: || Box::new(basic::MapScaleBlock::default()),
         },
         BlockEntry {

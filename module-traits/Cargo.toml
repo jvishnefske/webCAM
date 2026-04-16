@@ -11,8 +11,10 @@ workspace = true
 [features]
 default = []
 tsify = ["dep:tsify-next", "dep:wasm-bindgen"]
+typed-ports = ["dag-core"]
 
 [dependencies]
+dag-core = { path = "../dag-core", default-features = false, features = ["serde"], optional = true }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
 tsify-next = { version = "0.5", features = ["js"], optional = true }

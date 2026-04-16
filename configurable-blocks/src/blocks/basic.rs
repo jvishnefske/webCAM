@@ -26,14 +26,30 @@ impl Default for ConstantBlock {
 }
 
 impl ConfigurableBlock for ConstantBlock {
-    fn block_type(&self) -> &str { "constant" }
-    fn display_name(&self) -> &str { "Constant" }
-    fn category(&self) -> BlockCategory { BlockCategory::Math }
+    fn block_type(&self) -> &str {
+        "constant"
+    }
+    fn display_name(&self) -> &str {
+        "Constant"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::Math
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
-            ConfigField { key: "value".into(), label: "Value".into(), kind: FieldKind::Float, default: self.value.into() },
-            ConfigField { key: "publish_topic".into(), label: "Publish Topic (optional)".into(), kind: FieldKind::Text, default: self.publish_topic.clone().into() },
+            ConfigField {
+                key: "value".into(),
+                label: "Value".into(),
+                kind: FieldKind::Float,
+                default: self.value.into(),
+            },
+            ConfigField {
+                key: "publish_topic".into(),
+                label: "Publish Topic (optional)".into(),
+                kind: FieldKind::Text,
+                default: self.publish_topic.clone().into(),
+            },
         ]
     }
 
@@ -42,14 +58,23 @@ impl ConfigurableBlock for ConstantBlock {
     }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(v) = config.get("value").and_then(|v| v.as_f64()) { self.value = v; }
-        if let Some(s) = config.get("publish_topic").and_then(|v| v.as_str()) { self.publish_topic = s.into(); }
+        if let Some(v) = config.get("value").and_then(|v| v.as_f64()) {
+            self.value = v;
+        }
+        if let Some(s) = config.get("publish_topic").and_then(|v| v.as_str()) {
+            self.publish_topic = s.into();
+        }
     }
 
     fn declared_channels(&self) -> Vec<DeclaredChannel> {
         let mut ch = Vec::new();
         if !self.publish_topic.is_empty() {
-            ch.push(DeclaredChannel { name: self.publish_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub });
+            ch.push(DeclaredChannel {
+                name: self.publish_topic.clone(),
+                direction: ChannelDirection::Output,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            });
         }
         ch
     }
@@ -60,7 +85,13 @@ impl ConfigurableBlock for ConstantBlock {
         if !self.publish_topic.is_empty() {
             dag.publish(&self.publish_topic, c)?;
         }
-        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![], outputs: vec![("value".into(), c)] } })
+        Ok(LowerResult {
+            dag,
+            ports: dag_core::templates::BlockPorts {
+                inputs: vec![],
+                outputs: vec![("value".into(), c)],
+            },
+        })
     }
 }
 
@@ -86,31 +117,75 @@ impl Default for AddBlock {
 }
 
 impl ConfigurableBlock for AddBlock {
-    fn block_type(&self) -> &str { "add" }
-    fn display_name(&self) -> &str { "Add" }
-    fn category(&self) -> BlockCategory { BlockCategory::Math }
+    fn block_type(&self) -> &str {
+        "add"
+    }
+    fn display_name(&self) -> &str {
+        "Add"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::Math
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
-            ConfigField { key: "input_a_topic".into(), label: "Input A Topic".into(), kind: FieldKind::Text, default: self.input_a_topic.clone().into() },
-            ConfigField { key: "input_b_topic".into(), label: "Input B Topic".into(), kind: FieldKind::Text, default: self.input_b_topic.clone().into() },
-            ConfigField { key: "output_topic".into(), label: "Output Topic".into(), kind: FieldKind::Text, default: self.output_topic.clone().into() },
+            ConfigField {
+                key: "input_a_topic".into(),
+                label: "Input A Topic".into(),
+                kind: FieldKind::Text,
+                default: self.input_a_topic.clone().into(),
+            },
+            ConfigField {
+                key: "input_b_topic".into(),
+                label: "Input B Topic".into(),
+                kind: FieldKind::Text,
+                default: self.input_b_topic.clone().into(),
+            },
+            ConfigField {
+                key: "output_topic".into(),
+                label: "Output Topic".into(),
+                kind: FieldKind::Text,
+                default: self.output_topic.clone().into(),
+            },
         ]
     }
 
-    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+    fn config_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_default()
+    }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(s) = config.get("input_a_topic").and_then(|v| v.as_str()) { self.input_a_topic = s.into(); }
-        if let Some(s) = config.get("input_b_topic").and_then(|v| v.as_str()) { self.input_b_topic = s.into(); }
-        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) { self.output_topic = s.into(); }
+        if let Some(s) = config.get("input_a_topic").and_then(|v| v.as_str()) {
+            self.input_a_topic = s.into();
+        }
+        if let Some(s) = config.get("input_b_topic").and_then(|v| v.as_str()) {
+            self.input_b_topic = s.into();
+        }
+        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) {
+            self.output_topic = s.into();
+        }
     }
 
     fn declared_channels(&self) -> Vec<DeclaredChannel> {
         vec![
-            DeclaredChannel { name: self.input_a_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
-            DeclaredChannel { name: self.input_b_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
-            DeclaredChannel { name: self.output_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub },
+            DeclaredChannel {
+                name: self.input_a_topic.clone(),
+                direction: ChannelDirection::Input,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
+            DeclaredChannel {
+                name: self.input_b_topic.clone(),
+                direction: ChannelDirection::Input,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
+            DeclaredChannel {
+                name: self.output_topic.clone(),
+                direction: ChannelDirection::Output,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
         ]
     }
 
@@ -120,7 +195,13 @@ impl ConfigurableBlock for AddBlock {
         let b = dag.subscribe(&self.input_b_topic)?;
         let sum = dag.add(a, b)?;
         dag.publish(&self.output_topic, sum)?;
-        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![("a".into(), a), ("b".into(), b)], outputs: vec![("out".into(), sum)] } })
+        Ok(LowerResult {
+            dag,
+            ports: dag_core::templates::BlockPorts {
+                inputs: vec![("a".into(), a), ("b".into(), b)],
+                outputs: vec![("out".into(), sum)],
+            },
+        })
     }
 }
 
@@ -146,31 +227,75 @@ impl Default for MultiplyBlock {
 }
 
 impl ConfigurableBlock for MultiplyBlock {
-    fn block_type(&self) -> &str { "multiply" }
-    fn display_name(&self) -> &str { "Multiply" }
-    fn category(&self) -> BlockCategory { BlockCategory::Math }
+    fn block_type(&self) -> &str {
+        "multiply"
+    }
+    fn display_name(&self) -> &str {
+        "Multiply"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::Math
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
-            ConfigField { key: "input_a_topic".into(), label: "Input A Topic".into(), kind: FieldKind::Text, default: self.input_a_topic.clone().into() },
-            ConfigField { key: "input_b_topic".into(), label: "Input B Topic".into(), kind: FieldKind::Text, default: self.input_b_topic.clone().into() },
-            ConfigField { key: "output_topic".into(), label: "Output Topic".into(), kind: FieldKind::Text, default: self.output_topic.clone().into() },
+            ConfigField {
+                key: "input_a_topic".into(),
+                label: "Input A Topic".into(),
+                kind: FieldKind::Text,
+                default: self.input_a_topic.clone().into(),
+            },
+            ConfigField {
+                key: "input_b_topic".into(),
+                label: "Input B Topic".into(),
+                kind: FieldKind::Text,
+                default: self.input_b_topic.clone().into(),
+            },
+            ConfigField {
+                key: "output_topic".into(),
+                label: "Output Topic".into(),
+                kind: FieldKind::Text,
+                default: self.output_topic.clone().into(),
+            },
         ]
     }
 
-    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+    fn config_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_default()
+    }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(s) = config.get("input_a_topic").and_then(|v| v.as_str()) { self.input_a_topic = s.into(); }
-        if let Some(s) = config.get("input_b_topic").and_then(|v| v.as_str()) { self.input_b_topic = s.into(); }
-        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) { self.output_topic = s.into(); }
+        if let Some(s) = config.get("input_a_topic").and_then(|v| v.as_str()) {
+            self.input_a_topic = s.into();
+        }
+        if let Some(s) = config.get("input_b_topic").and_then(|v| v.as_str()) {
+            self.input_b_topic = s.into();
+        }
+        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) {
+            self.output_topic = s.into();
+        }
     }
 
     fn declared_channels(&self) -> Vec<DeclaredChannel> {
         vec![
-            DeclaredChannel { name: self.input_a_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
-            DeclaredChannel { name: self.input_b_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
-            DeclaredChannel { name: self.output_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub },
+            DeclaredChannel {
+                name: self.input_a_topic.clone(),
+                direction: ChannelDirection::Input,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
+            DeclaredChannel {
+                name: self.input_b_topic.clone(),
+                direction: ChannelDirection::Input,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
+            DeclaredChannel {
+                name: self.output_topic.clone(),
+                direction: ChannelDirection::Output,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
         ]
     }
 
@@ -180,7 +305,13 @@ impl ConfigurableBlock for MultiplyBlock {
         let b = dag.subscribe(&self.input_b_topic)?;
         let prod = dag.mul(a, b)?;
         dag.publish(&self.output_topic, prod)?;
-        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![("a".into(), a), ("b".into(), b)], outputs: vec![("out".into(), prod)] } })
+        Ok(LowerResult {
+            dag,
+            ports: dag_core::templates::BlockPorts {
+                inputs: vec![("a".into(), a), ("b".into(), b)],
+                outputs: vec![("out".into(), prod)],
+            },
+        })
     }
 }
 
@@ -208,32 +339,78 @@ impl Default for ClampBlock {
 }
 
 impl ConfigurableBlock for ClampBlock {
-    fn block_type(&self) -> &str { "clamp" }
-    fn display_name(&self) -> &str { "Clamp" }
-    fn category(&self) -> BlockCategory { BlockCategory::Math }
+    fn block_type(&self) -> &str {
+        "clamp"
+    }
+    fn display_name(&self) -> &str {
+        "Clamp"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::Math
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
-            ConfigField { key: "input_topic".into(), label: "Input Topic".into(), kind: FieldKind::Text, default: self.input_topic.clone().into() },
-            ConfigField { key: "output_topic".into(), label: "Output Topic".into(), kind: FieldKind::Text, default: self.output_topic.clone().into() },
-            ConfigField { key: "min".into(), label: "Min".into(), kind: FieldKind::Float, default: self.min.into() },
-            ConfigField { key: "max".into(), label: "Max".into(), kind: FieldKind::Float, default: self.max.into() },
+            ConfigField {
+                key: "input_topic".into(),
+                label: "Input Topic".into(),
+                kind: FieldKind::Text,
+                default: self.input_topic.clone().into(),
+            },
+            ConfigField {
+                key: "output_topic".into(),
+                label: "Output Topic".into(),
+                kind: FieldKind::Text,
+                default: self.output_topic.clone().into(),
+            },
+            ConfigField {
+                key: "min".into(),
+                label: "Min".into(),
+                kind: FieldKind::Float,
+                default: self.min.into(),
+            },
+            ConfigField {
+                key: "max".into(),
+                label: "Max".into(),
+                kind: FieldKind::Float,
+                default: self.max.into(),
+            },
         ]
     }
 
-    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+    fn config_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_default()
+    }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) { self.input_topic = s.into(); }
-        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) { self.output_topic = s.into(); }
-        if let Some(v) = config.get("min").and_then(|v| v.as_f64()) { self.min = v; }
-        if let Some(v) = config.get("max").and_then(|v| v.as_f64()) { self.max = v; }
+        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) {
+            self.input_topic = s.into();
+        }
+        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) {
+            self.output_topic = s.into();
+        }
+        if let Some(v) = config.get("min").and_then(|v| v.as_f64()) {
+            self.min = v;
+        }
+        if let Some(v) = config.get("max").and_then(|v| v.as_f64()) {
+            self.max = v;
+        }
     }
 
     fn declared_channels(&self) -> Vec<DeclaredChannel> {
         vec![
-            DeclaredChannel { name: self.input_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
-            DeclaredChannel { name: self.output_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub },
+            DeclaredChannel {
+                name: self.input_topic.clone(),
+                direction: ChannelDirection::Input,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
+            DeclaredChannel {
+                name: self.output_topic.clone(),
+                direction: ChannelDirection::Output,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
         ]
     }
 
@@ -252,7 +429,13 @@ impl ConfigurableBlock for ClampBlock {
         // min_c and max_c are in the DAG but unused for now
         let _ = min_c;
         let _ = max_c;
-        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![("in".into(), input)], outputs: vec![("out".into(), input)] } })
+        Ok(LowerResult {
+            dag,
+            ports: dag_core::templates::BlockPorts {
+                inputs: vec![("in".into(), input)],
+                outputs: vec![("out".into(), input)],
+            },
+        })
     }
 }
 
@@ -267,35 +450,61 @@ pub struct SubscribeBlock {
 
 impl Default for SubscribeBlock {
     fn default() -> Self {
-        Self { topic: "sensor/value".into() }
+        Self {
+            topic: "sensor/value".into(),
+        }
     }
 }
 
 impl ConfigurableBlock for SubscribeBlock {
-    fn block_type(&self) -> &str { "subscribe" }
-    fn display_name(&self) -> &str { "Subscribe" }
-    fn category(&self) -> BlockCategory { BlockCategory::PubSub }
-
-    fn config_schema(&self) -> Vec<ConfigField> {
-        vec![
-            ConfigField { key: "topic".into(), label: "Topic".into(), kind: FieldKind::Text, default: self.topic.clone().into() },
-        ]
+    fn block_type(&self) -> &str {
+        "subscribe"
+    }
+    fn display_name(&self) -> &str {
+        "Subscribe"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::PubSub
     }
 
-    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![ConfigField {
+            key: "topic".into(),
+            label: "Topic".into(),
+            kind: FieldKind::Text,
+            default: self.topic.clone().into(),
+        }]
+    }
+
+    fn config_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_default()
+    }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(s) = config.get("topic").and_then(|v| v.as_str()) { self.topic = s.into(); }
+        if let Some(s) = config.get("topic").and_then(|v| v.as_str()) {
+            self.topic = s.into();
+        }
     }
 
     fn declared_channels(&self) -> Vec<DeclaredChannel> {
-        vec![DeclaredChannel { name: self.topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub }]
+        vec![DeclaredChannel {
+            name: self.topic.clone(),
+            direction: ChannelDirection::Input,
+            kind: ChannelKind::PubSub,
+            channel_type: None,
+        }]
     }
 
     fn lower(&self) -> Result<LowerResult, DagError> {
         let mut dag = Dag::new();
         let sub = dag.subscribe(&self.topic)?;
-        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![], outputs: vec![("value".into(), sub)] } })
+        Ok(LowerResult {
+            dag,
+            ports: dag_core::templates::BlockPorts {
+                inputs: vec![],
+                outputs: vec![("value".into(), sub)],
+            },
+        })
     }
 }
 
@@ -319,28 +528,60 @@ impl Default for PublishBlock {
 }
 
 impl ConfigurableBlock for PublishBlock {
-    fn block_type(&self) -> &str { "publish" }
-    fn display_name(&self) -> &str { "Publish" }
-    fn category(&self) -> BlockCategory { BlockCategory::PubSub }
+    fn block_type(&self) -> &str {
+        "publish"
+    }
+    fn display_name(&self) -> &str {
+        "Publish"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::PubSub
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
-            ConfigField { key: "input_topic".into(), label: "Input Topic".into(), kind: FieldKind::Text, default: self.input_topic.clone().into() },
-            ConfigField { key: "output_topic".into(), label: "Output Topic".into(), kind: FieldKind::Text, default: self.output_topic.clone().into() },
+            ConfigField {
+                key: "input_topic".into(),
+                label: "Input Topic".into(),
+                kind: FieldKind::Text,
+                default: self.input_topic.clone().into(),
+            },
+            ConfigField {
+                key: "output_topic".into(),
+                label: "Output Topic".into(),
+                kind: FieldKind::Text,
+                default: self.output_topic.clone().into(),
+            },
         ]
     }
 
-    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+    fn config_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_default()
+    }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) { self.input_topic = s.into(); }
-        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) { self.output_topic = s.into(); }
+        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) {
+            self.input_topic = s.into();
+        }
+        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) {
+            self.output_topic = s.into();
+        }
     }
 
     fn declared_channels(&self) -> Vec<DeclaredChannel> {
         vec![
-            DeclaredChannel { name: self.input_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
-            DeclaredChannel { name: self.output_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub },
+            DeclaredChannel {
+                name: self.input_topic.clone(),
+                direction: ChannelDirection::Input,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
+            DeclaredChannel {
+                name: self.output_topic.clone(),
+                direction: ChannelDirection::Output,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
         ]
     }
 
@@ -348,7 +589,13 @@ impl ConfigurableBlock for PublishBlock {
         let mut dag = Dag::new();
         let sub = dag.subscribe(&self.input_topic)?;
         dag.publish(&self.output_topic, sub)?;
-        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![("in".into(), sub)], outputs: vec![] } })
+        Ok(LowerResult {
+            dag,
+            ports: dag_core::templates::BlockPorts {
+                inputs: vec![("in".into(), sub)],
+                outputs: vec![],
+            },
+        })
     }
 }
 
@@ -363,27 +610,49 @@ pub struct PwmBlock {
 
 impl Default for PwmBlock {
     fn default() -> Self {
-        Self { channel_name: "pwm0".into() }
+        Self {
+            channel_name: "pwm0".into(),
+        }
     }
 }
 
 impl ConfigurableBlock for PwmBlock {
-    fn block_type(&self) -> &str { "pwm" }
-    fn display_name(&self) -> &str { "PWM Output" }
-    fn category(&self) -> BlockCategory { BlockCategory::Io }
-
-    fn config_schema(&self) -> Vec<ConfigField> {
-        vec![ConfigField { key: "channel_name".into(), label: "Channel Name".into(), kind: FieldKind::Text, default: self.channel_name.clone().into() }]
+    fn block_type(&self) -> &str {
+        "pwm"
+    }
+    fn display_name(&self) -> &str {
+        "PWM Output"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::Io
     }
 
-    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+    fn config_schema(&self) -> Vec<ConfigField> {
+        vec![ConfigField {
+            key: "channel_name".into(),
+            label: "Channel Name".into(),
+            kind: FieldKind::Text,
+            default: self.channel_name.clone().into(),
+        }]
+    }
+
+    fn config_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_default()
+    }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(s) = config.get("channel_name").and_then(|v| v.as_str()) { self.channel_name = s.into(); }
+        if let Some(s) = config.get("channel_name").and_then(|v| v.as_str()) {
+            self.channel_name = s.into();
+        }
     }
 
     fn declared_channels(&self) -> Vec<DeclaredChannel> {
-        vec![DeclaredChannel { name: self.channel_name.clone(), direction: ChannelDirection::Output, kind: ChannelKind::Hardware }]
+        vec![DeclaredChannel {
+            name: self.channel_name.clone(),
+            direction: ChannelDirection::Output,
+            kind: ChannelKind::Hardware,
+            channel_type: None,
+        }]
     }
 
     fn lower(&self) -> Result<LowerResult, DagError> {
@@ -393,7 +662,13 @@ impl ConfigurableBlock for PwmBlock {
             let c = dag.constant(0.0)?;
             dag.output(&self.channel_name, c)
         })?;
-        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![], outputs: vec![("hw_out".into(), node)] } })
+        Ok(LowerResult {
+            dag,
+            ports: dag_core::templates::BlockPorts {
+                inputs: vec![],
+                outputs: vec![("hw_out".into(), node)],
+            },
+        })
     }
 }
 
@@ -410,36 +685,84 @@ pub struct SubtractBlock {
 
 impl Default for SubtractBlock {
     fn default() -> Self {
-        Self { input_a_topic: "sub/a".into(), input_b_topic: "sub/b".into(), output_topic: "sub/out".into() }
+        Self {
+            input_a_topic: "sub/a".into(),
+            input_b_topic: "sub/b".into(),
+            output_topic: "sub/out".into(),
+        }
     }
 }
 
 impl ConfigurableBlock for SubtractBlock {
-    fn block_type(&self) -> &str { "subtract" }
-    fn display_name(&self) -> &str { "Subtract" }
-    fn category(&self) -> BlockCategory { BlockCategory::Math }
+    fn block_type(&self) -> &str {
+        "subtract"
+    }
+    fn display_name(&self) -> &str {
+        "Subtract"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::Math
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
-            ConfigField { key: "input_a_topic".into(), label: "Input A Topic".into(), kind: FieldKind::Text, default: self.input_a_topic.clone().into() },
-            ConfigField { key: "input_b_topic".into(), label: "Input B Topic".into(), kind: FieldKind::Text, default: self.input_b_topic.clone().into() },
-            ConfigField { key: "output_topic".into(), label: "Output Topic".into(), kind: FieldKind::Text, default: self.output_topic.clone().into() },
+            ConfigField {
+                key: "input_a_topic".into(),
+                label: "Input A Topic".into(),
+                kind: FieldKind::Text,
+                default: self.input_a_topic.clone().into(),
+            },
+            ConfigField {
+                key: "input_b_topic".into(),
+                label: "Input B Topic".into(),
+                kind: FieldKind::Text,
+                default: self.input_b_topic.clone().into(),
+            },
+            ConfigField {
+                key: "output_topic".into(),
+                label: "Output Topic".into(),
+                kind: FieldKind::Text,
+                default: self.output_topic.clone().into(),
+            },
         ]
     }
 
-    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+    fn config_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_default()
+    }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(s) = config.get("input_a_topic").and_then(|v| v.as_str()) { self.input_a_topic = s.into(); }
-        if let Some(s) = config.get("input_b_topic").and_then(|v| v.as_str()) { self.input_b_topic = s.into(); }
-        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) { self.output_topic = s.into(); }
+        if let Some(s) = config.get("input_a_topic").and_then(|v| v.as_str()) {
+            self.input_a_topic = s.into();
+        }
+        if let Some(s) = config.get("input_b_topic").and_then(|v| v.as_str()) {
+            self.input_b_topic = s.into();
+        }
+        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) {
+            self.output_topic = s.into();
+        }
     }
 
     fn declared_channels(&self) -> Vec<DeclaredChannel> {
         vec![
-            DeclaredChannel { name: self.input_a_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
-            DeclaredChannel { name: self.input_b_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
-            DeclaredChannel { name: self.output_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub },
+            DeclaredChannel {
+                name: self.input_a_topic.clone(),
+                direction: ChannelDirection::Input,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
+            DeclaredChannel {
+                name: self.input_b_topic.clone(),
+                direction: ChannelDirection::Input,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
+            DeclaredChannel {
+                name: self.output_topic.clone(),
+                direction: ChannelDirection::Output,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
         ]
     }
 
@@ -449,7 +772,13 @@ impl ConfigurableBlock for SubtractBlock {
         let b = dag.subscribe(&self.input_b_topic)?;
         let diff = dag.sub(a, b)?;
         dag.publish(&self.output_topic, diff)?;
-        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![("a".into(), a), ("b".into(), b)], outputs: vec![("out".into(), diff)] } })
+        Ok(LowerResult {
+            dag,
+            ports: dag_core::templates::BlockPorts {
+                inputs: vec![("a".into(), a), ("b".into(), b)],
+                outputs: vec![("out".into(), diff)],
+            },
+        })
     }
 }
 
@@ -465,33 +794,68 @@ pub struct NegateBlock {
 
 impl Default for NegateBlock {
     fn default() -> Self {
-        Self { input_topic: "neg/in".into(), output_topic: "neg/out".into() }
+        Self {
+            input_topic: "neg/in".into(),
+            output_topic: "neg/out".into(),
+        }
     }
 }
 
 impl ConfigurableBlock for NegateBlock {
-    fn block_type(&self) -> &str { "negate" }
-    fn display_name(&self) -> &str { "Negate" }
-    fn category(&self) -> BlockCategory { BlockCategory::Math }
+    fn block_type(&self) -> &str {
+        "negate"
+    }
+    fn display_name(&self) -> &str {
+        "Negate"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::Math
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
-            ConfigField { key: "input_topic".into(), label: "Input Topic".into(), kind: FieldKind::Text, default: self.input_topic.clone().into() },
-            ConfigField { key: "output_topic".into(), label: "Output Topic".into(), kind: FieldKind::Text, default: self.output_topic.clone().into() },
+            ConfigField {
+                key: "input_topic".into(),
+                label: "Input Topic".into(),
+                kind: FieldKind::Text,
+                default: self.input_topic.clone().into(),
+            },
+            ConfigField {
+                key: "output_topic".into(),
+                label: "Output Topic".into(),
+                kind: FieldKind::Text,
+                default: self.output_topic.clone().into(),
+            },
         ]
     }
 
-    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+    fn config_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_default()
+    }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) { self.input_topic = s.into(); }
-        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) { self.output_topic = s.into(); }
+        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) {
+            self.input_topic = s.into();
+        }
+        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) {
+            self.output_topic = s.into();
+        }
     }
 
     fn declared_channels(&self) -> Vec<DeclaredChannel> {
         vec![
-            DeclaredChannel { name: self.input_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
-            DeclaredChannel { name: self.output_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub },
+            DeclaredChannel {
+                name: self.input_topic.clone(),
+                direction: ChannelDirection::Input,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
+            DeclaredChannel {
+                name: self.output_topic.clone(),
+                direction: ChannelDirection::Output,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
         ]
     }
 
@@ -500,7 +864,13 @@ impl ConfigurableBlock for NegateBlock {
         let input = dag.subscribe(&self.input_topic)?;
         let neg = dag.neg(input)?;
         dag.publish(&self.output_topic, neg)?;
-        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![("in".into(), input)], outputs: vec![("out".into(), neg)] } })
+        Ok(LowerResult {
+            dag,
+            ports: dag_core::templates::BlockPorts {
+                inputs: vec![("in".into(), input)],
+                outputs: vec![("out".into(), neg)],
+            },
+        })
     }
 }
 
@@ -521,43 +891,107 @@ pub struct MapScaleBlock {
 impl Default for MapScaleBlock {
     fn default() -> Self {
         Self {
-            input_topic: "map/in".into(), output_topic: "map/out".into(),
-            in_min: 0.0, in_max: 1023.0, out_min: 0.0, out_max: 100.0,
+            input_topic: "map/in".into(),
+            output_topic: "map/out".into(),
+            in_min: 0.0,
+            in_max: 1023.0,
+            out_min: 0.0,
+            out_max: 100.0,
         }
     }
 }
 
 impl ConfigurableBlock for MapScaleBlock {
-    fn block_type(&self) -> &str { "map_scale" }
-    fn display_name(&self) -> &str { "Map/Scale" }
-    fn category(&self) -> BlockCategory { BlockCategory::Math }
+    fn block_type(&self) -> &str {
+        "map_scale"
+    }
+    fn display_name(&self) -> &str {
+        "Map/Scale"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::Math
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
-            ConfigField { key: "input_topic".into(), label: "Input Topic".into(), kind: FieldKind::Text, default: self.input_topic.clone().into() },
-            ConfigField { key: "output_topic".into(), label: "Output Topic".into(), kind: FieldKind::Text, default: self.output_topic.clone().into() },
-            ConfigField { key: "in_min".into(), label: "Input Min".into(), kind: FieldKind::Float, default: self.in_min.into() },
-            ConfigField { key: "in_max".into(), label: "Input Max".into(), kind: FieldKind::Float, default: self.in_max.into() },
-            ConfigField { key: "out_min".into(), label: "Output Min".into(), kind: FieldKind::Float, default: self.out_min.into() },
-            ConfigField { key: "out_max".into(), label: "Output Max".into(), kind: FieldKind::Float, default: self.out_max.into() },
+            ConfigField {
+                key: "input_topic".into(),
+                label: "Input Topic".into(),
+                kind: FieldKind::Text,
+                default: self.input_topic.clone().into(),
+            },
+            ConfigField {
+                key: "output_topic".into(),
+                label: "Output Topic".into(),
+                kind: FieldKind::Text,
+                default: self.output_topic.clone().into(),
+            },
+            ConfigField {
+                key: "in_min".into(),
+                label: "Input Min".into(),
+                kind: FieldKind::Float,
+                default: self.in_min.into(),
+            },
+            ConfigField {
+                key: "in_max".into(),
+                label: "Input Max".into(),
+                kind: FieldKind::Float,
+                default: self.in_max.into(),
+            },
+            ConfigField {
+                key: "out_min".into(),
+                label: "Output Min".into(),
+                kind: FieldKind::Float,
+                default: self.out_min.into(),
+            },
+            ConfigField {
+                key: "out_max".into(),
+                label: "Output Max".into(),
+                kind: FieldKind::Float,
+                default: self.out_max.into(),
+            },
         ]
     }
 
-    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+    fn config_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_default()
+    }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) { self.input_topic = s.into(); }
-        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) { self.output_topic = s.into(); }
-        if let Some(v) = config.get("in_min").and_then(|v| v.as_f64()) { self.in_min = v; }
-        if let Some(v) = config.get("in_max").and_then(|v| v.as_f64()) { self.in_max = v; }
-        if let Some(v) = config.get("out_min").and_then(|v| v.as_f64()) { self.out_min = v; }
-        if let Some(v) = config.get("out_max").and_then(|v| v.as_f64()) { self.out_max = v; }
+        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) {
+            self.input_topic = s.into();
+        }
+        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) {
+            self.output_topic = s.into();
+        }
+        if let Some(v) = config.get("in_min").and_then(|v| v.as_f64()) {
+            self.in_min = v;
+        }
+        if let Some(v) = config.get("in_max").and_then(|v| v.as_f64()) {
+            self.in_max = v;
+        }
+        if let Some(v) = config.get("out_min").and_then(|v| v.as_f64()) {
+            self.out_min = v;
+        }
+        if let Some(v) = config.get("out_max").and_then(|v| v.as_f64()) {
+            self.out_max = v;
+        }
     }
 
     fn declared_channels(&self) -> Vec<DeclaredChannel> {
         vec![
-            DeclaredChannel { name: self.input_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
-            DeclaredChannel { name: self.output_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub },
+            DeclaredChannel {
+                name: self.input_topic.clone(),
+                direction: ChannelDirection::Input,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
+            DeclaredChannel {
+                name: self.output_topic.clone(),
+                direction: ChannelDirection::Output,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
         ]
     }
 
@@ -567,18 +1001,28 @@ impl ConfigurableBlock for MapScaleBlock {
         //            out = (in - in_min) * scale + out_min
         let in_range = self.in_max - self.in_min;
         let out_range = self.out_max - self.out_min;
-        let scale = if in_range.abs() > 1e-15 { out_range / in_range } else { 0.0 };
+        let scale = if in_range.abs() > 1e-15 {
+            out_range / in_range
+        } else {
+            0.0
+        };
 
         let mut dag = Dag::new();
         let input = dag.subscribe(&self.input_topic)?;
         let in_min_c = dag.constant(self.in_min)?;
-        let shifted = dag.sub(input, in_min_c)?;       // in - in_min
+        let shifted = dag.sub(input, in_min_c)?; // in - in_min
         let scale_c = dag.constant(scale)?;
-        let scaled = dag.mul(shifted, scale_c)?;        // (in - in_min) * scale
+        let scaled = dag.mul(shifted, scale_c)?; // (in - in_min) * scale
         let out_min_c = dag.constant(self.out_min)?;
-        let result = dag.add(scaled, out_min_c)?;       // + out_min
+        let result = dag.add(scaled, out_min_c)?; // + out_min
         dag.publish(&self.output_topic, result)?;
-        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![("in".into(), input)], outputs: vec![("out".into(), result)] } })
+        Ok(LowerResult {
+            dag,
+            ports: dag_core::templates::BlockPorts {
+                inputs: vec![("in".into(), input)],
+                outputs: vec![("out".into(), result)],
+            },
+        })
     }
 }
 
@@ -597,35 +1041,78 @@ pub struct LowPassBlock {
 
 impl Default for LowPassBlock {
     fn default() -> Self {
-        Self { input_topic: "lp/in".into(), output_topic: "lp/out".into(), alpha: 0.1 }
+        Self {
+            input_topic: "lp/in".into(),
+            output_topic: "lp/out".into(),
+            alpha: 0.1,
+        }
     }
 }
 
 impl ConfigurableBlock for LowPassBlock {
-    fn block_type(&self) -> &str { "lowpass" }
-    fn display_name(&self) -> &str { "Low-Pass Filter" }
-    fn category(&self) -> BlockCategory { BlockCategory::Math }
+    fn block_type(&self) -> &str {
+        "lowpass"
+    }
+    fn display_name(&self) -> &str {
+        "Low-Pass Filter"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::Math
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![
-            ConfigField { key: "input_topic".into(), label: "Input Topic".into(), kind: FieldKind::Text, default: self.input_topic.clone().into() },
-            ConfigField { key: "output_topic".into(), label: "Output Topic".into(), kind: FieldKind::Text, default: self.output_topic.clone().into() },
-            ConfigField { key: "alpha".into(), label: "Alpha (0-1, lower = smoother)".into(), kind: FieldKind::Float, default: self.alpha.into() },
+            ConfigField {
+                key: "input_topic".into(),
+                label: "Input Topic".into(),
+                kind: FieldKind::Text,
+                default: self.input_topic.clone().into(),
+            },
+            ConfigField {
+                key: "output_topic".into(),
+                label: "Output Topic".into(),
+                kind: FieldKind::Text,
+                default: self.output_topic.clone().into(),
+            },
+            ConfigField {
+                key: "alpha".into(),
+                label: "Alpha (0-1, lower = smoother)".into(),
+                kind: FieldKind::Float,
+                default: self.alpha.into(),
+            },
         ]
     }
 
-    fn config_json(&self) -> serde_json::Value { serde_json::to_value(self).unwrap_or_default() }
+    fn config_json(&self) -> serde_json::Value {
+        serde_json::to_value(self).unwrap_or_default()
+    }
 
     fn apply_config(&mut self, config: &serde_json::Value) {
-        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) { self.input_topic = s.into(); }
-        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) { self.output_topic = s.into(); }
-        if let Some(v) = config.get("alpha").and_then(|v| v.as_f64()) { self.alpha = v.clamp(0.0, 1.0); }
+        if let Some(s) = config.get("input_topic").and_then(|v| v.as_str()) {
+            self.input_topic = s.into();
+        }
+        if let Some(s) = config.get("output_topic").and_then(|v| v.as_str()) {
+            self.output_topic = s.into();
+        }
+        if let Some(v) = config.get("alpha").and_then(|v| v.as_f64()) {
+            self.alpha = v.clamp(0.0, 1.0);
+        }
     }
 
     fn declared_channels(&self) -> Vec<DeclaredChannel> {
         vec![
-            DeclaredChannel { name: self.input_topic.clone(), direction: ChannelDirection::Input, kind: ChannelKind::PubSub },
-            DeclaredChannel { name: self.output_topic.clone(), direction: ChannelDirection::Output, kind: ChannelKind::PubSub },
+            DeclaredChannel {
+                name: self.input_topic.clone(),
+                direction: ChannelDirection::Input,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
+            DeclaredChannel {
+                name: self.output_topic.clone(),
+                direction: ChannelDirection::Output,
+                kind: ChannelKind::PubSub,
+                channel_type: None,
+            },
         ]
     }
 
@@ -638,11 +1125,17 @@ impl ConfigurableBlock for LowPassBlock {
         let y_prev = dag.subscribe(&self.output_topic)?; // previous output via pubsub
         let alpha_c = dag.constant(self.alpha)?;
         let one_minus_alpha = dag.constant(1.0 - self.alpha)?;
-        let ax = dag.mul(alpha_c, x)?;                   // alpha * x
-        let by = dag.mul(one_minus_alpha, y_prev)?;       // (1-alpha) * y_prev
-        let y = dag.add(ax, by)?;                         // alpha*x + (1-alpha)*y_prev
+        let ax = dag.mul(alpha_c, x)?; // alpha * x
+        let by = dag.mul(one_minus_alpha, y_prev)?; // (1-alpha) * y_prev
+        let y = dag.add(ax, by)?; // alpha*x + (1-alpha)*y_prev
         dag.publish(&self.output_topic, y)?;
-        Ok(LowerResult { dag, ports: dag_core::templates::BlockPorts { inputs: vec![("in".into(), x)], outputs: vec![("out".into(), y)] } })
+        Ok(LowerResult {
+            dag,
+            ports: dag_core::templates::BlockPorts {
+                inputs: vec![("in".into(), x)],
+                outputs: vec![("out".into(), y)],
+            },
+        })
     }
 }
 
@@ -670,9 +1163,15 @@ impl Default for AdcBlock {
 }
 
 impl ConfigurableBlock for AdcBlock {
-    fn block_type(&self) -> &str { "adc" }
-    fn display_name(&self) -> &str { "ADC Input" }
-    fn category(&self) -> BlockCategory { BlockCategory::Io }
+    fn block_type(&self) -> &str {
+        "adc"
+    }
+    fn display_name(&self) -> &str {
+        "ADC Input"
+    }
+    fn category(&self) -> BlockCategory {
+        BlockCategory::Io
+    }
 
     fn config_schema(&self) -> Vec<ConfigField> {
         vec![ConfigField {
@@ -698,6 +1197,7 @@ impl ConfigurableBlock for AdcBlock {
             name: self.channel_name.clone(),
             direction: ChannelDirection::Input,
             kind: ChannelKind::Hardware,
+            channel_type: None,
         }]
     }
 
@@ -742,7 +1242,10 @@ mod tests {
 
     #[test]
     fn constant_lowers() {
-        let block = ConstantBlock { value: 42.0, publish_topic: "test".into() };
+        let block = ConstantBlock {
+            value: 42.0,
+            publish_topic: "test".into(),
+        };
         let result = block.lower().unwrap();
         assert_eq!(result.dag.len(), 2); // const + publish
         let mut values = vec![0.0; result.dag.len()];
@@ -752,7 +1255,10 @@ mod tests {
 
     #[test]
     fn constant_no_publish() {
-        let block = ConstantBlock { value: 7.0, publish_topic: String::new() };
+        let block = ConstantBlock {
+            value: 7.0,
+            publish_topic: String::new(),
+        };
         let result = block.lower().unwrap();
         assert_eq!(result.dag.len(), 1); // just const
     }
@@ -809,8 +1315,12 @@ mod tests {
         // config schema
         let schema = block.config_schema();
         assert_eq!(schema.len(), 2);
-        assert!(schema.iter().any(|f| f.key == "value" && f.kind == FieldKind::Float));
-        assert!(schema.iter().any(|f| f.key == "publish_topic" && f.kind == FieldKind::Text));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "value" && f.kind == FieldKind::Float));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "publish_topic" && f.kind == FieldKind::Text));
 
         // config json roundtrip
         let json = block.config_json();
@@ -891,9 +1401,15 @@ mod tests {
         // config schema
         let schema = block.config_schema();
         assert_eq!(schema.len(), 3);
-        assert!(schema.iter().any(|f| f.key == "input_a_topic" && f.kind == FieldKind::Text));
-        assert!(schema.iter().any(|f| f.key == "input_b_topic" && f.kind == FieldKind::Text));
-        assert!(schema.iter().any(|f| f.key == "output_topic" && f.kind == FieldKind::Text));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "input_a_topic" && f.kind == FieldKind::Text));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "input_b_topic" && f.kind == FieldKind::Text));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "output_topic" && f.kind == FieldKind::Text));
 
         // config json
         let json = block.config_json();
@@ -961,10 +1477,7 @@ mod tests {
         let block = AddBlock::default();
         let result = block.lower().unwrap();
         let ps = MockPubSub {
-            values: BTreeMap::from([
-                ("add/a".into(), 3.0),
-                ("add/b".into(), 7.0),
-            ]),
+            values: BTreeMap::from([("add/a".into(), 3.0), ("add/b".into(), 7.0)]),
         };
 
         let mut values = vec![0.0; result.dag.len()];
@@ -1002,9 +1515,15 @@ mod tests {
         // config schema
         let schema = block.config_schema();
         assert_eq!(schema.len(), 3);
-        assert!(schema.iter().any(|f| f.key == "input_a_topic" && f.kind == FieldKind::Text));
-        assert!(schema.iter().any(|f| f.key == "input_b_topic" && f.kind == FieldKind::Text));
-        assert!(schema.iter().any(|f| f.key == "output_topic" && f.kind == FieldKind::Text));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "input_a_topic" && f.kind == FieldKind::Text));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "input_b_topic" && f.kind == FieldKind::Text));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "output_topic" && f.kind == FieldKind::Text));
 
         // config json
         let json = block.config_json();
@@ -1071,10 +1590,7 @@ mod tests {
         let block = MultiplyBlock::default();
         let result = block.lower().unwrap();
         let ps = MockPubSub {
-            values: BTreeMap::from([
-                ("mul/a".into(), 4.0),
-                ("mul/b".into(), 5.0),
-            ]),
+            values: BTreeMap::from([("mul/a".into(), 4.0), ("mul/b".into(), 5.0)]),
         };
 
         let mut values = vec![0.0; result.dag.len()];
@@ -1112,10 +1628,18 @@ mod tests {
         // config schema
         let schema = block.config_schema();
         assert_eq!(schema.len(), 4);
-        assert!(schema.iter().any(|f| f.key == "input_topic" && f.kind == FieldKind::Text));
-        assert!(schema.iter().any(|f| f.key == "output_topic" && f.kind == FieldKind::Text));
-        assert!(schema.iter().any(|f| f.key == "min" && f.kind == FieldKind::Float));
-        assert!(schema.iter().any(|f| f.key == "max" && f.kind == FieldKind::Float));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "input_topic" && f.kind == FieldKind::Text));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "output_topic" && f.kind == FieldKind::Text));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "min" && f.kind == FieldKind::Float));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "max" && f.kind == FieldKind::Float));
 
         // config json -- default values
         let json = block.config_json();
@@ -1319,8 +1843,12 @@ mod tests {
         // config schema
         let schema = block.config_schema();
         assert_eq!(schema.len(), 2);
-        assert!(schema.iter().any(|f| f.key == "input_topic" && f.kind == FieldKind::Text));
-        assert!(schema.iter().any(|f| f.key == "output_topic" && f.kind == FieldKind::Text));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "input_topic" && f.kind == FieldKind::Text));
+        assert!(schema
+            .iter()
+            .any(|f| f.key == "output_topic" && f.kind == FieldKind::Text));
 
         // config json
         let json = block.config_json();
@@ -1461,10 +1989,7 @@ mod tests {
         let block = SubtractBlock::default();
         let result = block.lower().unwrap();
         let ps = MockPubSub {
-            values: BTreeMap::from([
-                ("sub/a".into(), 10.0),
-                ("sub/b".into(), 3.0),
-            ]),
+            values: BTreeMap::from([("sub/a".into(), 10.0), ("sub/b".into(), 3.0)]),
         };
         let mut values = vec![0.0; result.dag.len()];
         let eval = result.dag.evaluate(&NullChannels, &ps, &mut values);
@@ -1476,7 +2001,9 @@ mod tests {
     #[test]
     fn test_subtract_config() {
         let mut block = SubtractBlock::default();
-        block.apply_config(&serde_json::json!({"input_a_topic": "x", "input_b_topic": "y", "output_topic": "z"}));
+        block.apply_config(
+            &serde_json::json!({"input_a_topic": "x", "input_b_topic": "y", "output_topic": "z"}),
+        );
         assert_eq!(block.input_a_topic, "x");
         let ch = block.declared_channels();
         assert_eq!(ch.len(), 3);
@@ -1737,7 +2264,9 @@ mod tests {
         let json = block.config_json();
         assert_eq!(json["input_a_topic"], "sub/a");
 
-        block.apply_config(&serde_json::json!({"input_a_topic": "x", "input_b_topic": "y", "output_topic": "z"}));
+        block.apply_config(
+            &serde_json::json!({"input_a_topic": "x", "input_b_topic": "y", "output_topic": "z"}),
+        );
         assert_eq!(block.input_a_topic, "x");
         assert_eq!(block.input_b_topic, "y");
         assert_eq!(block.output_topic, "z");
@@ -1779,7 +2308,8 @@ mod tests {
         assert_eq!(json["input_topic"], "neg/in");
         assert_eq!(json["output_topic"], "neg/out");
 
-        block.apply_config(&serde_json::json!({"input_topic": "sig/in", "output_topic": "sig/out"}));
+        block
+            .apply_config(&serde_json::json!({"input_topic": "sig/in", "output_topic": "sig/out"}));
         assert_eq!(block.input_topic, "sig/in");
         assert_eq!(block.output_topic, "sig/out");
 
@@ -1877,7 +2407,9 @@ mod tests {
         assert_eq!(json["output_topic"], "lp/out");
         assert_eq!(json["alpha"], 0.1);
 
-        block.apply_config(&serde_json::json!({"input_topic": "x", "output_topic": "y", "alpha": 0.5}));
+        block.apply_config(
+            &serde_json::json!({"input_topic": "x", "output_topic": "y", "alpha": 0.5}),
+        );
         assert_eq!(block.input_topic, "x");
         assert_eq!(block.output_topic, "y");
         assert_eq!(block.alpha, 0.5);

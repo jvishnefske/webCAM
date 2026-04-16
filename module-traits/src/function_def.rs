@@ -213,10 +213,7 @@ pub fn builtin_function_defs() -> Vec<FunctionDef> {
             op: FunctionOp::Clamp,
             inputs: alloc::vec![FuncPortDef::new("in", PortKind::Float)],
             outputs: alloc::vec![FuncPortDef::new("out", PortKind::Float)],
-            params: alloc::vec![
-                ParamDef::float("min", 0.0),
-                ParamDef::float("max", 1.0),
-            ],
+            params: alloc::vec![ParamDef::float("min", 0.0), ParamDef::float("max", 1.0),],
             mlir_op: None, // clamp = max(min, min(max, x)) — compound arith
         },
         FunctionDef {

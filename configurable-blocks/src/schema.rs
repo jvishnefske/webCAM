@@ -29,6 +29,11 @@ pub enum FieldKind {
     Bool,
     /// Select from a list of string options.
     Select(Vec<String>),
+    /// Type selector widget — renders a dropdown of DAG scalar types
+    /// (e.g. "f32", "i32", "bool"). The selected value is stored as a
+    /// type name string that maps to a [`dag_core::types::DagType`] at
+    /// lowering time.
+    TypeSelector,
 }
 
 /// Block category for sub-menu grouping in the palette.
@@ -89,6 +94,117 @@ mod tests {
         assert!(all.contains(&BlockCategory::Math));
         assert!(all.contains(&BlockCategory::Monitor));
     }
+
+    // --- DeclaredChannel tests ---
+
+    #[test]
+    fn test_declared_channel_with_channel_type_serde_roundtrip() {
+        let ch = DeclaredChannel {
+            name: "motor/speed".into(),
+            direction: ChannelDirection::Output,
+            kind: ChannelKind::PubSub,
+            channel_type: Some("i32".into()),
+        };
+        let json = serde_json::to_string(&ch).expect("serialize");
+        let restored: DeclaredChannel = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(restored.name, "motor/speed");
+        assert_eq!(restored.direction, ChannelDirection::Output);
+        assert_eq!(restored.kind, ChannelKind::PubSub);
+        assert_eq!(restored.channel_type, Some("i32".into()));
+    }
+
+    #[test]
+    fn test_declared_channel_with_channel_type_none_serde_roundtrip() {
+        let ch = DeclaredChannel {
+            name: "adc0".into(),
+            direction: ChannelDirection::Input,
+            kind: ChannelKind::Hardware,
+            channel_type: None,
+        };
+        let json = serde_json::to_string(&ch).expect("serialize");
+        let restored: DeclaredChannel = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(restored.name, "adc0");
+        assert_eq!(restored.direction, ChannelDirection::Input);
+        assert_eq!(restored.kind, ChannelKind::Hardware);
+        assert_eq!(restored.channel_type, None);
+    }
+
+    #[test]
+    fn test_declared_channel_none_skipped_in_json() {
+        // When channel_type is None, it should not appear in serialized JSON
+        let ch = DeclaredChannel {
+            name: "x".into(),
+            direction: ChannelDirection::Input,
+            kind: ChannelKind::PubSub,
+            channel_type: None,
+        };
+        let json = serde_json::to_string(&ch).expect("serialize");
+        assert!(
+            !json.contains("channel_type"),
+            "None channel_type should be skipped: {json}"
+        );
+    }
+
+    #[test]
+    fn test_declared_channel_backward_compat_missing_channel_type() {
+        // Old JSON without channel_type should deserialize with channel_type = None
+        let json = r#"{"name":"x","direction":"input","kind":"pub_sub"}"#;
+        let ch: DeclaredChannel = serde_json::from_str(json).expect("deserialize old format");
+        assert_eq!(ch.name, "x");
+        assert_eq!(ch.channel_type, None);
+    }
+
+    #[test]
+    fn test_declared_channel_channel_type_f32() {
+        let ch = DeclaredChannel {
+            name: "sensor/temp".into(),
+            direction: ChannelDirection::Output,
+            kind: ChannelKind::PubSub,
+            channel_type: Some("f32".into()),
+        };
+        // Verify type name can be resolved via DagType::from_name
+        let dag_type = dag_core::types::DagType::from_name(ch.channel_type.as_deref().unwrap());
+        assert_eq!(dag_type, Some(dag_core::types::DagType::F32));
+    }
+
+    // --- FieldKind tests ---
+
+    #[test]
+    fn test_field_kind_type_selector_serde_roundtrip() {
+        let kind = FieldKind::TypeSelector;
+        let json = serde_json::to_string(&kind).expect("serialize TypeSelector");
+        let restored: FieldKind = serde_json::from_str(&json).expect("deserialize TypeSelector");
+        assert_eq!(kind, restored);
+        assert_eq!(json, "\"type_selector\""); // snake_case rename
+    }
+
+    #[test]
+    fn test_field_kind_existing_variants_unchanged() {
+        // Verify existing FieldKind variants still serialize/deserialize correctly
+        let cases = vec![
+            (FieldKind::Float, "\"float\""),
+            (FieldKind::Int, "\"int\""),
+            (FieldKind::Text, "\"text\""),
+            (FieldKind::Bool, "\"bool\""),
+        ];
+        for (kind, expected_json) in &cases {
+            let json = serde_json::to_string(kind).expect("serialize");
+            assert_eq!(
+                &json, expected_json,
+                "FieldKind::{kind:?} serialization mismatch"
+            );
+            let restored: FieldKind = serde_json::from_str(&json).expect("deserialize");
+            assert_eq!(kind, &restored);
+        }
+    }
+
+    #[test]
+    fn test_field_kind_select_unchanged() {
+        let kind = FieldKind::Select(vec!["a".into(), "b".into()]);
+        let json = serde_json::to_string(&kind).expect("serialize Select");
+        let restored: FieldKind = serde_json::from_str(&json).expect("deserialize Select");
+        assert_eq!(kind, restored);
+    }
 }
 
 /// Pubsub or hardware channel declared by a configurable block.
@@ -100,6 +216,13 @@ pub struct DeclaredChannel {
     pub direction: ChannelDirection,
     /// Channel kind — pubsub topic or hardware I/O.
     pub kind: ChannelKind,
+    /// Optional DAG type name (e.g. "i32", "f32", "bool").
+    ///
+    /// When `None`, the channel defaults to `f64` (the standard DAG scalar).
+    /// The string maps to a [`dag_core::types::DagType`] at lowering time via
+    /// [`DagType::from_name`](dag_core::types::DagType::from_name).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel_type: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -129,9 +129,7 @@ pub fn remap_dag_channels(dag: &Dag, channel_map: &ChannelMap) -> Result<Dag, Da
     for op in dag.nodes() {
         let new_op = match op {
             Op::Subscribe(topic) => Op::Subscribe(channel_map.remap(topic).to_string()),
-            Op::Publish(topic, src) => {
-                Op::Publish(channel_map.remap(topic).to_string(), *src)
-            }
+            Op::Publish(topic, src) => Op::Publish(channel_map.remap(topic).to_string(), *src),
             other => other.clone(),
         };
         remapped.add_op(new_op)?;
@@ -285,8 +283,8 @@ mod tests {
     fn test_remap_dag_channels_remaps_subscribe_and_publish() {
         let mut dag = Dag::new();
         dag.add_op(Op::Subscribe("motor/setpoint".into())).unwrap(); // node 0
-        dag.add_op(Op::Const(1.0)).unwrap();                         // node 1
-        dag.add_op(Op::Publish("motor/output".into(), 1)).unwrap();  // node 2
+        dag.add_op(Op::Const(1.0)).unwrap(); // node 1
+        dag.add_op(Op::Publish("motor/output".into(), 1)).unwrap(); // node 2
 
         let mut map = ChannelMap::new();
         map.insert("motor/setpoint".into(), "robot/joint1/setpoint".into());
@@ -311,14 +309,14 @@ mod tests {
     #[test]
     fn test_remap_dag_channels_leaves_non_pubsub_ops_unchanged() {
         let mut dag = Dag::new();
-        dag.add_op(Op::Const(42.0)).unwrap();  // node 0
-        dag.add_op(Op::Const(10.0)).unwrap();  // node 1
-        dag.add_op(Op::Add(0, 1)).unwrap();    // node 2
-        dag.add_op(Op::Mul(0, 2)).unwrap();    // node 3
-        dag.add_op(Op::Sub(3, 1)).unwrap();    // node 4
-        dag.add_op(Op::Div(4, 1)).unwrap();    // node 5
-        dag.add_op(Op::Neg(5)).unwrap();       // node 6
-        dag.add_op(Op::Relu(6)).unwrap();      // node 7
+        dag.add_op(Op::Const(42.0)).unwrap(); // node 0
+        dag.add_op(Op::Const(10.0)).unwrap(); // node 1
+        dag.add_op(Op::Add(0, 1)).unwrap(); // node 2
+        dag.add_op(Op::Mul(0, 2)).unwrap(); // node 3
+        dag.add_op(Op::Sub(3, 1)).unwrap(); // node 4
+        dag.add_op(Op::Div(4, 1)).unwrap(); // node 5
+        dag.add_op(Op::Neg(5)).unwrap(); // node 6
+        dag.add_op(Op::Relu(6)).unwrap(); // node 7
         dag.add_op(Op::Input("sensor".into())).unwrap(); // node 8
         dag.add_op(Op::Output("out".into(), 7)).unwrap(); // node 9
 
@@ -357,7 +355,13 @@ mod tests {
             .dag
             .nodes()
             .iter()
-            .find_map(|op| if let Op::Subscribe(t) = op { Some(t.clone()) } else { None })
+            .find_map(|op| {
+                if let Op::Subscribe(t) = op {
+                    Some(t.clone())
+                } else {
+                    None
+                }
+            })
             .expect("no Subscribe in PID DAG");
 
         let mut profile = DeploymentProfile::new("test");
@@ -365,20 +369,29 @@ mod tests {
             .channel_map
             .insert(first_sub.clone(), "remapped/topic".into());
 
-        let result =
-            lower_with_profile(&pid, &profile).expect("lower_with_profile failed");
+        let result = lower_with_profile(&pid, &profile).expect("lower_with_profile failed");
 
         // The remapped DAG should have the new topic name
-        let has_remapped = result.dag.nodes().iter().any(|op| {
-            matches!(op, Op::Subscribe(t) if t == "remapped/topic")
-        });
-        assert!(has_remapped, "expected remapped Subscribe topic in output DAG");
+        let has_remapped = result
+            .dag
+            .nodes()
+            .iter()
+            .any(|op| matches!(op, Op::Subscribe(t) if t == "remapped/topic"));
+        assert!(
+            has_remapped,
+            "expected remapped Subscribe topic in output DAG"
+        );
 
         // The original topic name should no longer appear
-        let has_original = result.dag.nodes().iter().any(|op| {
-            matches!(op, Op::Subscribe(t) if *t == first_sub)
-        });
-        assert!(!has_original, "original topic should have been remapped away");
+        let has_original = result
+            .dag
+            .nodes()
+            .iter()
+            .any(|op| matches!(op, Op::Subscribe(t) if *t == first_sub));
+        assert!(
+            !has_original,
+            "original topic should have been remapped away"
+        );
     }
 
     // ── lower_block_set ──────────────────────────────────────────────────────
@@ -431,11 +444,9 @@ mod tests {
                 Op::Output(_, src) | Op::Neg(src) | Op::Relu(src) | Op::Publish(_, src) => {
                     vec![*src]
                 }
-                Op::Add(a, b)
-                | Op::Mul(a, b)
-                | Op::Sub(a, b)
-                | Op::Div(a, b)
-                | Op::Pow(a, b) => vec![*a, *b],
+                Op::Add(a, b) | Op::Mul(a, b) | Op::Sub(a, b) | Op::Div(a, b) | Op::Pow(a, b) => {
+                    vec![*a, *b]
+                }
                 _ => vec![],
             };
             for r in refs {
@@ -458,27 +469,33 @@ mod tests {
             .dag
             .nodes()
             .iter()
-            .find_map(|op| if let Op::Subscribe(t) = op { Some(t.clone()) } else { None })
+            .find_map(|op| {
+                if let Op::Subscribe(t) = op {
+                    Some(t.clone())
+                } else {
+                    None
+                }
+            })
             .expect("pid should have Subscribe");
 
         profile
             .channel_map
             .insert(default_sub.clone(), "deployed/setpoint".into());
 
-        let blocks: Vec<(String, serde_json::Value)> = vec![
-            ("pid".into(), serde_json::json!({})),
-        ];
+        let blocks: Vec<(String, serde_json::Value)> = vec![("pid".into(), serde_json::json!({}))];
 
         let combined = lower_block_set(&blocks, &profile).expect("lower_block_set failed");
 
-        let has_remapped = combined.nodes().iter().any(|op| {
-            matches!(op, Op::Subscribe(t) if t == "deployed/setpoint")
-        });
+        let has_remapped = combined
+            .nodes()
+            .iter()
+            .any(|op| matches!(op, Op::Subscribe(t) if t == "deployed/setpoint"));
         assert!(has_remapped, "combined DAG should contain remapped topic");
 
-        let has_original = combined.nodes().iter().any(|op| {
-            matches!(op, Op::Subscribe(t) if *t == default_sub)
-        });
+        let has_original = combined
+            .nodes()
+            .iter()
+            .any(|op| matches!(op, Op::Subscribe(t) if *t == default_sub));
         assert!(!has_original, "original topic should be remapped away");
     }
 
@@ -534,9 +551,8 @@ mod tests {
     #[test]
     fn test_lower_block_set_unknown_block_type_returns_error() {
         let profile = DeploymentProfile::new("bench");
-        let blocks: Vec<(String, serde_json::Value)> = vec![
-            ("nonexistent_block_xyz".into(), serde_json::json!({})),
-        ];
+        let blocks: Vec<(String, serde_json::Value)> =
+            vec![("nonexistent_block_xyz".into(), serde_json::json!({}))];
         let result = lower_block_set(&blocks, &profile);
         match result {
             Err(e) => assert!(e.contains("unknown block type"), "unexpected error: {e}"),
@@ -636,9 +652,8 @@ mod tests {
     fn test_lower_block_set_per_node_unassigned_goes_to_default() {
         let profile = DeploymentProfile::new("no_assignments");
         // No node_assignments set -- blocks should go to "_default"
-        let blocks: Vec<(String, serde_json::Value)> = vec![
-            ("constant".into(), serde_json::json!({"value": 1.0})),
-        ];
+        let blocks: Vec<(String, serde_json::Value)> =
+            vec![("constant".into(), serde_json::json!({"value": 1.0}))];
         let node_dags = lower_block_set_per_node(&blocks, &profile).expect("should succeed");
         assert!(
             node_dags.contains_key("_default"),
@@ -655,7 +670,10 @@ mod tests {
         let adc = crate::blocks::basic::AdcBlock::default();
         let text = lower_to_il_text(&adc).expect("lower failed");
         assert!(text.contains("block @adc"), "should contain block type");
-        assert!(text.contains("hw"), "should contain hw label for hardware channel");
+        assert!(
+            text.contains("hw"),
+            "should contain hw label for hardware channel"
+        );
         assert!(text.contains("adc0"), "should contain channel name");
     }
 
@@ -665,16 +683,18 @@ mod tests {
         let pwm = crate::blocks::basic::PwmBlock::default();
         let text = lower_to_il_text(&pwm).expect("lower failed");
         assert!(text.contains("block @pwm"), "should contain block type");
-        assert!(text.contains("hw"), "should contain hw label for hardware channel");
+        assert!(
+            text.contains("hw"),
+            "should contain hw label for hardware channel"
+        );
         assert!(text.contains("pwm0"), "should contain channel name");
     }
 
     #[test]
     fn test_lower_block_set_per_node_unknown_block_type() {
         let profile = DeploymentProfile::new("bench");
-        let blocks: Vec<(String, serde_json::Value)> = vec![
-            ("nonexistent_block_xyz".into(), serde_json::json!({})),
-        ];
+        let blocks: Vec<(String, serde_json::Value)> =
+            vec![("nonexistent_block_xyz".into(), serde_json::json!({}))];
         let result = lower_block_set_per_node(&blocks, &profile);
         match result {
             Err(e) => assert!(e.contains("unknown block type"), "unexpected error: {e}"),

@@ -173,16 +173,19 @@ impl ConfigurableBlock for PidBlock {
                 name: self.setpoint_topic.clone(),
                 direction: ChannelDirection::Input,
                 kind: ChannelKind::PubSub,
+                channel_type: None,
             },
             DeclaredChannel {
                 name: self.feedback_topic.clone(),
                 direction: ChannelDirection::Input,
                 kind: ChannelKind::PubSub,
+                channel_type: None,
             },
             DeclaredChannel {
                 name: self.output_topic.clone(),
                 direction: ChannelDirection::Output,
                 kind: ChannelKind::PubSub,
+                channel_type: None,
             },
         ]
     }
@@ -326,11 +329,13 @@ impl ConfigurableBlock for SimpleGainBlock {
                 name: self.input_topic.clone(),
                 direction: ChannelDirection::Input,
                 kind: ChannelKind::PubSub,
+                channel_type: None,
             },
             DeclaredChannel {
                 name: self.output_topic.clone(),
                 direction: ChannelDirection::Output,
                 kind: ChannelKind::PubSub,
+                channel_type: None,
             },
         ]
     }
@@ -439,11 +444,13 @@ impl ConfigurableBlock for PubSubBridgeBlock {
                 name: self.subscribe_topic.clone(),
                 direction: ChannelDirection::Input,
                 kind: ChannelKind::PubSub,
+                channel_type: None,
             },
             DeclaredChannel {
                 name: self.publish_topic.clone(),
                 direction: ChannelDirection::Output,
                 kind: ChannelKind::PubSub,
+                channel_type: None,
             },
         ]
     }
