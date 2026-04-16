@@ -1283,3 +1283,16 @@ body {
     white-space: nowrap;
     pointer-events: none;
 }
+
+/* Edge paths */
+.df-edge {
+    transition: stroke-width 0.1s;
+}
+.df-edge-hit {
+    cursor: pointer;
+}
+.df-edge-hit:hover + .df-edge {
+    stroke: #4f8cff !important;
+    stroke-width: 4px !important;
+    filter: brightness(1.3);
+}

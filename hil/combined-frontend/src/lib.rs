@@ -19,6 +19,7 @@ pub mod storage;
 
 #[cfg(target_arch = "wasm32")]
 pub mod components;
+pub mod edge_math;
 pub mod firmware_util;
 pub mod graph_engine;
 pub mod graph_state;
