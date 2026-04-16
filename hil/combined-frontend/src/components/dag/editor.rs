@@ -48,6 +48,26 @@ struct DraggingWire {
     mouse_y: f64,
 }
 
+/// State of an in-progress node drag.
+#[derive(Clone, Copy)]
+struct DraggingNode {
+    block_id: usize,
+    start_mouse_x: f64,
+    start_mouse_y: f64,
+    start_node_x: f64,
+    start_node_y: f64,
+    moved: bool,
+}
+
+/// Represents an edge for selection purposes.
+#[derive(Clone, Copy, PartialEq)]
+struct SelectedEdge {
+    from_block: usize,
+    from_port: usize,
+    to_block: usize,
+    to_port: usize,
+}
+
 // ---------------------------------------------------------------------------
 // DagEditorPanel component
 // ---------------------------------------------------------------------------
@@ -78,6 +98,12 @@ pub fn DagEditorPanel() -> impl IntoView {
 
     // Wire drag state: Some while dragging from an output port.
     let (dragging_wire, set_dragging_wire) = signal(None::<DraggingWire>);
+
+    // Node drag state: Some while dragging a block.
+    let (dragging_node, set_dragging_node) = signal(None::<DraggingNode>);
+
+    // Selected edge (for deletion).
+    let (selected_edge, set_selected_edge) = signal(None::<SelectedEdge>);
 
     // Config signals derived from selection
     let selected_block_type = Signal::derive(move || {
@@ -270,17 +296,25 @@ pub fn DagEditorPanel() -> impl IntoView {
     let on_keydown = move |ev: web_sys::KeyboardEvent| {
         let key = ev.key();
         if key == "Delete" || key == "Backspace" {
-            // Only act if we have a selection and the target is not an input/textarea
+            let target_tag = ev
+                .target()
+                .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                .map(|el| el.tag_name().to_uppercase())
+                .unwrap_or_default();
+            if target_tag == "INPUT" || target_tag == "TEXTAREA" || target_tag == "SELECT" {
+                return;
+            }
+            ev.prevent_default();
+
+            // Delete selected edge first (if any)
+            if let Some(edge) = selected_edge.get_untracked() {
+                gs_kbd.disconnect_edge(edge.from_block, edge.from_port);
+                set_selected_edge.set(None);
+                return;
+            }
+            // Otherwise delete selected block
             if gs_kbd.selected_id.get_untracked().is_some() {
-                let target_tag = ev
-                    .target()
-                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
-                    .map(|el| el.tag_name().to_uppercase())
-                    .unwrap_or_default();
-                if target_tag != "INPUT" && target_tag != "TEXTAREA" && target_tag != "SELECT" {
-                    ev.prevent_default();
-                    gs_kbd.delete_selected();
-                }
+                gs_kbd.delete_selected();
             }
         }
     };
@@ -506,7 +540,7 @@ pub fn DagEditorPanel() -> impl IntoView {
                             <button class="btn btn-secondary btn-sm" on:click=on_new>"New"</button>
                         </div>
                     </div>
-                    {move || {
+                    {let gs_list = gs.clone(); move || {
                         let projects = project_list.get();
                         if projects.is_empty() {
                             view! { <div class="project-empty">"No saved projects"</div> }.into_any()
@@ -516,7 +550,7 @@ pub fn DagEditorPanel() -> impl IntoView {
                                     {projects.into_iter().map(|name| {
                                         let name_load = name.clone();
                                         let name_del = name.clone();
-                                        let gs_load = gs.clone();
+                                        let gs_load = gs_list.clone();
                                         let gs_save_name = set_save_name;
                                         view! {
                                             <li class="project-item">
@@ -570,7 +604,6 @@ pub fn DagEditorPanel() -> impl IntoView {
                     class="dag-canvas"
                     viewBox="0 0 700 400"
                     on:mousedown=move |ev: web_sys::MouseEvent| {
-                        // Start wire drag if mousedown is on an output port circle.
                         let target = match ev.target() {
                             Some(t) => t,
                             None => return,
@@ -579,36 +612,110 @@ pub fn DagEditorPanel() -> impl IntoView {
                             Ok(e) => e,
                             Err(_) => return,
                         };
-                        let side = el.get_attribute("data-side").unwrap_or_default();
-                        if side != "out" {
+
+                        // 1. Edge click — select edge (data-edge-from-block on hit-area)
+                        if let (Some(fb), Some(fp), Some(tb), Some(tp)) = (
+                            el.get_attribute("data-edge-from-block").and_then(|s| s.parse::<usize>().ok()),
+                            el.get_attribute("data-edge-from-port").and_then(|s| s.parse::<usize>().ok()),
+                            el.get_attribute("data-edge-to-block").and_then(|s| s.parse::<usize>().ok()),
+                            el.get_attribute("data-edge-to-port").and_then(|s| s.parse::<usize>().ok()),
+                        ) {
+                            set_selected_edge.set(Some(SelectedEdge {
+                                from_block: fb, from_port: fp, to_block: tb, to_port: tp,
+                            }));
+                            set_selected_id.set(None);
+                            ev.prevent_default();
                             return;
                         }
-                        let block_id: usize = match el.get_attribute("data-block-id")
-                            .and_then(|s| s.parse().ok()) {
-                            Some(v) => v,
-                            None => return,
-                        };
-                        let port_idx: usize = match el.get_attribute("data-port-idx")
-                            .and_then(|s| s.parse().ok()) {
-                            Some(v) => v,
-                            None => return,
-                        };
-                        // Compute SVG coordinates from client position
-                        let svg_el = match el.closest("svg") {
-                            Ok(Some(s)) => s,
-                            _ => return,
-                        };
-                        let (mx, my) = client_to_svg(&svg_el, ev.client_x() as f64, ev.client_y() as f64);
-                        set_dragging_wire.set(Some(DraggingWire {
-                            from_block: block_id,
-                            from_port: port_idx,
-                            mouse_x: mx,
-                            mouse_y: my,
-                        }));
-                        ev.prevent_default();
+
+                        // 2. Port wire drag start (data-side="out")
+                        let side = el.get_attribute("data-side").unwrap_or_default();
+                        if side == "out" {
+                            let block_id: usize = match el.get_attribute("data-block-id")
+                                .and_then(|s| s.parse().ok()) {
+                                Some(v) => v,
+                                None => return,
+                            };
+                            let port_idx: usize = match el.get_attribute("data-port-idx")
+                                .and_then(|s| s.parse().ok()) {
+                                Some(v) => v,
+                                None => return,
+                            };
+                            let svg_el = match el.closest("svg") {
+                                Ok(Some(s)) => s,
+                                _ => return,
+                            };
+                            let (mx, my) = client_to_svg(&svg_el, ev.client_x() as f64, ev.client_y() as f64);
+                            set_dragging_wire.set(Some(DraggingWire {
+                                from_block: block_id,
+                                from_port: port_idx,
+                                mouse_x: mx,
+                                mouse_y: my,
+                            }));
+                            ev.prevent_default();
+                            return;
+                        }
+
+                        // 3. Node drag start — walk up DOM to find dag-node group
+                        let mut walk = Some(el.clone());
+                        while let Some(ref current) = walk {
+                            if let Some(bid_str) = current.get_attribute("data-block-id") {
+                                // Only start drag from the node group, not from ports
+                                if current.get_attribute("data-side").is_none() {
+                                    if let Ok(block_id) = bid_str.parse::<usize>() {
+                                        let blks = blocks.get_untracked();
+                                        if let Some(pb) = blks.iter().find(|b| b.id == block_id) {
+                                            set_dragging_node.set(Some(DraggingNode {
+                                                block_id,
+                                                start_mouse_x: ev.client_x() as f64,
+                                                start_mouse_y: ev.client_y() as f64,
+                                                start_node_x: pb.x,
+                                                start_node_y: pb.y,
+                                                moved: false,
+                                            }));
+                                            ev.prevent_default();
+                                            return;
+                                        }
+                                    }
+                                }
+                            }
+                            walk = current.parent_element();
+                        }
+
+                        // 4. Click on empty canvas — clear selection
+                        set_selected_edge.set(None);
+                        set_selected_id.set(None);
                     }
-                    on:mousemove=move |ev: web_sys::MouseEvent| {
-                        // Update drag line endpoint while dragging.
+                    on:mousemove={let gs_move = gs.clone(); move |ev: web_sys::MouseEvent| {
+                        // Node drag
+                        if let Some(dn) = dragging_node.get_untracked() {
+                            let dx = ev.client_x() as f64 - dn.start_mouse_x;
+                            let dy = ev.client_y() as f64 - dn.start_mouse_y;
+                            if !dn.moved && (dx.abs() + dy.abs()) < 3.0 {
+                                return; // below threshold
+                            }
+                            // Convert client delta to SVG space (account for viewBox scaling)
+                            let svg_el = match ev.current_target() {
+                                Some(t) => t,
+                                None => return,
+                            };
+                            let el: web_sys::Element = match svg_el.dyn_into() {
+                                Ok(e) => e,
+                                Err(_) => return,
+                            };
+                            let rect = el.get_bounding_client_rect();
+                            let scale_x = 700.0 / rect.width();
+                            let scale_y = 400.0 / rect.height();
+                            let new_x = dn.start_node_x + dx * scale_x;
+                            let new_y = dn.start_node_y + dy * scale_y;
+                            gs_move.move_block(dn.block_id, new_x, new_y);
+                            set_dragging_node.update(|d| {
+                                if let Some(ref mut n) = d { n.moved = true; }
+                            });
+                            return;
+                        }
+
+                        // Wire drag
                         if dragging_wire.get_untracked().is_none() {
                             return;
                         }
@@ -627,8 +734,21 @@ pub fn DagEditorPanel() -> impl IntoView {
                                 w.mouse_y = my;
                             }
                         });
-                    }
-                    on:mouseup=move |ev: web_sys::MouseEvent| {
+                    }}
+                    on:mouseup={let gs_up = gs.clone(); move |ev: web_sys::MouseEvent| {
+                        // Finish node drag
+                        if let Some(dn) = dragging_node.get_untracked() {
+                            set_dragging_node.set(None);
+                            if dn.moved {
+                                gs_up.bump_revision(); // save after drag
+                            } else {
+                                // Below threshold — treat as click to select
+                                set_selected_id.set(Some(dn.block_id));
+                                set_selected_edge.set(None);
+                            }
+                            return;
+                        }
+
                         // Complete or cancel wire drag.
                         let wire = match dragging_wire.get_untracked() {
                             Some(w) => w,
@@ -711,7 +831,7 @@ pub fn DagEditorPanel() -> impl IntoView {
                             }
                         });
                         gs_wire.bump_revision();
-                    }
+                    }}
                 >
                     // Dashed drag line (rendered when dragging a wire)
                     {move || {
@@ -748,16 +868,14 @@ pub fn DagEditorPanel() -> impl IntoView {
                         let edge_list = edges.get();
 
                         // Edge paths (rendered first so they appear behind nodes)
+                        let sel_edge = selected_edge.get();
                         let edge_views = edge_list.iter().filter_map(|edge| {
                             let src = blks.iter().find(|b| b.id == edge.from_block)?;
                             let dst = blks.iter().find(|b| b.id == edge.to_block)?;
-                            // Output port: right side of src block
                             let x1 = src.x + 190.0;
                             let y1 = src.y + 46.0 + edge.from_port as f64 * 16.0;
-                            // Input port: left side of dst block
                             let x2 = dst.x;
                             let y2 = dst.y + 46.0 + edge.to_port as f64 * 16.0;
-                            // Cubic bezier control point x-offset
                             let cpx = f64::max((x2 - x1).abs() * 0.4, 30.0);
                             let d = format!(
                                 "M {},{} C {},{} {},{} {},{}",
@@ -766,13 +884,43 @@ pub fn DagEditorPanel() -> impl IntoView {
                                 x2 - cpx, y2,
                                 x2, y2
                             );
+                            let is_selected = sel_edge == Some(SelectedEdge {
+                                from_block: edge.from_block,
+                                from_port: edge.from_port,
+                                to_block: edge.to_block,
+                                to_port: edge.to_port,
+                            });
+                            let stroke = if is_selected { "#4f8cff" } else { "#6b7280" };
+                            let width = if is_selected { "3" } else { "2" };
+                            let dash = if is_selected { "6 3" } else { "" };
+                            let hit_d = d.clone();
+                            let fb = edge.from_block.to_string();
+                            let fp = edge.from_port.to_string();
+                            let tb = edge.to_block.to_string();
+                            let tp = edge.to_port.to_string();
                             Some(view! {
+                                // Invisible fat hit-area for click targeting
+                                <path
+                                    d=hit_d
+                                    fill="none"
+                                    stroke="transparent"
+                                    stroke-width="12"
+                                    class="dag-edge-hit"
+                                    style="cursor:pointer"
+                                    attr:data-edge-from-block=fb
+                                    attr:data-edge-from-port=fp
+                                    attr:data-edge-to-block=tb
+                                    attr:data-edge-to-port=tp
+                                />
+                                // Visible edge path
                                 <path
                                     d=d
                                     fill="none"
-                                    stroke="#6b7280"
-                                    stroke-width="2"
+                                    stroke=stroke
+                                    stroke-width=width
+                                    stroke-dasharray=dash
                                     class="dag-edge"
+                                    style="pointer-events:none"
                                 />
                             })
                         }).collect_view();
@@ -797,7 +945,14 @@ pub fn DagEditorPanel() -> impl IntoView {
                                 <g
                                     class=move || if is_selected() { "dag-node selected" } else { "dag-node" }
                                     transform=format!("translate({},{})", x, y)
-                                    on:click=move |_| set_selected_id.set(Some(id))
+                                    attr:data-block-id=id.to_string()
+                                    on:click=move |ev: web_sys::MouseEvent| {
+                                        // Don't select if it was a drag
+                                        if dragging_node.get_untracked().is_some() { return; }
+                                        ev.stop_propagation();
+                                        set_selected_id.set(Some(id));
+                                        set_selected_edge.set(None);
+                                    }
                                 >
                                     <rect
                                         width="190" height=height rx="6" ry="6"

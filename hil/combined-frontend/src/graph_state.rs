@@ -152,6 +152,53 @@ impl GraphState {
         self.bump_revision();
     }
 
+    /// Move a block to a new position.
+    pub fn move_block(&self, id: usize, x: f64, y: f64) {
+        self.set_blocks.update(|blks| {
+            if let Some(pb) = blks.iter_mut().find(|b| b.id == id) {
+                pb.x = x;
+                pb.y = y;
+            }
+        });
+        // Don't bump revision on every drag frame — caller bumps on drag end.
+    }
+
+    /// Disconnect an edge by clearing the auto-topic on the source block's output.
+    ///
+    /// Edges are "virtual" — they exist because two blocks share a matching topic
+    /// name. Disconnecting means clearing the source's output topic to break the
+    /// name match.
+    pub fn disconnect_edge(&self, from_block_id: usize, from_port: usize) {
+        use configurable_blocks::schema::ChannelDirection;
+
+        self.set_blocks.update(|blks| {
+            let pb = match blks.iter().find(|b| b.id == from_block_id) {
+                Some(b) => b.clone(),
+                None => return,
+            };
+            let block = match pb.reconstruct() {
+                Some(b) => b,
+                None => return,
+            };
+            let channels = block.declared_channels();
+            let out_channels: Vec<_> = channels
+                .iter()
+                .filter(|c| c.direction == ChannelDirection::Output)
+                .collect();
+            if let Some(out_ch) = out_channels.get(from_port) {
+                if let Some(key) = find_config_key_for_channel(&pb.config, &out_ch.name) {
+                    if let Some(src) = blks.iter_mut().find(|b| b.id == from_block_id) {
+                        if let serde_json::Value::Object(ref mut map) = src.config {
+                            map.insert(key, serde_json::Value::String(String::new()));
+                        }
+                    }
+                }
+            }
+        });
+        self.set_selected_id.set(None);
+        self.bump_revision();
+    }
+
     /// Delete the currently selected block.
     pub fn delete_selected(&self) {
         if let Some(sel) = self.selected_id.get_untracked() {
@@ -555,5 +602,67 @@ mod tests {
         gs.update_config("value".to_string(), serde_json::json!(99.0));
         // Config should not change, revision should not change
         assert_eq!(gs.revision.get_untracked(), rev_before);
+    }
+
+    #[test]
+    fn graph_state_move_block() {
+        let gs = GraphState::new();
+        let id = gs.add_block("constant").unwrap();
+        let blks = gs.blocks.get_untracked();
+        let orig_x = blks[0].x;
+        let orig_y = blks[0].y;
+        drop(blks);
+
+        gs.move_block(id, 300.0, 400.0);
+
+        let blks = gs.blocks.get_untracked();
+        assert!((blks[0].x - 300.0).abs() < 0.01);
+        assert!((blks[0].y - 400.0).abs() < 0.01);
+        assert!((blks[0].x - orig_x).abs() > 1.0); // actually moved
+    }
+
+    #[test]
+    fn graph_state_move_nonexistent_block_is_noop() {
+        let gs = GraphState::new();
+        gs.add_block("constant");
+        gs.move_block(999, 100.0, 200.0); // no panic
+        // Block at id=1 should not have moved
+        let blks = gs.blocks.get_untracked();
+        assert!(blks[0].x < 100.0); // still at original position
+    }
+
+    #[test]
+    fn graph_state_disconnect_edge() {
+        let gs = GraphState::new();
+        // Add a pubsub_bridge block (has publish_topic as its output channel)
+        gs.add_block("pubsub_bridge");
+        // Set its publish_topic to "my_wire"
+        gs.update_config(
+            "publish_topic".to_string(),
+            serde_json::json!("my_wire"),
+        );
+
+        // Verify the publish topic is set
+        let blks = gs.blocks.get_untracked();
+        assert_eq!(
+            blks[0]
+                .config
+                .get("publish_topic")
+                .and_then(|v| v.as_str()),
+            Some("my_wire")
+        );
+        drop(blks);
+
+        // Disconnect output port 0 — should clear the publish topic
+        let block_id = 1;
+        gs.disconnect_edge(block_id, 0);
+
+        let blks = gs.blocks.get_untracked();
+        let output_val = blks[0]
+            .config
+            .get("publish_topic")
+            .and_then(|v| v.as_str())
+            .unwrap_or("not_found");
+        assert_eq!(output_val, "", "publish topic should be cleared");
     }
 }
