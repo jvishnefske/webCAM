@@ -1,18 +1,22 @@
-//! DAG editor panel: palette, canvas, config, deploy.
+//! DAG editor panel: palette, canvas, config, deploy, project management.
+
+use std::cell::RefCell;
 
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use configurable_blocks::lower;
-use configurable_blocks::registry;
 use configurable_blocks::schema::ChannelDirection;
 
+use crate::graph_state::{find_config_key_for_channel, offset_op, GraphState, PlacedBlock};
 use crate::types::BlockSet;
 
 use super::config_panel::ConfigPanel;
 use super::monitor::MonitorPanel;
 use super::palette::BlockPalette;
-use super::plot::PlotPanel;
+
+// ---------------------------------------------------------------------------
+// Editor-local types (not needed outside this component)
+// ---------------------------------------------------------------------------
 
 /// An edge connecting an output port on one block to an input port on another.
 ///
@@ -44,38 +48,24 @@ struct DraggingWire {
     mouse_y: f64,
 }
 
-/// Instance of a placed block on the canvas.
-///
-/// Stores block type + config as serializable data (Send+Sync safe).
-/// The trait object is reconstructed from the registry when needed.
-#[derive(Clone)]
-struct PlacedBlock {
-    id: usize,
-    block_type: String,
-    config: serde_json::Value,
-    x: f64,
-    y: f64,
-}
-
-impl PlacedBlock {
-    /// Reconstruct the ConfigurableBlock trait object from the registry.
-    fn reconstruct(&self) -> Option<Box<dyn lower::ConfigurableBlock>> {
-        let mut block = registry::create_block(&self.block_type)?;
-        block.apply_config(&self.config);
-        Some(block)
-    }
-}
+// ---------------------------------------------------------------------------
+// DagEditorPanel component
+// ---------------------------------------------------------------------------
 
 #[component]
 pub fn DagEditorPanel() -> impl IntoView {
-    // Block instances on the canvas
-    let (blocks, set_blocks) = signal(Vec::<PlacedBlock>::new());
-    let (next_id, set_next_id) = signal(1_usize);
+    // Retrieve GraphState from context (created in App).
+    let gs = use_context::<GraphState>().expect("GraphState must be provided via context");
+
+    let blocks = gs.blocks;
+    let set_blocks = gs.set_blocks;
+    let selected_id = gs.selected_id;
+    let set_selected_id = gs.set_selected_id;
 
     // Shared block-set context: push (block_type, config) pairs to deploy panel.
     let set_shared_blocks = use_context::<WriteSignal<BlockSet>>();
 
-    // Sync local blocks → shared context whenever blocks change.
+    // Sync local blocks -> shared context whenever blocks change.
     let sync_shared = move |blks: &[PlacedBlock]| {
         if let Some(setter) = set_shared_blocks {
             let block_set: BlockSet = blks
@@ -85,9 +75,6 @@ pub fn DagEditorPanel() -> impl IntoView {
             setter.set(block_set);
         }
     };
-
-    // Selected block
-    let (selected_id, set_selected_id) = signal(None::<usize>);
 
     // Wire drag state: Some while dragging from an output port.
     let (dragging_wire, set_dragging_wire) = signal(None::<DraggingWire>);
@@ -164,7 +151,7 @@ pub fn DagEditorPanel() -> impl IntoView {
         let blks = blocks.get();
         match blks.iter().find(|b| b.id == sel) {
             Some(pb) => match pb.reconstruct() {
-                Some(block) => lower::lower_to_il_text(block.as_ref())
+                Some(block) => configurable_blocks::lower::lower_to_il_text(block.as_ref())
                     .unwrap_or_else(|e| format!("Error: {}", e)),
                 None => String::new(),
             },
@@ -175,9 +162,7 @@ pub fn DagEditorPanel() -> impl IntoView {
     // Auto-detect edges by matching output topic names to input topic names.
     let edges = Signal::derive(move || {
         let blks = blocks.get();
-        // Collect (block_id, port_index, topic_name) for every output channel.
         let mut outputs: Vec<(usize, usize, String)> = Vec::new();
-        // Collect (block_id, port_index, topic_name) for every input channel.
         let mut inputs: Vec<(usize, usize, String)> = Vec::new();
 
         for pb in blks.iter() {
@@ -220,51 +205,83 @@ pub fn DagEditorPanel() -> impl IntoView {
     let (deploy_status, set_deploy_status) = signal(String::new());
 
     // Add block from palette
+    let gs_add = gs.clone();
     let on_add_block = Callback::new(move |block_type: String| {
-        if let Some(block) = registry::create_block(&block_type) {
-            let id = next_id.get();
-            set_next_id.set(id + 1);
-            let count = blocks.get().len();
-            let x = 30.0 + (count % 3) as f64 * 220.0;
-            let y = 30.0 + (count / 3) as f64 * 120.0;
-            let config = block.config_json();
-            set_blocks.update(|v| {
-                v.push(PlacedBlock {
-                    id,
-                    block_type: block_type.clone(),
-                    config,
-                    x,
-                    y,
-                });
-            });
-            sync_shared(&blocks.get());
-            set_selected_id.set(Some(id));
-        }
+        gs_add.add_block(&block_type);
+        sync_shared(&gs_add.blocks.get_untracked());
     });
 
     // Config change handler
+    let gs_cfg = gs.clone();
     let on_config_change = Callback::new(move |(key, value): (String, serde_json::Value)| {
-        let sel = match selected_id.get_untracked() {
-            Some(s) => s,
-            None => return,
-        };
-        set_blocks.update(|blks| {
-            if let Some(pb) = blks.iter_mut().find(|b| b.id == sel) {
-                // Update the stored config JSON directly
-                if let serde_json::Value::Object(ref mut map) = pb.config {
-                    map.insert(key, value);
-                }
-            }
-        });
-        sync_shared(&blocks.get());
+        gs_cfg.update_config(key, value);
+        sync_shared(&gs_cfg.blocks.get_untracked());
     });
 
     // Delete selected block
+    let gs_del = gs.clone();
     let on_delete = move |_| {
-        if let Some(sel) = selected_id.get_untracked() {
-            set_blocks.update(|v| v.retain(|b| b.id != sel));
-            sync_shared(&blocks.get());
-            set_selected_id.set(None);
+        gs_del.delete_selected();
+        sync_shared(&gs_del.blocks.get_untracked());
+    };
+
+    // -- Project sidebar signals --
+    let (project_list, set_project_list) = signal(GraphState::list_projects());
+    let (save_name, set_save_name) = signal(String::new());
+
+    // Refresh project list helper
+    let refresh_list = move || {
+        set_project_list.set(GraphState::list_projects());
+    };
+
+    let gs_save = gs.clone();
+    let on_save = move |_| {
+        let name = save_name.get_untracked();
+        if name.is_empty() {
+            return;
+        }
+        gs_save.save_to_storage(&name);
+        refresh_list();
+    };
+
+    let gs_new = gs.clone();
+    let on_new = move |_| {
+        gs_new.clear();
+        set_save_name.set(String::new());
+        sync_shared(&gs_new.blocks.get_untracked());
+    };
+
+    // -- Auto-save effect (fires when revision changes) --
+    let gs_auto = gs.clone();
+    let revision = gs.revision;
+    Effect::new(move |_| {
+        let _rev = revision.get(); // subscribe to revision changes
+        gs_auto.auto_save();
+    });
+
+    // -- Sync shared block set whenever blocks change --
+    Effect::new(move |_| {
+        let blks = blocks.get();
+        sync_shared(&blks);
+    });
+
+    // -- Keyboard shortcuts --
+    let gs_kbd = gs.clone();
+    let on_keydown = move |ev: web_sys::KeyboardEvent| {
+        let key = ev.key();
+        if key == "Delete" || key == "Backspace" {
+            // Only act if we have a selection and the target is not an input/textarea
+            if gs_kbd.selected_id.get_untracked().is_some() {
+                let target_tag = ev
+                    .target()
+                    .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+                    .map(|el| el.tag_name().to_uppercase())
+                    .unwrap_or_default();
+                if target_tag != "INPUT" && target_tag != "TEXTAREA" && target_tag != "SELECT" {
+                    ev.prevent_default();
+                    gs_kbd.delete_selected();
+                }
+            }
         }
     };
 
@@ -273,65 +290,70 @@ pub fn DagEditorPanel() -> impl IntoView {
     let (sim_tick_count, set_sim_tick_count) = signal(0_u64);
     let (sim_running, set_sim_running) = signal(false);
 
-    // GraphState is stored in a thread_local RefCell (not Send, can't be in signal).
-    use crate::graph_state::GraphState;
-    use std::cell::RefCell;
-    thread_local! {
-        static GRAPH: RefCell<GraphState> = RefCell::new(GraphState::new());
-    }
-
-    /// Sync placed blocks from the reactive signal into the thread-local GraphState.
-    fn sync_graph_state(blks: &[PlacedBlock]) {
-        GRAPH.with(|cell| {
-            let mut gs = cell.borrow_mut();
-            // Rebuild: clear and re-add all blocks (simple but correct).
-            *gs = GraphState::new();
-            for pb in blks {
-                // add_block assigns its own ids, but we use the existing id
-                // by going through the internal add.  Since GraphState::add_block
-                // auto-assigns ids we need a different approach: we directly
-                // add blocks matching the editor's id scheme.
-                gs.add_block(&pb.block_type, pb.config.clone(), pb.x, pb.y);
+    // Helper: build merged DAG from current blocks
+    let build_dag = move || -> Result<dag_core::op::Dag, String> {
+        let blks = blocks.get();
+        if blks.is_empty() {
+            return Err("No blocks".into());
+        }
+        let mut combined = dag_core::op::Dag::new();
+        for pb in blks.iter() {
+            let block = pb
+                .reconstruct()
+                .ok_or_else(|| format!("Unknown block type: {}", pb.block_type))?;
+            let result = block.lower().map_err(|e| format!("Lower error: {:?}", e))?;
+            let offset = combined.len() as u16;
+            for op in result.dag.nodes() {
+                let adjusted = offset_op(op, offset);
+                combined
+                    .add_op(adjusted)
+                    .map_err(|e| format!("Merge error: {:?}", e))?;
             }
-        });
-    }
+        }
+        Ok(combined)
+    };
 
-    /// Perform a single tick via GraphState, updating reactive signals.
-    fn with_tick(
-        blks: &[PlacedBlock],
-        set_topics: WriteSignal<std::collections::BTreeMap<String, f64>>,
-        set_tick: WriteSignal<u64>,
-    ) -> Result<(), String> {
-        sync_graph_state(blks);
-        GRAPH.with(|cell| {
-            let mut gs = cell.borrow_mut();
-            gs.tick()?;
-            set_topics.set(gs.topics().clone());
-            set_tick.set(gs.tick_count());
-            Ok(())
-        })
+    // SimState is stored in a thread_local RefCell (not Send, can't be in signal)
+    thread_local! {
+        static SIM: RefCell<Option<dag_core::eval::SimState>> = const { RefCell::new(None) };
     }
 
     // Step: single tick
     let on_step = move |_| {
-        let blks = blocks.get();
-        match with_tick(&blks, set_sim_topics, set_sim_tick_count) {
-            Ok(()) => {
-                let tc = sim_tick_count.get_untracked();
-                let nt = sim_topics.get_untracked().len();
-                set_deploy_status.set(format!("Tick {tc} ({nt} topics)"));
+        let dag = match build_dag() {
+            Ok(d) => d,
+            Err(e) => {
+                set_deploy_status.set(e);
+                return;
             }
-            Err(e) => set_deploy_status.set(e),
-        }
+        };
+        SIM.with(|cell| {
+            let mut sim = cell.borrow_mut();
+            if sim.is_none() || sim.as_ref().is_some_and(|s| s.tick_count() == 0) {
+                *sim = Some(dag_core::eval::SimState::new(dag.len()));
+            }
+            if let Some(ref mut s) = *sim {
+                s.tick(&dag);
+                set_sim_topics.set(s.topics().clone());
+                set_sim_tick_count.set(s.tick_count());
+                set_deploy_status.set(format!(
+                    "Tick {} ({} topics)",
+                    s.tick_count(),
+                    s.topics().len()
+                ));
+            }
+        });
     };
 
     // Reset
     let on_reset = move |_| {
-        GRAPH.with(|cell| {
-            cell.borrow_mut().reset();
+        SIM.with(|cell| {
+            if let Some(ref mut s) = *cell.borrow_mut() {
+                s.reset();
+                set_sim_topics.set(std::collections::BTreeMap::new());
+                set_sim_tick_count.set(0);
+            }
         });
-        set_sim_topics.set(std::collections::BTreeMap::new());
-        set_sim_tick_count.set(0);
         set_sim_running.set(false);
         set_deploy_status.set("Reset".into());
     };
@@ -343,12 +365,20 @@ pub fn DagEditorPanel() -> impl IntoView {
             set_sim_running.set(false);
             set_deploy_status.set("Paused".into());
         } else {
-            // Verify DAG can be built before starting
-            let blks = blocks.get();
-            if let Err(e) = with_tick(&blks, set_sim_topics, set_sim_tick_count) {
-                set_deploy_status.set(e);
-                return;
-            }
+            // Rebuild DAG and start ticking
+            let dag = match build_dag() {
+                Ok(d) => d,
+                Err(e) => {
+                    set_deploy_status.set(e);
+                    return;
+                }
+            };
+            SIM.with(|cell| {
+                let mut sim = cell.borrow_mut();
+                if sim.is_none() {
+                    *sim = Some(dag_core::eval::SimState::new(dag.len()));
+                }
+            });
             set_sim_running.set(true);
             set_deploy_status.set("Running...".into());
 
@@ -357,10 +387,19 @@ pub fn DagEditorPanel() -> impl IntoView {
             let set_tick = set_sim_tick_count;
             gloo_timers::callback::Interval::new(100, move || {
                 if !sim_running.get_untracked() {
-                    return; // paused — interval keeps firing but we skip
+                    return; // paused -- interval keeps firing but we skip
                 }
-                let blks = blocks.get();
-                let _ = with_tick(&blks, set_topics, set_tick);
+                let dag = match build_dag() {
+                    Ok(d) => d,
+                    Err(_) => return,
+                };
+                SIM.with(|cell| {
+                    if let Some(ref mut s) = *cell.borrow_mut() {
+                        s.tick(&dag);
+                        set_topics.set(s.topics().clone());
+                        set_tick.set(s.tick_count());
+                    }
+                });
             })
             .forget();
         }
@@ -432,11 +471,85 @@ pub fn DagEditorPanel() -> impl IntoView {
         });
     };
 
+    // Wire mouseup needs to bump revision after modifying configs.
+    let gs_wire = gs.clone();
+
     view! {
+        <div
+            class="dag-editor-wrapper"
+            tabindex="0"
+            on:keydown=on_keydown
+        >
         <h2 class="section-title">"DAG Editor"</h2>
         <div class="dag-editor-layout">
-            // Left: palette
-            <BlockPalette on_add=on_add_block />
+            // Left sidebar: project + palette
+            <div class="dag-sidebar-left">
+                // Project management section
+                <div class="dag-project-sidebar">
+                    <div class="palette-title">"Project"</div>
+                    <div class="project-controls">
+                        <div class="project-name-row">
+                            <input
+                                type="text"
+                                placeholder="project name"
+                                class="project-name-input"
+                                prop:value=move || {
+                                    save_name.get()
+                                }
+                                on:input=move |ev| {
+                                    set_save_name.set(event_target_value(&ev));
+                                }
+                            />
+                            <button class="btn btn-primary btn-sm" on:click=on_save>"Save"</button>
+                        </div>
+                        <div class="project-actions">
+                            <button class="btn btn-secondary btn-sm" on:click=on_new>"New"</button>
+                        </div>
+                    </div>
+                    {move || {
+                        let projects = project_list.get();
+                        if projects.is_empty() {
+                            view! { <div class="project-empty">"No saved projects"</div> }.into_any()
+                        } else {
+                            view! {
+                                <ul class="project-list">
+                                    {projects.into_iter().map(|name| {
+                                        let name_load = name.clone();
+                                        let name_del = name.clone();
+                                        let gs_load = gs.clone();
+                                        let gs_save_name = set_save_name;
+                                        view! {
+                                            <li class="project-item">
+                                                <button
+                                                    class="project-item-name"
+                                                    on:click=move |_| {
+                                                        gs_load.load_from_storage(&name_load);
+                                                        gs_save_name.set(name_load.clone());
+                                                    }
+                                                >
+                                                    {name.clone()}
+                                                </button>
+                                                <button
+                                                    class="btn btn-danger btn-xs"
+                                                    on:click=move |_| {
+                                                        GraphState::delete_project(&name_del);
+                                                        refresh_list();
+                                                    }
+                                                >
+                                                    "x"
+                                                </button>
+                                            </li>
+                                        }
+                                    }).collect_view()}
+                                </ul>
+                            }.into_any()
+                        }
+                    }}
+                </div>
+
+                // Block palette
+                <BlockPalette on_add=on_add_block />
+            </div>
 
             // Center: canvas
             <div class="dag-canvas-container">
@@ -535,7 +648,7 @@ pub fn DagEditorPanel() -> impl IntoView {
                         };
                         let side = el.get_attribute("data-side").unwrap_or_default();
                         if side != "in" {
-                            return; // Dropped on empty canvas — cancel.
+                            return; // Dropped on empty canvas -- cancel.
                         }
                         let to_block: usize = match el.get_attribute("data-block-id")
                             .and_then(|s| s.parse().ok()) {
@@ -597,7 +710,7 @@ pub fn DagEditorPanel() -> impl IntoView {
                                 }
                             }
                         });
-                        sync_shared(&blocks.get());
+                        gs_wire.bump_revision();
                     }
                 >
                     // Dashed drag line (rendered when dragging a wire)
@@ -709,18 +822,12 @@ pub fn DagEditorPanel() -> impl IntoView {
                                             <text x="8" y=py + 4.0 class="dag-port-label">{label}</text>
                                         }
                                     }).collect_view()}
-                                    // Output ports with live values
+                                    // Output ports
                                     {channels.iter().filter(|c| c.direction == ChannelDirection::Output).enumerate().map(|(i, ch)| {
                                         let py = 46.0 + i as f64 * 16.0;
                                         let label = ch.name.clone();
-                                        let topic_name = ch.name.clone();
                                         let bid = id.to_string();
                                         let pidx = i.to_string();
-                                        // Look up current topic value from sim_topics.
-                                        let value_text = sim_topics.get()
-                                            .get(&topic_name)
-                                            .map(|v| format!("{v:.2}"))
-                                            .unwrap_or_default();
                                         view! {
                                             <circle
                                                 cx="190" cy=py r="4"
@@ -730,12 +837,6 @@ pub fn DagEditorPanel() -> impl IntoView {
                                                 attr:data-side="out"
                                             />
                                             <text x="182" y=py + 4.0 class="dag-port-label dag-port-label-right">{label}</text>
-                                            <text x="160" y=py + 4.0
-                                                class="dag-output-value"
-                                                text-anchor="end"
-                                                font-size="9"
-                                                fill="#10b981"
-                                            >{value_text}</text>
                                         }
                                     }).collect_view()}
                                 </g>
@@ -753,9 +854,6 @@ pub fn DagEditorPanel() -> impl IntoView {
             // Bottom: live monitor
             <MonitorPanel topics=sim_topics tick_count=sim_tick_count />
 
-            // Bottom: plot panel
-            <PlotPanel topics=sim_topics tick_count=sim_tick_count />
-
             // Right: config panel
             <ConfigPanel
                 block_type=selected_block_type
@@ -766,24 +864,8 @@ pub fn DagEditorPanel() -> impl IntoView {
                 il_text=il_text
             />
         </div>
+        </div>
     }
-}
-
-/// Find the config key whose current value matches `channel_name`.
-///
-/// Blocks store channel topic names as string values in their config JSON.
-/// For example, `{"input_topic": "add/a", "output_topic": "add/out"}`.
-/// Given channel_name="add/a", this returns Some("input_topic").
-fn find_config_key_for_channel(config: &serde_json::Value, channel_name: &str) -> Option<String> {
-    let obj = config.as_object()?;
-    for (key, val) in obj {
-        if let Some(s) = val.as_str() {
-            if s == channel_name {
-                return Some(key.clone());
-            }
-        }
-    }
-    None
 }
 
 /// Convert mouse client coordinates to SVG user-space coordinates.
@@ -794,7 +876,7 @@ fn client_to_svg(svg: &web_sys::Element, client_x: f64, client_y: f64) -> (f64, 
     let rect = svg.get_bounding_client_rect();
     let rect_w = rect.width();
     let rect_h = rect.height();
-    // viewBox is "0 0 700 400" — extract via attribute or use defaults
+    // viewBox is "0 0 700 400" -- extract via attribute or use defaults
     let (vb_w, vb_h) = svg
         .get_attribute("viewBox")
         .and_then(|vb| {
@@ -815,25 +897,6 @@ fn client_to_svg(svg: &web_sys::Element, client_x: f64, client_y: f64) -> (f64, 
     let x = (client_x - rect.left()) * scale_x;
     let y = (client_y - rect.top()) * scale_y;
     (x, y)
-}
-
-/// Offset all NodeId references in an Op by a given amount.
-fn offset_op(op: &dag_core::op::Op, offset: u16) -> dag_core::op::Op {
-    use dag_core::op::Op;
-    match op {
-        Op::Const(v) => Op::Const(*v),
-        Op::Input(name) => Op::Input(name.clone()),
-        Op::Output(name, src) => Op::Output(name.clone(), src + offset),
-        Op::Add(a, b) => Op::Add(a + offset, b + offset),
-        Op::Mul(a, b) => Op::Mul(a + offset, b + offset),
-        Op::Sub(a, b) => Op::Sub(a + offset, b + offset),
-        Op::Div(a, b) => Op::Div(a + offset, b + offset),
-        Op::Pow(a, b) => Op::Pow(a + offset, b + offset),
-        Op::Neg(a) => Op::Neg(a + offset),
-        Op::Relu(a) => Op::Relu(a + offset),
-        Op::Subscribe(topic) => Op::Subscribe(topic.clone()),
-        Op::Publish(topic, src) => Op::Publish(topic.clone(), src + offset),
-    }
 }
 
 /// POST CBOR DAG to the Pico2 HTTP API.

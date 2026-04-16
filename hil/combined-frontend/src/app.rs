@@ -9,6 +9,7 @@ use crate::backoff;
 use crate::components::header::Header;
 use crate::components::keyboard;
 use crate::components::tab_bar::{DataflowTabBar, ModeBar};
+use crate::graph_state::GraphState;
 use crate::messages::{BusEntry, Request, Response};
 use crate::types::BlockSet;
 use crate::ws_client::{self, ConnState};
@@ -179,6 +180,11 @@ pub fn App() -> impl IntoView {
     if let Some(f) = do_connect.borrow().as_ref() {
         f();
     }
+
+    // -- GraphState: persistent DAG editor state that survives tab switches --
+    let graph_state = GraphState::new();
+    graph_state.restore_autosave();
+    provide_context(graph_state);
 
     // -- Shared block set (editor -> deploy panel bridge) --
     let (shared_blocks, set_shared_blocks) = signal(BlockSet::new());
