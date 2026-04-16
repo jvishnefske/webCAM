@@ -40,6 +40,20 @@ body {
 .header h1 {
     font-size: 1.5rem;
     font-weight: 600;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+.header-subtitle {
+    font-size: 0.85rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+}
+.version-badge {
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+    opacity: 0.6;
 }
 
 .status-indicator {
@@ -381,13 +395,14 @@ body {
 /* DAG Editor Layout (3-column) */
 .dag-editor-layout {
     display: grid;
-    grid-template-columns: 240px 1fr 240px;
-    height: calc(100vh - 100px);
+    grid-template-columns: 260px 1fr;
+    height: calc(100vh - 140px);
     gap: 0;
 }
-.dag-sidebar {
-    background: #1a1d27;
-    border-right: 1px solid #2a2d3a;
+.dag-sidebar,
+.dag-sidebar-left {
+    background: var(--bg-secondary);
+    border-right: 1px solid var(--border);
     padding: 12px;
     overflow-y: auto;
     display: flex;
@@ -543,7 +558,50 @@ body {
     background-size: 20px 20px;
 }
 
-/* Dataflow Node Styling (HTML div-based) */
+/* SVG-based node styling (used by current editor.rs) */
+.dag-node { cursor: pointer; }
+.dag-node-rect {
+    fill: var(--bg-card);
+    stroke: var(--border);
+    stroke-width: 1.5;
+    transition: stroke 0.15s;
+}
+.dag-node:hover .dag-node-rect { stroke: var(--accent-dim); }
+.dag-node.selected .dag-node-rect {
+    stroke: var(--accent);
+    stroke-width: 2;
+    filter: drop-shadow(0 0 8px rgba(79, 140, 255, 0.25));
+}
+.dag-node-title {
+    fill: var(--text-primary);
+    font-size: 11px;
+    font-weight: 600;
+    text-anchor: middle;
+}
+.dag-node-type {
+    fill: var(--text-secondary);
+    font-size: 9px;
+    font-family: monospace;
+    text-anchor: middle;
+}
+.dag-port { stroke: none; }
+.dag-port-in { fill: var(--success); }
+.dag-port-out { fill: var(--accent); }
+.dag-port:hover { r: 8; filter: brightness(1.3); cursor: crosshair; }
+.dag-port-label {
+    fill: var(--text-secondary);
+    font-size: 8px;
+    font-family: monospace;
+}
+.dag-port-label-right { text-anchor: end; }
+.dag-edge { transition: stroke-width 0.1s; }
+.dag-edge-hit { cursor: pointer; }
+.dag-edge-hit:hover + .dag-edge {
+    stroke: #f59e0b !important;
+    stroke-width: 3 !important;
+}
+
+/* Dataflow Node Styling (HTML div-based — future migration) */
 .df-node {
     position: absolute;
     background: #1a1d27;
