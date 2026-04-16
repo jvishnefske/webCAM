@@ -3,6 +3,7 @@ pub mod config_panel;
 pub mod editor;
 pub mod export_panel;
 pub mod monitor;
+pub mod node;
 pub mod palette;
 pub mod pin_table;
 pub mod plot;
