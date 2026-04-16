@@ -8,6 +8,7 @@ pub mod node;
 pub mod palette;
 pub mod pin_table;
 pub mod plot;
+pub mod port;
 #[cfg(target_arch = "wasm32")]
 pub mod sidebar;
 pub mod state_machine_editor;
