@@ -1,58 +1,82 @@
-//! Graph-level simulation state: blocks, DAG building, ticking, topic readout.
+//! Persistent DAG editor state that survives tab switches.
 //!
-//! `GraphState` owns a list of placed blocks and a `dag_core::eval::SimState`
-//! for local (in-browser) DAG evaluation.  It is not `Send`/`Sync` (due to
-//! trait-object reconstruction), but it is **not** wasm-specific — tests run
-//! on the host target.
+//! [`GraphState`] holds reactive signals for the block canvas, selection, and
+//! project management. It is created once in `App` and provided via Leptos
+//! context so the editor component can read/write it without owning it.
+//!
+//! This module deliberately avoids `web_sys` view types so it compiles and
+//! tests on native targets.
 
-use std::collections::BTreeMap;
-
-use configurable_blocks::lower::ConfigurableBlock;
+use configurable_blocks::lower;
 use configurable_blocks::registry;
-use configurable_blocks::schema::ChannelDirection;
-use dag_core::eval::SimState;
-use dag_core::op::{Dag, Op};
+use leptos::prelude::*;
 
-/// A block placed on the editor canvas.
-#[derive(Clone, Debug)]
+use crate::types::BlockSet;
+
+// ---------------------------------------------------------------------------
+// Domain types
+// ---------------------------------------------------------------------------
+
+/// Instance of a placed block on the canvas.
+///
+/// Stores block type + config as serializable data (Send+Sync safe).
+/// The trait object is reconstructed from the registry when needed.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct PlacedBlock {
-    /// Unique id within this graph.
     pub id: usize,
-    /// Registry block-type key (e.g. "constant", "pid").
     pub block_type: String,
-    /// Current configuration JSON.
     pub config: serde_json::Value,
-    /// Canvas x position.
     pub x: f64,
-    /// Canvas y position.
     pub y: f64,
 }
 
 impl PlacedBlock {
-    /// Reconstruct the `ConfigurableBlock` trait object from the registry.
-    pub fn reconstruct(&self) -> Option<Box<dyn ConfigurableBlock>> {
+    /// Reconstruct the ConfigurableBlock trait object from the registry.
+    pub fn reconstruct(&self) -> Option<Box<dyn lower::ConfigurableBlock>> {
         let mut block = registry::create_block(&self.block_type)?;
         block.apply_config(&self.config);
         Some(block)
     }
 }
 
-/// Monotonically increasing revision counter — lets reactive views know when
-/// the underlying graph has changed.
-pub type Revision = u64;
+/// Serializable project snapshot for localStorage persistence.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct ProjectSnapshot {
+    pub blocks: Vec<PlacedBlock>,
+    pub next_id: usize,
+}
 
-/// Central simulation state for the DAG editor.
+/// localStorage key prefix for saved projects.
+const STORAGE_PREFIX: &str = "dag_project_";
+
+/// localStorage key for the auto-save slot.
+const AUTOSAVE_KEY: &str = "dag_autosave";
+
+// ---------------------------------------------------------------------------
+// GraphState
+// ---------------------------------------------------------------------------
+
+/// Reactive graph state that survives tab switches.
 ///
-/// Holds placed blocks, manages DAG lowering + merging, owns a `SimState` for
-/// tick-based evaluation, and exposes a revision counter for reactive UI
-/// invalidation.
+/// Created once in `App` and provided via `provide_context`. The editor reads
+/// it with `use_context::<GraphState>()`.
+#[derive(Clone)]
 pub struct GraphState {
-    blocks: Vec<PlacedBlock>,
-    next_id: usize,
-    revision: Revision,
-    sim: Option<SimState>,
-    topics: BTreeMap<String, f64>,
-    tick_count: u64,
+    /// All placed blocks on the canvas.
+    pub blocks: ReadSignal<Vec<PlacedBlock>>,
+    pub set_blocks: WriteSignal<Vec<PlacedBlock>>,
+    /// Monotonic ID counter for new blocks.
+    pub next_id: ReadSignal<usize>,
+    pub set_next_id: WriteSignal<usize>,
+    /// Currently selected block id.
+    pub selected_id: ReadSignal<Option<usize>>,
+    pub set_selected_id: WriteSignal<Option<usize>>,
+    /// Revision counter incremented on every mutation (for auto-save debounce).
+    pub revision: ReadSignal<u64>,
+    set_revision: WriteSignal<u64>,
+    /// Current project name (None = unsaved / new).
+    pub project_name: ReadSignal<Option<String>>,
+    pub set_project_name: WriteSignal<Option<String>>,
 }
 
 impl Default for GraphState {
@@ -62,179 +86,281 @@ impl Default for GraphState {
 }
 
 impl GraphState {
-    /// Create a new, empty graph state.
+    /// Create a new GraphState with empty canvas.
     pub fn new() -> Self {
+        let (blocks, set_blocks) = signal(Vec::<PlacedBlock>::new());
+        let (next_id, set_next_id) = signal(1_usize);
+        let (selected_id, set_selected_id) = signal(None::<usize>);
+        let (revision, set_revision) = signal(0_u64);
+        let (project_name, set_project_name) = signal(None::<String>);
+
         Self {
-            blocks: Vec::new(),
-            next_id: 1,
-            revision: 0,
-            sim: None,
-            topics: BTreeMap::new(),
-            tick_count: 0,
+            blocks,
+            set_blocks,
+            next_id,
+            set_next_id,
+            selected_id,
+            set_selected_id,
+            revision,
+            set_revision,
+            project_name,
+            set_project_name,
         }
     }
 
-    /// Current revision — bumped on every mutation.
-    pub fn revision(&self) -> Revision {
-        self.revision
+    /// Bump the revision counter (triggers auto-save).
+    pub fn bump_revision(&self) {
+        self.set_revision.set(self.revision.get_untracked() + 1);
     }
 
-    /// Immutable view of placed blocks.
-    pub fn blocks(&self) -> &[PlacedBlock] {
-        &self.blocks
-    }
-
-    /// Current pubsub topics and their latest values.
-    pub fn topics(&self) -> &BTreeMap<String, f64> {
-        &self.topics
-    }
-
-    /// Current tick count.
-    pub fn tick_count(&self) -> u64 {
-        self.tick_count
-    }
-
-    // ── Mutation ─────────────────────────────────────────────────────────
-
-    /// Add a block to the canvas.  Returns the assigned block id.
-    pub fn add_block(
-        &mut self,
-        block_type: &str,
-        config: serde_json::Value,
-        x: f64,
-        y: f64,
-    ) -> usize {
-        let id = self.next_id;
-        self.next_id += 1;
-        self.blocks.push(PlacedBlock {
-            id,
-            block_type: block_type.to_string(),
-            config,
-            x,
-            y,
+    /// Add a block of the given type to the canvas. Returns the new block id.
+    pub fn add_block(&self, block_type: &str) -> Option<usize> {
+        let block = registry::create_block(block_type)?;
+        let id = self.next_id.get_untracked();
+        self.set_next_id.set(id + 1);
+        let count = self.blocks.get_untracked().len();
+        let x = 30.0 + (count % 3) as f64 * 220.0;
+        let y = 30.0 + (count / 3) as f64 * 120.0;
+        let config = block.config_json();
+        self.set_blocks.update(|v| {
+            v.push(PlacedBlock {
+                id,
+                block_type: block_type.to_string(),
+                config,
+                x,
+                y,
+            });
         });
-        self.revision += 1;
-        // Invalidate sim — DAG shape changed.
-        self.sim = None;
-        id
+        self.set_selected_id.set(Some(id));
+        self.bump_revision();
+        Some(id)
     }
 
-    /// Remove a block by id.  Returns `true` if found and removed.
-    pub fn remove_block(&mut self, id: usize) -> bool {
-        let before = self.blocks.len();
-        self.blocks.retain(|b| b.id != id);
-        let removed = self.blocks.len() < before;
-        if removed {
-            self.revision += 1;
-            self.sim = None;
-        }
-        removed
-    }
-
-    /// Update a single config key on a block.
-    pub fn update_config(&mut self, id: usize, key: &str, value: serde_json::Value) {
-        if let Some(pb) = self.blocks.iter_mut().find(|b| b.id == id) {
-            if let serde_json::Value::Object(ref mut map) = pb.config {
-                map.insert(key.to_string(), value);
-            }
-            self.revision += 1;
-            self.sim = None;
-        }
-    }
-
-    // ── DAG building ────────────────────────────────────────────────────
-
-    /// Lower all blocks and merge into a single DAG.
-    pub fn build_dag(&self) -> Result<Dag, String> {
-        if self.blocks.is_empty() {
-            return Err("No blocks".into());
-        }
-        let mut combined = Dag::new();
-        for pb in &self.blocks {
-            let block = pb
-                .reconstruct()
-                .ok_or_else(|| format!("Unknown block type: {}", pb.block_type))?;
-            let result = block.lower().map_err(|e| format!("Lower error: {:?}", e))?;
-            let offset = combined.len() as u16;
-            for op in result.dag.nodes() {
-                let adjusted = offset_op(op, offset);
-                combined
-                    .add_op(adjusted)
-                    .map_err(|e| format!("Merge error: {:?}", e))?;
-            }
-        }
-        Ok(combined)
-    }
-
-    // ── Simulation ──────────────────────────────────────────────────────
-
-    /// Evaluate one tick of the merged DAG.
-    ///
-    /// Rebuilds the DAG and SimState if they have been invalidated (e.g.
-    /// after adding/removing/reconfiguring a block).
-    pub fn tick(&mut self) -> Result<(), String> {
-        let dag = self.build_dag()?;
-
-        if self.sim.is_none() {
-            self.sim = Some(SimState::new(dag.len()));
-        }
-
-        if let Some(ref mut s) = self.sim {
-            // Resize values buffer if DAG length changed.
-            if s.topics().is_empty() && self.tick_count == 0 {
-                // Fresh sim — already sized correctly from `new()`.
-            }
-            s.tick(&dag);
-            self.topics = s.topics().clone();
-            self.tick_count = s.tick_count();
-        }
-
-        self.revision += 1;
-        Ok(())
-    }
-
-    /// Reset the simulation: clear tick counter and all pubsub topics.
-    pub fn reset(&mut self) {
-        if let Some(ref mut s) = self.sim {
-            s.reset();
-        }
-        self.topics.clear();
-        self.tick_count = 0;
-        self.revision += 1;
-    }
-
-    // ── Output values for port display ──────────────────────────────────
-
-    /// For each block, return a `Vec<String>` of formatted output-port values.
-    ///
-    /// The ordering matches the output ports returned by
-    /// `declared_channels()` (filtered to `Output` direction).  If a
-    /// topic has not been published yet the string is empty.
-    pub fn output_values_for_block(&self, id: usize) -> Vec<String> {
-        let pb = match self.blocks.iter().find(|b| b.id == id) {
-            Some(pb) => pb,
-            None => return Vec::new(),
+    /// Update a config key on the currently selected block.
+    pub fn update_config(&self, key: String, value: serde_json::Value) {
+        let sel = match self.selected_id.get_untracked() {
+            Some(s) => s,
+            None => return,
         };
-        let block = match pb.reconstruct() {
-            Some(b) => b,
-            None => return Vec::new(),
-        };
-        block
-            .declared_channels()
+        self.set_blocks.update(|blks| {
+            if let Some(pb) = blks.iter_mut().find(|b| b.id == sel) {
+                if let serde_json::Value::Object(ref mut map) = pb.config {
+                    map.insert(key, value);
+                }
+            }
+        });
+        self.bump_revision();
+    }
+
+    /// Delete the currently selected block.
+    pub fn delete_selected(&self) {
+        if let Some(sel) = self.selected_id.get_untracked() {
+            self.set_blocks.update(|v| v.retain(|b| b.id != sel));
+            self.set_selected_id.set(None);
+            self.bump_revision();
+        }
+    }
+
+    /// Clear all blocks and reset state for a new project.
+    pub fn clear(&self) {
+        self.set_blocks.set(Vec::new());
+        self.set_next_id.set(1);
+        self.set_selected_id.set(None);
+        self.set_project_name.set(None);
+        self.bump_revision();
+    }
+
+    /// Build a `BlockSet` (for the deploy panel bridge).
+    pub fn to_block_set(&self) -> BlockSet {
+        self.blocks
+            .get_untracked()
             .iter()
-            .filter(|ch| ch.direction == ChannelDirection::Output)
-            .map(|ch| {
-                self.topics
-                    .get(&ch.name)
-                    .map(|v| format!("{v:.4}"))
-                    .unwrap_or_default()
-            })
+            .map(|pb| (pb.block_type.clone(), pb.config.clone()))
             .collect()
+    }
+
+    // -----------------------------------------------------------------------
+    // localStorage persistence
+    // -----------------------------------------------------------------------
+
+    /// Save current state to localStorage under the given project name.
+    pub fn save_to_storage(&self, name: &str) {
+        let snapshot = ProjectSnapshot {
+            blocks: self.blocks.get_untracked(),
+            next_id: self.next_id.get_untracked(),
+        };
+        let json = match serde_json::to_string(&snapshot) {
+            Ok(j) => j,
+            Err(_) => return,
+        };
+        let key = format!("{}{}", STORAGE_PREFIX, name);
+        let _ = set_local_storage(&key, &json);
+        self.set_project_name.set(Some(name.to_string()));
+    }
+
+    /// Auto-save to the dedicated auto-save slot.
+    pub fn auto_save(&self) {
+        let snapshot = ProjectSnapshot {
+            blocks: self.blocks.get_untracked(),
+            next_id: self.next_id.get_untracked(),
+        };
+        if let Ok(json) = serde_json::to_string(&snapshot) {
+            let _ = set_local_storage(AUTOSAVE_KEY, &json);
+        }
+    }
+
+    /// Load a project from localStorage by name.
+    pub fn load_from_storage(&self, name: &str) {
+        let key = format!("{}{}", STORAGE_PREFIX, name);
+        let json = match get_local_storage(&key) {
+            Some(j) => j,
+            None => return,
+        };
+        let snapshot: ProjectSnapshot = match serde_json::from_str(&json) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        self.set_blocks.set(snapshot.blocks);
+        self.set_next_id.set(snapshot.next_id);
+        self.set_selected_id.set(None);
+        self.set_project_name.set(Some(name.to_string()));
+        self.bump_revision();
+    }
+
+    /// Try to restore from auto-save on startup.
+    pub fn restore_autosave(&self) {
+        let json = match get_local_storage(AUTOSAVE_KEY) {
+            Some(j) => j,
+            None => return,
+        };
+        let snapshot: ProjectSnapshot = match serde_json::from_str(&json) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        if !snapshot.blocks.is_empty() {
+            self.set_blocks.set(snapshot.blocks);
+            self.set_next_id.set(snapshot.next_id);
+        }
+    }
+
+    /// Delete a project from localStorage.
+    pub fn delete_project(name: &str) {
+        let key = format!("{}{}", STORAGE_PREFIX, name);
+        let _ = remove_local_storage(&key);
+    }
+
+    /// List all saved project names.
+    pub fn list_projects() -> Vec<String> {
+        list_local_storage_keys(STORAGE_PREFIX)
     }
 }
 
-/// Offset all `NodeId` references in an `Op` by `offset`.
-fn offset_op(op: &Op, offset: u16) -> Op {
+// ---------------------------------------------------------------------------
+// localStorage helpers (no-op on non-wasm)
+// ---------------------------------------------------------------------------
+
+fn get_local_storage(key: &str) -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let window = web_sys::window()?;
+        let storage = window.local_storage().ok().flatten()?;
+        storage.get_item(key).ok().flatten()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = key;
+        None
+    }
+}
+
+fn set_local_storage(key: &str, value: &str) -> Result<(), ()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let window = web_sys::window().ok_or(())?;
+        let storage = window.local_storage().map_err(|_| ())?.ok_or(())?;
+        storage.set_item(key, value).map_err(|_| ())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (key, value);
+        Err(())
+    }
+}
+
+fn remove_local_storage(key: &str) -> Result<(), ()> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let window = web_sys::window().ok_or(())?;
+        let storage = window.local_storage().map_err(|_| ())?.ok_or(())?;
+        storage.remove_item(key).map_err(|_| ())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = key;
+        Err(())
+    }
+}
+
+fn list_local_storage_keys(prefix: &str) -> Vec<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let window = match web_sys::window() {
+            Some(w) => w,
+            None => return Vec::new(),
+        };
+        let storage = match window.local_storage() {
+            Ok(Some(s)) => s,
+            _ => return Vec::new(),
+        };
+        let len = match storage.length() {
+            Ok(n) => n,
+            Err(_) => return Vec::new(),
+        };
+        let mut names = Vec::new();
+        for i in 0..len {
+            if let Ok(Some(key)) = storage.key(i) {
+                if let Some(name) = key.strip_prefix(prefix) {
+                    names.push(name.to_string());
+                }
+            }
+        }
+        names.sort();
+        names
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = prefix;
+        Vec::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pure helper functions used by the editor
+// ---------------------------------------------------------------------------
+
+/// Find the config key whose current value matches `channel_name`.
+///
+/// Blocks store channel topic names as string values in their config JSON.
+/// For example, `{"input_topic": "add/a", "output_topic": "add/out"}`.
+/// Given channel_name="add/a", this returns Some("input_topic").
+pub fn find_config_key_for_channel(
+    config: &serde_json::Value,
+    channel_name: &str,
+) -> Option<String> {
+    let obj = config.as_object()?;
+    for (key, val) in obj {
+        if let Some(s) = val.as_str() {
+            if s == channel_name {
+                return Some(key.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Offset all NodeId references in an Op by a given amount.
+pub fn offset_op(op: &dag_core::op::Op, offset: u16) -> dag_core::op::Op {
+    use dag_core::op::Op;
     match op {
         Op::Const(v) => Op::Const(*v),
         Op::Input(name) => Op::Input(name.clone()),
@@ -251,176 +377,183 @@ fn offset_op(op: &Op, offset: u16) -> Op {
     }
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_new_graph_state_is_empty() {
-        let state = GraphState::new();
-        assert!(state.blocks().is_empty());
-        assert!(state.topics().is_empty());
-        assert_eq!(state.tick_count(), 0);
-        assert_eq!(state.revision(), 0);
-    }
-
-    #[test]
-    fn test_add_block_increments_revision() {
-        let mut state = GraphState::new();
-        let r0 = state.revision();
-        state.add_block("constant", serde_json::json!({"value": 1.0}), 0.0, 0.0);
-        assert!(state.revision() > r0);
-        assert_eq!(state.blocks().len(), 1);
-    }
-
-    #[test]
-    fn test_add_block_returns_unique_ids() {
-        let mut state = GraphState::new();
-        let id1 = state.add_block("constant", serde_json::json!({}), 0.0, 0.0);
-        let id2 = state.add_block("constant", serde_json::json!({}), 0.0, 0.0);
+    fn graph_state_add_block_increments_id() {
+        let gs = GraphState::new();
+        let id1 = gs.add_block("constant");
+        let id2 = gs.add_block("constant");
+        assert!(id1.is_some());
+        assert!(id2.is_some());
         assert_ne!(id1, id2);
+        assert_eq!(gs.blocks.get_untracked().len(), 2);
     }
 
     #[test]
-    fn test_remove_block() {
-        let mut state = GraphState::new();
-        let id = state.add_block("constant", serde_json::json!({}), 0.0, 0.0);
-        assert!(state.remove_block(id));
-        assert!(state.blocks().is_empty());
-        // Removing a nonexistent id returns false.
-        assert!(!state.remove_block(id));
+    fn graph_state_delete_selected() {
+        let gs = GraphState::new();
+        let id = gs.add_block("constant");
+        assert!(id.is_some());
+        assert_eq!(gs.blocks.get_untracked().len(), 1);
+        gs.delete_selected();
+        assert_eq!(gs.blocks.get_untracked().len(), 0);
+        assert_eq!(gs.selected_id.get_untracked(), None);
     }
 
     #[test]
-    fn test_update_config() {
-        let mut state = GraphState::new();
-        let id = state.add_block("constant", serde_json::json!({"value": 1.0}), 0.0, 0.0);
-        let r_before = state.revision();
-        state.update_config(id, "value", serde_json::json!(42.0));
-        assert!(state.revision() > r_before);
-        let pb = state.blocks().iter().find(|b| b.id == id).unwrap();
-        assert_eq!(pb.config["value"], 42.0);
+    fn graph_state_clear() {
+        let gs = GraphState::new();
+        gs.add_block("constant");
+        gs.add_block("constant");
+        assert_eq!(gs.blocks.get_untracked().len(), 2);
+        gs.clear();
+        assert_eq!(gs.blocks.get_untracked().len(), 0);
+        assert_eq!(gs.next_id.get_untracked(), 1);
+        assert_eq!(gs.selected_id.get_untracked(), None);
+        assert_eq!(gs.project_name.get_untracked(), None);
     }
 
     #[test]
-    fn test_build_dag_empty_returns_error() {
-        let state = GraphState::new();
-        assert!(state.build_dag().is_err());
+    fn graph_state_update_config() {
+        let gs = GraphState::new();
+        gs.add_block("constant");
+        gs.update_config("value".to_string(), serde_json::json!(42.0));
+        let blks = gs.blocks.get_untracked();
+        let config = &blks[0].config;
+        assert_eq!(config.get("value"), Some(&serde_json::json!(42.0)));
     }
 
     #[test]
-    fn test_build_dag_with_constant() {
-        let mut state = GraphState::new();
-        state.add_block(
-            "constant",
-            serde_json::json!({"value": 5.0, "publish_topic": "out"}),
-            0.0,
-            0.0,
+    fn graph_state_to_block_set() {
+        let gs = GraphState::new();
+        gs.add_block("constant");
+        let bs = gs.to_block_set();
+        assert_eq!(bs.len(), 1);
+        assert_eq!(bs[0].0, "constant");
+    }
+
+    #[test]
+    fn graph_state_revision_increments() {
+        let gs = GraphState::new();
+        let r0 = gs.revision.get_untracked();
+        gs.add_block("constant");
+        let r1 = gs.revision.get_untracked();
+        assert!(r1 > r0);
+        gs.delete_selected();
+        let r2 = gs.revision.get_untracked();
+        assert!(r2 > r1);
+    }
+
+    #[test]
+    fn project_snapshot_round_trip() {
+        let snap = ProjectSnapshot {
+            blocks: vec![PlacedBlock {
+                id: 1,
+                block_type: "constant".to_string(),
+                config: serde_json::json!({"value": 3.14}),
+                x: 10.0,
+                y: 20.0,
+            }],
+            next_id: 2,
+        };
+        let json = serde_json::to_string(&snap).unwrap();
+        let restored: ProjectSnapshot = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.blocks.len(), 1);
+        assert_eq!(restored.blocks[0].id, 1);
+        assert_eq!(restored.next_id, 2);
+    }
+
+    #[test]
+    fn list_projects_returns_empty_on_native() {
+        // On non-wasm, localStorage is unavailable, so list returns empty.
+        assert!(GraphState::list_projects().is_empty());
+    }
+
+    #[test]
+    fn find_config_key_matches() {
+        let config = serde_json::json!({"input_topic": "add/a", "output_topic": "add/out"});
+        assert_eq!(
+            find_config_key_for_channel(&config, "add/a"),
+            Some("input_topic".to_string())
         );
-        let dag = state.build_dag().unwrap();
-        assert!(!dag.is_empty());
-    }
-
-    #[test]
-    fn test_tick_updates_topics() {
-        let mut state = GraphState::new();
-        state.add_block(
-            "constant",
-            serde_json::json!({"value": 5.0, "publish_topic": "out"}),
-            0.0,
-            0.0,
+        assert_eq!(
+            find_config_key_for_channel(&config, "add/out"),
+            Some("output_topic".to_string())
         );
-        state.tick().unwrap();
-        assert!(state.topics().contains_key("out"));
-        assert_eq!(state.topics()["out"], 5.0);
-        assert_eq!(state.tick_count(), 1);
+        assert_eq!(find_config_key_for_channel(&config, "missing"), None);
     }
 
     #[test]
-    fn test_tick_increments_tick_count() {
-        let mut state = GraphState::new();
-        state.add_block(
-            "constant",
-            serde_json::json!({"value": 1.0, "publish_topic": "x"}),
-            0.0,
-            0.0,
-        );
-        state.tick().unwrap();
-        state.tick().unwrap();
-        state.tick().unwrap();
-        assert_eq!(state.tick_count(), 3);
+    fn offset_op_adds_offset() {
+        use dag_core::op::Op;
+        let op = Op::Add(0, 1);
+        let adjusted = offset_op(&op, 5);
+        assert_eq!(adjusted, Op::Add(5, 6));
     }
 
     #[test]
-    fn test_reset_clears_simulation() {
-        let mut state = GraphState::new();
-        state.add_block(
-            "constant",
-            serde_json::json!({"value": 5.0, "publish_topic": "out"}),
-            0.0,
-            0.0,
-        );
-        state.tick().unwrap();
-        assert_eq!(state.tick_count(), 1);
-        assert!(!state.topics().is_empty());
-
-        state.reset();
-        assert_eq!(state.tick_count(), 0);
-        assert!(state.topics().is_empty());
+    fn offset_op_const_unchanged() {
+        use dag_core::op::Op;
+        let op = Op::Const(3.14);
+        let adjusted = offset_op(&op, 10);
+        assert_eq!(adjusted, Op::Const(3.14));
     }
 
     #[test]
-    fn test_output_values_for_block() {
-        let mut state = GraphState::new();
-        let id = state.add_block(
-            "constant",
-            serde_json::json!({"value": 3.14, "publish_topic": "pi"}),
-            0.0,
-            0.0,
-        );
-        // Before any tick, output values are empty strings.
-        let vals = state.output_values_for_block(id);
-        assert_eq!(vals, vec![String::new()]);
-
-        state.tick().unwrap();
-        let vals = state.output_values_for_block(id);
-        assert_eq!(vals.len(), 1);
-        assert_eq!(vals[0], "3.1400");
+    fn graph_state_default_matches_new() {
+        let gs = GraphState::default();
+        assert_eq!(gs.blocks.get_untracked().len(), 0);
+        assert_eq!(gs.next_id.get_untracked(), 1);
+        assert_eq!(gs.selected_id.get_untracked(), None);
     }
 
     #[test]
-    fn test_output_values_nonexistent_block() {
-        let state = GraphState::new();
-        assert!(state.output_values_for_block(999).is_empty());
+    fn placed_block_reconstruct_unknown_returns_none() {
+        let pb = PlacedBlock {
+            id: 1,
+            block_type: "nonexistent_block_type".to_string(),
+            config: serde_json::json!({}),
+            x: 0.0,
+            y: 0.0,
+        };
+        assert!(pb.reconstruct().is_none());
     }
 
     #[test]
-    fn test_multiple_blocks_tick() {
-        let mut state = GraphState::new();
-        state.add_block(
-            "constant",
-            serde_json::json!({"value": 2.0, "publish_topic": "a"}),
-            0.0,
-            0.0,
-        );
-        state.add_block(
-            "constant",
-            serde_json::json!({"value": 3.0, "publish_topic": "b"}),
-            100.0,
-            0.0,
-        );
-        state.tick().unwrap();
-        assert_eq!(state.topics().len(), 2);
-        assert_eq!(state.topics()["a"], 2.0);
-        assert_eq!(state.topics()["b"], 3.0);
+    fn graph_state_add_unknown_block_returns_none() {
+        let gs = GraphState::new();
+        let result = gs.add_block("totally_made_up");
+        assert!(result.is_none());
+        assert_eq!(gs.blocks.get_untracked().len(), 0);
     }
 
     #[test]
-    fn test_default_is_new() {
-        let state = GraphState::default();
-        assert!(state.blocks().is_empty());
-        assert_eq!(state.tick_count(), 0);
+    fn graph_state_delete_with_no_selection_is_noop() {
+        let gs = GraphState::new();
+        gs.add_block("constant");
+        gs.set_selected_id.set(None);
+        let rev_before = gs.revision.get_untracked();
+        gs.delete_selected();
+        // Nothing deleted, revision should not change
+        assert_eq!(gs.blocks.get_untracked().len(), 1);
+        assert_eq!(gs.revision.get_untracked(), rev_before);
+    }
+
+    #[test]
+    fn graph_state_update_config_no_selection_is_noop() {
+        let gs = GraphState::new();
+        gs.add_block("constant");
+        gs.set_selected_id.set(None);
+        let rev_before = gs.revision.get_untracked();
+        gs.update_config("value".to_string(), serde_json::json!(99.0));
+        // Config should not change, revision should not change
+        assert_eq!(gs.revision.get_untracked(), rev_before);
     }
 }
