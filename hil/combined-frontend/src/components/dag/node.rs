@@ -1,105 +1,119 @@
-//! A single block node rendered as an HTML div with CSS transform positioning.
+//! Reusable BlockNode component for the DAG editor canvas.
+//!
+//! Renders an HTML div node with port circles via the [`Port`] component.
+//! Nodes are absolutely positioned on the canvas and display block name,
+//! type label, and input/output ports.
 
 use leptos::prelude::*;
 
-/// A single block node rendered as an HTML div.
+use super::port::{Port, WireDrag};
+
+/// Descriptor for a single port on a block node.
+#[derive(Clone, Debug)]
+pub struct PortDef {
+    /// Display name (channel topic name).
+    pub name: String,
+    /// `"input"` or `"output"`.
+    pub side: &'static str,
+}
+
+/// A single block node on the canvas.
 ///
-/// Positioned absolutely via CSS transform within the node layer.
-/// Contains a header (block name), type label, and port circles.
+/// Renders the node box, title, type label, and input/output ports.
+/// Port interaction (wire drag) is delegated to [`Port`] components.
 #[component]
 pub fn BlockNode(
+    /// Numeric block identifier.
     block_id: u32,
+    /// Display name (e.g. "Constant").
     name: String,
+    /// Block type string (e.g. "constant").
     block_type: String,
+    /// X position on the canvas (CSS pixels).
     x: f64,
+    /// Y position on the canvas (CSS pixels).
     y: f64,
-    is_selected: Signal<bool>,
-    input_ports: Vec<String>,
-    output_ports: Vec<String>,
+    /// Whether this node is currently selected.
+    selected: Signal<bool>,
+    /// Ordered list of input ports.
+    inputs: Vec<PortDef>,
+    /// Ordered list of output ports.
+    outputs: Vec<PortDef>,
+    /// Called when the node body is clicked (for selection).
     on_select: Callback<u32>,
-    on_drag_end: Callback<(u32, f64, f64)>,
+    /// Current wire drag state (passed through to Port components).
+    wire_drag: ReadSignal<Option<WireDrag>>,
+    /// Called when user starts dragging from an output port.
+    on_wire_start: Callback<WireDrag>,
+    /// Called when user drops wire onto an input port.
+    on_wire_end: Callback<(u32, usize)>,
 ) -> impl IntoView {
-    // Suppress unused-variable warning; drag-end will be wired in task-005.
-    let _ = on_drag_end;
+    let port_start_y = 46.0_f64;
+    let port_spacing = 16.0_f64;
+    let port_count = inputs.len().max(outputs.len());
+    let height = 50.0 + port_count as f64 * port_spacing;
 
-    // Port spacing constants
-    let port_offset_y = 30.0;
-    let port_spacing = 20.0;
-    let node_width = 140.0;
-    let in_count = input_ports.len();
-    let out_count = output_ports.len();
-    let node_height = 40.0 + (in_count.max(out_count) as f64) * port_spacing;
+    // Build input port views.
+    let input_views = inputs
+        .into_iter()
+        .enumerate()
+        .map(|(i, pd)| {
+            let y_off = port_start_y + i as f64 * port_spacing;
+            view! {
+                <Port
+                    block_id=block_id
+                    index=i
+                    side="input"
+                    name=pd.name
+                    y_offset=y_off
+                    wire_drag=wire_drag
+                    on_drag_start=on_wire_start
+                    on_drag_end=on_wire_end
+                />
+            }
+        })
+        .collect_view();
+
+    // Build output port views.
+    let output_views = outputs
+        .into_iter()
+        .enumerate()
+        .map(|(i, pd)| {
+            let y_off = port_start_y + i as f64 * port_spacing;
+            view! {
+                <Port
+                    block_id=block_id
+                    index=i
+                    side="output"
+                    name=pd.name
+                    y_offset=y_off
+                    wire_drag=wire_drag
+                    on_drag_start=on_wire_start
+                    on_drag_end=on_wire_end
+                />
+            }
+        })
+        .collect_view();
 
     view! {
         <div
             class="df-node"
-            class:selected=move || is_selected.get()
-            style=move || {
-                format!(
-                    "position:absolute;transform:translate({}px,{}px);width:{}px;height:{}px",
-                    x, y, node_width, node_height,
-                )
-            }
-            data-id=block_id.to_string()
+            class:selected=move || selected.get()
+            style=format!(
+                "position:absolute;left:{}px;top:{}px;width:190px;height:{}px",
+                x, y, height
+            )
             on:mousedown=move |ev: web_sys::MouseEvent| {
-                ev.stop_propagation();
-                on_select.run(block_id);
+                // Only select on primary button, don't interfere with port drags.
+                if ev.button() == 0 {
+                    on_select.run(block_id);
+                }
             }
         >
-            <div class="df-node-header">{name}</div>
+            <div class="df-node-title">{name}</div>
             <div class="df-node-type">{block_type}</div>
-            // Input ports (left side)
-            {input_ports
-                .into_iter()
-                .enumerate()
-                .map(|(i, port_name)| {
-                    let py = port_offset_y + i as f64 * port_spacing;
-                    view! {
-                        <div
-                            class="df-port input"
-                            style=format!("position:absolute;left:-6px;top:{}px", py)
-                            data-side="in"
-                            data-block-id=block_id.to_string()
-                            data-port-idx=i.to_string()
-                        />
-                        <span
-                            class="df-port-label"
-                            style=format!(
-                                "position:absolute;left:10px;top:{}px",
-                                py - 5.0,
-                            )
-                        >
-                            {port_name}
-                        </span>
-                    }
-                })
-                .collect_view()}
-            // Output ports (right side)
-            {output_ports
-                .into_iter()
-                .enumerate()
-                .map(|(i, port_name)| {
-                    let py = port_offset_y + i as f64 * port_spacing;
-                    view! {
-                        <div
-                            class="df-port output"
-                            style=format!("position:absolute;right:-6px;top:{}px", py)
-                            data-side="out"
-                            data-block-id=block_id.to_string()
-                            data-port-idx=i.to_string()
-                        />
-                        <span
-                            class="df-port-label"
-                            style=format!(
-                                "position:absolute;right:10px;top:{}px;text-align:right",
-                                py - 5.0,
-                            )
-                        >
-                            {port_name}
-                        </span>
-                    }
-                })
-                .collect_view()}
+            {input_views}
+            {output_views}
         </div>
     }
 }
