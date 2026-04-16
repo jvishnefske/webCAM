@@ -7,44 +7,11 @@ use configurable_blocks::lower;
 use configurable_blocks::registry;
 use configurable_blocks::schema::ChannelDirection;
 
-use crate::sim_mode::SimMode;
 use crate::types::BlockSet;
 
 use super::config_panel::ConfigPanel;
 use super::monitor::MonitorPanel;
 use super::palette::BlockPalette;
-
-/// Callback that panel widgets use to inject a pubsub value and (in Live mode)
-/// trigger an immediate DAG tick.
-///
-/// Provided via Leptos context so any descendant component can call it.
-pub type InjectTopicCallback = Callback<(String, f64)>;
-
-/// Read a pubsub topic value from the thread-local simulation state.
-///
-/// Returns `None` if no simulation state exists or the topic has not been
-/// published yet.
-pub fn engine_read_topic(topic: &str) -> Option<f64> {
-    SIM.with(|cell| cell.borrow().as_ref().and_then(|s| s.pubsub_value(topic)))
-}
-
-/// Inject a pubsub topic value into the thread-local simulation state.
-///
-/// This writes the value directly into the SimState's internal pubsub map so
-/// that subsequent ticks will see it via `Subscribe` nodes.
-fn engine_inject_topic(topic: &str, value: f64) {
-    SIM.with(|cell| {
-        if let Some(ref mut s) = *cell.borrow_mut() {
-            s.inject_topic(topic, value);
-        }
-    });
-}
-
-// Thread-local simulation state (not Send — lives on the main WASM thread).
-use std::cell::RefCell;
-thread_local! {
-    static SIM: RefCell<Option<dag_core::eval::SimState>> = const { RefCell::new(None) };
-}
 
 /// An edge connecting an output port on one block to an input port on another.
 ///
@@ -303,10 +270,7 @@ pub fn DagEditorPanel() -> impl IntoView {
     // Simulation state (persists pubsub values across ticks)
     let (sim_topics, set_sim_topics) = signal(std::collections::BTreeMap::<String, f64>::new());
     let (sim_tick_count, set_sim_tick_count) = signal(0_u64);
-    let (sim_mode, set_sim_mode) = signal(SimMode::Stopped);
-
-    // Counter bumped by inject_topic; watched by an Effect in Live mode.
-    let (live_trigger, set_live_trigger) = signal(0_u64);
+    let (sim_running, set_sim_running) = signal(false);
 
     // Helper: build merged DAG from current blocks
     let build_dag = move || -> Result<dag_core::op::Dag, String> {
@@ -331,55 +295,13 @@ pub fn DagEditorPanel() -> impl IntoView {
         Ok(combined)
     };
 
-    // Helper: ensure SimState exists for the current DAG size.
-    let ensure_sim = move |dag: &dag_core::op::Dag| {
-        SIM.with(|cell| {
-            let mut sim = cell.borrow_mut();
-            if sim.is_none() {
-                *sim = Some(dag_core::eval::SimState::new(dag.len()));
-            }
-        });
-    };
+    // SimState is stored in a thread_local RefCell (not Send, can't be in signal)
+    use std::cell::RefCell;
+    thread_local! {
+        static SIM: RefCell<Option<dag_core::eval::SimState>> = const { RefCell::new(None) };
+    }
 
-    // Helper: tick the SimState and propagate results to signals.
-    let do_tick = move |dag: &dag_core::op::Dag| {
-        SIM.with(|cell| {
-            if let Some(ref mut s) = *cell.borrow_mut() {
-                s.tick(dag);
-                set_sim_topics.set(s.topics().clone());
-                set_sim_tick_count.set(s.tick_count());
-            }
-        });
-    };
-
-    // Provide inject-topic callback to descendant components.
-    //
-    // Panel widgets call this to write a value into the sim's pubsub map.
-    // In Live mode the Effect below will notice the bumped `live_trigger`
-    // and immediately tick the DAG.
-    let inject_cb: InjectTopicCallback = Callback::new(move |(topic, value): (String, f64)| {
-        engine_inject_topic(&topic, value);
-        // Bump the live trigger so the Effect fires.
-        set_live_trigger.update(|n| *n += 1);
-    });
-    provide_context(inject_cb);
-
-    // Live-mode Effect: when live_trigger is bumped and mode is Live,
-    // immediately tick the DAG and update signals.
-    Effect::new(move |_| {
-        let _trigger = live_trigger.get(); // subscribe to changes
-        if sim_mode.get_untracked() != SimMode::Live {
-            return;
-        }
-        let dag = match build_dag() {
-            Ok(d) => d,
-            Err(_) => return,
-        };
-        ensure_sim(&dag);
-        do_tick(&dag);
-    });
-
-    // Step: single tick (works in any mode)
+    // Step: single tick
     let on_step = move |_| {
         let dag = match build_dag() {
             Ok(d) => d,
@@ -406,7 +328,7 @@ pub fn DagEditorPanel() -> impl IntoView {
         });
     };
 
-    // Reset: stop everything and clear SimState
+    // Reset
     let on_reset = move |_| {
         SIM.with(|cell| {
             if let Some(ref mut s) = *cell.borrow_mut() {
@@ -415,15 +337,15 @@ pub fn DagEditorPanel() -> impl IntoView {
                 set_sim_tick_count.set(0);
             }
         });
-        set_sim_mode.set(SimMode::Stopped);
+        set_sim_running.set(false);
         set_deploy_status.set("Reset".into());
     };
 
     // Play/Pause toggle
     let on_play_pause = move |_| {
-        let mode = sim_mode.get();
-        if mode == SimMode::Playing {
-            set_sim_mode.set(SimMode::Stopped);
+        let running = sim_running.get();
+        if running {
+            set_sim_running.set(false);
             set_deploy_status.set("Paused".into());
         } else {
             // Rebuild DAG and start ticking
@@ -434,16 +356,21 @@ pub fn DagEditorPanel() -> impl IntoView {
                     return;
                 }
             };
-            ensure_sim(&dag);
-            set_sim_mode.set(SimMode::Playing);
+            SIM.with(|cell| {
+                let mut sim = cell.borrow_mut();
+                if sim.is_none() {
+                    *sim = Some(dag_core::eval::SimState::new(dag.len()));
+                }
+            });
+            set_sim_running.set(true);
             set_deploy_status.set("Running...".into());
 
             // Start tick loop via gloo_timers (100ms = 10Hz)
             let set_topics = set_sim_topics;
             let set_tick = set_sim_tick_count;
             gloo_timers::callback::Interval::new(100, move || {
-                if sim_mode.get_untracked() != SimMode::Playing {
-                    return; // not playing — interval keeps firing but we skip
+                if !sim_running.get_untracked() {
+                    return; // paused — interval keeps firing but we skip
                 }
                 let dag = match build_dag() {
                     Ok(d) => d,
@@ -458,22 +385,6 @@ pub fn DagEditorPanel() -> impl IntoView {
                 });
             })
             .forget();
-        }
-    };
-
-    // Live mode toggle
-    let on_live = move |_| {
-        let mode = sim_mode.get();
-        if mode == SimMode::Live {
-            set_sim_mode.set(SimMode::Stopped);
-            set_deploy_status.set("Live off".into());
-        } else {
-            // Ensure SimState is initialised so inject + tick work immediately.
-            if let Ok(dag) = build_dag() {
-                ensure_sim(&dag);
-            }
-            set_sim_mode.set(SimMode::Live);
-            set_deploy_status.set("Live".into());
         }
     };
 
@@ -553,16 +464,10 @@ pub fn DagEditorPanel() -> impl IntoView {
             <div class="dag-canvas-container">
                 <div class="dag-toolbar">
                     <button
-                        class=move || if sim_mode.get() == SimMode::Playing { "btn btn-danger" } else { "btn btn-primary" }
+                        class=move || if sim_running.get() { "btn btn-danger" } else { "btn btn-primary" }
                         on:click=on_play_pause
                     >
-                        {move || if sim_mode.get() == SimMode::Playing { "Pause" } else { "Play" }}
-                    </button>
-                    <button
-                        class=move || if sim_mode.get() == SimMode::Live { "btn btn-success" } else { "btn btn-secondary" }
-                        on:click=on_live
-                    >
-                        {move || if sim_mode.get() == SimMode::Live { "\u{25CF} Live" } else { "Live" }}
+                        {move || if sim_running.get() { "Pause" } else { "Play" }}
                     </button>
                     <button class="btn btn-secondary" on:click=on_step>"Step"</button>
                     <button class="btn btn-secondary" on:click=on_reset>"Reset"</button>

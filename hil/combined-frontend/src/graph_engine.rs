@@ -1,157 +1,267 @@
-//! Graph engine: builds a combined DAG from configurable blocks and runs
-//! tick-based simulation with pubsub topic injection and readback.
+//! In-browser DAG simulation engine.
 //!
-//! This is the simulation backend for the DAG editor and panel widgets.
-//! Panel widgets inject values (e.g. slider position) via [`GraphEngine::inject_topic`]
-//! and read computed values (e.g. gauge reading) via [`GraphEngine::read_topic`].
+//! Manages a set of configurable blocks, lowers them to a combined DAG,
+//! and evaluates the DAG tick-by-tick using [`dag_core::eval::SimState`].
 
 use std::collections::BTreeMap;
 
 use configurable_blocks::deployment_profile::DeploymentProfile;
-use configurable_blocks::lower::lower_block_set;
+use configurable_blocks::lower::{self, ConfigurableBlock};
+use configurable_blocks::registry;
 use dag_core::eval::SimState;
+use dag_core::op::Dag;
 
-/// Reactive simulation engine built on top of configurable blocks and DAG
-/// evaluation.
+/// A placed block instance tracked by the engine.
+struct EngineBlock {
+    /// Unique id assigned by the engine.
+    id: u32,
+    /// Block type name (e.g. "constant", "pid").
+    block_type: String,
+    /// Current configuration as JSON.
+    config: serde_json::Value,
+}
+
+impl EngineBlock {
+    /// Reconstruct the [`ConfigurableBlock`] trait object from the registry.
+    #[allow(dead_code)]
+    fn reconstruct(&self) -> Option<Box<dyn ConfigurableBlock>> {
+        let mut block = registry::create_block(&self.block_type)?;
+        block.apply_config(&self.config);
+        Some(block)
+    }
+}
+
+/// A channel (edge) connecting an output port on one block to an input port
+/// on another.
+struct EngineChannel {
+    id: u32,
+    from_block: u32,
+    from_port: usize,
+    to_block: u32,
+    to_port: usize,
+}
+
+/// In-browser DAG simulation engine.
 ///
-/// Stores a list of `(block_type, config_json)` block definitions, lowers
-/// them into a single DAG, and evaluates tick-by-tick using [`SimState`].
-/// External code (e.g. panel widgets) can inject pubsub values before a tick
-/// and read them back after.
+/// Holds configurable blocks, channels between them, and a [`SimState`]
+/// that persists pubsub values across ticks. On each `tick()`, the engine
+/// re-lowers all blocks into a combined DAG and evaluates one step.
 pub struct GraphEngine {
-    /// Block definitions: `(block_type, config_json)`.
-    blocks: Vec<(String, serde_json::Value)>,
-    /// Persistent simulation state (lazily created on first tick or inject).
+    blocks: Vec<EngineBlock>,
+    channels: Vec<EngineChannel>,
+    next_block_id: u32,
+    next_channel_id: u32,
+    /// Combined DAG (rebuilt on tick if dirty).
+    dag: Option<Dag>,
+    /// Simulation state for the current DAG.
     sim: Option<SimState>,
-    /// Pre-tick buffer for externally injected topics.
-    ///
-    /// Values here are merged into `SimState.pubsub` before each tick and also
-    /// when the SimState is first created. This ensures injected values survive
-    /// DAG rebuilds.
+    /// Manual topic injections (fed into SimState before tick).
     injected: BTreeMap<String, f64>,
-    /// Whether blocks have changed since the last tick (requires DAG rebuild).
+    /// Accumulated tick count (survives DAG rebuilds).
+    tick_count: u64,
+    /// True when blocks/channels have changed since last DAG build.
     dirty: bool,
 }
 
 impl GraphEngine {
-    /// Create a new empty graph engine with no blocks.
+    /// Create a new empty engine.
     pub fn new() -> Self {
         Self {
             blocks: Vec::new(),
+            channels: Vec::new(),
+            next_block_id: 1,
+            next_channel_id: 1,
+            dag: None,
             sim: None,
             injected: BTreeMap::new(),
-            dirty: false,
+            tick_count: 0,
+            dirty: true,
         }
     }
 
-    /// Add a block to the engine.
+    /// Add a block of the given type with the provided config.
     ///
-    /// `block_type` must match a registered block name (e.g. `"constant"`,
-    /// `"gain"`, `"pubsub_bridge"`, `"pid"`). `config` is the JSON
-    /// configuration applied to the block before lowering.
-    ///
-    /// Returns the index of the newly added block.
-    pub fn add_block(&mut self, block_type: &str, config: serde_json::Value) -> usize {
-        let idx = self.blocks.len();
-        self.blocks.push((block_type.into(), config));
+    /// Returns `None` if the block type is unknown.
+    pub fn add_block(&mut self, block_type: &str, config: serde_json::Value) -> Option<u32> {
+        // Validate that the block type exists in the registry.
+        let _ = registry::create_block(block_type)?;
+
+        let id = self.next_block_id;
+        self.next_block_id += 1;
+        self.blocks.push(EngineBlock {
+            id,
+            block_type: block_type.to_string(),
+            config,
+        });
         self.dirty = true;
-        idx
+        Some(id)
     }
 
-    /// Remove all blocks and reset simulation state.
-    pub fn reset_sim(&mut self) {
-        self.blocks.clear();
-        self.sim = None;
-        self.injected.clear();
-        self.dirty = false;
+    /// Remove a block by id. Also removes any channels connected to it.
+    pub fn remove_block(&mut self, id: u32) {
+        self.blocks.retain(|b| b.id != id);
+        self.channels
+            .retain(|ch| ch.from_block != id && ch.to_block != id);
+        self.dirty = true;
     }
 
-    /// Externally inject a pubsub topic value (e.g. from a UI slider widget).
-    ///
-    /// The value is immediately readable via [`read_topic`](Self::read_topic)
-    /// and will be visible to `Subscribe` DAG ops on the next
-    /// [`tick`](Self::tick).
-    pub fn inject_topic(&mut self, topic: &str, value: f64) {
-        self.injected.insert(topic.into(), value);
-        // Also write through to the live SimState so read_topic works
-        // immediately (before any tick).
-        if let Some(sim) = &mut self.sim {
-            sim.set_topic(topic, value);
-        }
-    }
-
-    /// Read a pubsub topic's current value (e.g. for a UI gauge widget).
-    ///
-    /// Returns `None` if the topic has never been published or injected.
-    pub fn read_topic(&self, topic: &str) -> Option<f64> {
-        // Check live SimState first (has both injected and DAG-published values).
-        if let Some(sim) = &self.sim {
-            if let Some(v) = sim.pubsub_value(topic) {
-                return Some(v);
+    /// Update a single config key on a block.
+    pub fn update_config(&mut self, id: u32, key: String, value: serde_json::Value) {
+        if let Some(block) = self.blocks.iter_mut().find(|b| b.id == id) {
+            if let Some(obj) = block.config.as_object_mut() {
+                obj.insert(key, value);
+            } else {
+                let mut obj = serde_json::Map::new();
+                obj.insert(key, value);
+                block.config = serde_json::Value::Object(obj);
             }
+            self.dirty = true;
         }
-        // Fall back to the injected buffer (covers the case where no tick has
-        // run yet but inject_topic was called).
-        self.injected.get(topic).copied()
     }
 
-    /// Return a snapshot of all pubsub topic values.
+    /// Connect an output port on one block to an input port on another.
+    ///
+    /// Returns the channel id, or `None` if either block doesn't exist.
+    pub fn connect(
+        &mut self,
+        from_block: u32,
+        from_port: usize,
+        to_block: u32,
+        to_port: usize,
+    ) -> Option<u32> {
+        // Validate both blocks exist.
+        if !self.blocks.iter().any(|b| b.id == from_block) {
+            return None;
+        }
+        if !self.blocks.iter().any(|b| b.id == to_block) {
+            return None;
+        }
+
+        let id = self.next_channel_id;
+        self.next_channel_id += 1;
+        self.channels.push(EngineChannel {
+            id,
+            from_block,
+            from_port,
+            to_block,
+            to_port,
+        });
+        self.dirty = true;
+        Some(id)
+    }
+
+    /// Remove a channel by id. Returns true if a channel was removed.
+    pub fn disconnect(&mut self, channel_id: u32) -> bool {
+        let before = self.channels.len();
+        self.channels.retain(|ch| ch.id != channel_id);
+        let removed = self.channels.len() < before;
+        if removed {
+            self.dirty = true;
+        }
+        removed
+    }
+
+    /// Rebuild the combined DAG from current blocks, then evaluate one tick.
+    pub fn tick(&mut self) -> Result<(), String> {
+        if self.dirty || self.dag.is_none() {
+            self.rebuild_dag()?;
+        }
+
+        if let (Some(dag), Some(sim)) = (&self.dag, &mut self.sim) {
+            // Inject any manual topic values before tick.
+            for (topic, value) in &self.injected {
+                sim.inject(topic, *value);
+            }
+            sim.tick(dag);
+            self.tick_count = sim.tick_count();
+        }
+
+        Ok(())
+    }
+
+    /// Reset simulation state: clear tick count, pubsub store.
+    pub fn reset_sim(&mut self) {
+        self.sim = None;
+        self.dag = None;
+        self.tick_count = 0;
+        self.injected.clear();
+        self.dirty = true;
+    }
+
+    /// Inject a topic value for the next tick.
+    pub fn inject_topic(&mut self, topic: &str, value: f64) {
+        self.injected.insert(topic.to_string(), value);
+    }
+
+    /// Read the current value of a topic from the simulation state.
+    pub fn read_topic(&self, topic: &str) -> Option<f64> {
+        // Check injected values first, then sim state.
+        if let Some(&v) = self.injected.get(topic) {
+            return Some(v);
+        }
+        self.sim.as_ref().and_then(|s| s.pubsub_value(topic))
+    }
+
+    /// Current tick count.
+    pub fn tick_count(&self) -> u64 {
+        self.tick_count
+    }
+
+    /// All current pubsub topic values.
     pub fn topics(&self) -> BTreeMap<String, f64> {
-        let mut result = self.injected.clone();
+        let mut result = BTreeMap::new();
         if let Some(sim) = &self.sim {
-            // SimState topics override injected (they include injected values
-            // plus any DAG Publish outputs).
             for (k, v) in sim.topics() {
                 result.insert(k.clone(), *v);
             }
         }
+        // Overlay injected values.
+        for (k, v) in &self.injected {
+            result.insert(k.clone(), *v);
+        }
         result
     }
 
-    /// Evaluate one simulation tick.
-    ///
-    /// Lowers all blocks into a combined DAG (rebuilds when blocks have
-    /// changed), merges injected topic values into the SimState, then
-    /// evaluates one tick.
-    ///
-    /// Returns `Ok(tick_count)` on success, or `Err(message)` if lowering
-    /// fails (e.g. unknown block type).
-    pub fn tick(&mut self) -> Result<u64, String> {
-        let profile = DeploymentProfile::new("sim");
-        let dag = lower_block_set(&self.blocks, &profile)?;
-
-        // If there is no SimState yet, or blocks changed since last tick,
-        // create a fresh SimState sized for the current DAG. Preserve any
-        // existing pubsub values across the rebuild.
-        if self.dirty || self.sim.is_none() {
-            let preserved: BTreeMap<String, f64> = self
-                .sim
-                .as_ref()
-                .map(|s| s.topics().clone())
-                .unwrap_or_default();
-
-            let mut new_sim = SimState::new(dag.len());
-            for (k, v) in &preserved {
-                new_sim.set_topic(k, *v);
-            }
-            self.sim = Some(new_sim);
-            self.dirty = false;
-        }
-
-        let sim = self.sim.as_mut().expect("sim was just ensured above");
-
-        // Merge injected values into SimState before evaluation.
-        for (topic, value) in &self.injected {
-            sim.set_topic(topic, *value);
-        }
-
-        sim.tick(&dag);
-        Ok(sim.tick_count())
+    /// Access the current block list (id, block_type, config).
+    pub fn blocks(&self) -> Vec<(u32, &str, &serde_json::Value)> {
+        self.blocks
+            .iter()
+            .map(|b| (b.id, b.block_type.as_str(), &b.config))
+            .collect()
     }
 
-    /// Current tick count (0 if no ticks have run).
-    pub fn tick_count(&self) -> u64 {
-        self.sim.as_ref().map_or(0, |s| s.tick_count())
+    /// Access the current channel list.
+    pub fn channels(&self) -> Vec<(u32, u32, usize, u32, usize)> {
+        self.channels
+            .iter()
+            .map(|ch| (ch.id, ch.from_block, ch.from_port, ch.to_block, ch.to_port))
+            .collect()
+    }
+
+    // ── Private ─────────────────────────────────────────────────────────
+
+    /// Rebuild the combined DAG from the current set of blocks.
+    fn rebuild_dag(&mut self) -> Result<(), String> {
+        let block_set: Vec<(String, serde_json::Value)> = self
+            .blocks
+            .iter()
+            .map(|b| (b.block_type.clone(), b.config.clone()))
+            .collect();
+
+        let profile = DeploymentProfile::new("sim");
+        let dag = lower::lower_block_set(&block_set, &profile)?;
+        let node_count = dag.len();
+
+        // Preserve injected values across rebuilds by seeding the new SimState.
+        let mut sim = SimState::new(node_count);
+        for (topic, value) in &self.injected {
+            sim.inject(topic, *value);
+        }
+
+        self.dag = Some(dag);
+        self.sim = Some(sim);
+        self.dirty = false;
+        Ok(())
     }
 }
 
@@ -161,167 +271,143 @@ impl Default for GraphEngine {
     }
 }
 
-// ===========================================================================
-// Tests
-// ===========================================================================
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // ---- inject / read basics ----
-
     #[test]
-    fn test_inject_topic_sets_value() {
-        let mut engine = GraphEngine::new();
-        engine.inject_topic("input/slider", 5.0);
-        assert_eq!(engine.read_topic("input/slider"), Some(5.0));
-    }
-
-    #[test]
-    fn test_read_unknown_topic_returns_none() {
+    fn test_new_engine() {
         let engine = GraphEngine::new();
-        assert_eq!(engine.read_topic("nonexistent"), None);
+        assert_eq!(engine.tick_count(), 0);
+        assert!(engine.blocks().is_empty());
+        assert!(engine.channels().is_empty());
     }
 
     #[test]
-    fn test_inject_no_dag_stores_value() {
+    fn test_add_block_valid() {
         let mut engine = GraphEngine::new();
-        // No blocks added, no ticks -- value should still be readable.
-        engine.inject_topic("orphan", 99.0);
-        assert_eq!(engine.read_topic("orphan"), Some(99.0));
+        let id = engine.add_block("constant", serde_json::json!({"value": 42.0}));
+        assert!(id.is_some());
+        assert_eq!(engine.blocks().len(), 1);
     }
 
     #[test]
-    fn test_inject_topic_overwrites_previous() {
+    fn test_add_block_invalid_type() {
         let mut engine = GraphEngine::new();
-        engine.inject_topic("x", 1.0);
-        engine.inject_topic("x", 2.0);
-        assert_eq!(engine.read_topic("x"), Some(2.0));
+        let id = engine.add_block("nonexistent", serde_json::json!({}));
+        assert!(id.is_none());
+        assert!(engine.blocks().is_empty());
     }
 
-    // ---- tick interaction ----
-
     #[test]
-    fn test_inject_topic_persists_across_ticks() {
+    fn test_remove_block() {
         let mut engine = GraphEngine::new();
-        // Add a constant block so tick() has something to evaluate.
-        engine.add_block("constant", serde_json::json!({"value": 1.0}));
-        engine.inject_topic("external", 42.0);
-        let _ = engine.tick();
-        assert_eq!(engine.read_topic("external"), Some(42.0));
+        let id = engine.add_block("constant", serde_json::json!({})).unwrap();
+        engine.remove_block(id);
+        assert!(engine.blocks().is_empty());
     }
 
     #[test]
-    fn test_dag_publish_readable() {
+    fn test_connect_disconnect() {
         let mut engine = GraphEngine::new();
-        // Constant(5.0) with publish_topic "result".
-        engine.add_block(
-            "constant",
-            serde_json::json!({"value": 5.0, "publish_topic": "result"}),
-        );
-        let _ = engine.tick();
-        assert_eq!(engine.read_topic("result"), Some(5.0));
+        let a = engine
+            .add_block("pubsub_bridge", serde_json::json!({}))
+            .unwrap();
+        let b = engine
+            .add_block("pubsub_bridge", serde_json::json!({}))
+            .unwrap();
+        let ch = engine.connect(a, 0, b, 0);
+        assert!(ch.is_some());
+        assert_eq!(engine.channels().len(), 1);
+
+        let ok = engine.disconnect(ch.unwrap());
+        assert!(ok);
+        assert!(engine.channels().is_empty());
     }
 
     #[test]
-    fn test_inject_topic_read_by_subscribe() {
+    fn test_connect_invalid_block() {
         let mut engine = GraphEngine::new();
-        // PublishBlock subscribes to input_topic and publishes to output_topic.
-        engine.add_block(
-            "publish",
-            serde_json::json!({"input_topic": "input", "output_topic": "output"}),
-        );
-        engine.inject_topic("input", 7.0);
-        let _ = engine.tick();
-        assert_eq!(engine.read_topic("output"), Some(7.0));
+        let a = engine.add_block("constant", serde_json::json!({})).unwrap();
+        assert!(engine.connect(a, 0, 999, 0).is_none());
     }
 
     #[test]
-    fn test_full_loop_inject_gain_read() {
+    fn test_disconnect_nonexistent() {
         let mut engine = GraphEngine::new();
-        // PubSubBridgeBlock: subscribe("input") * gain -> publish("output").
-        engine.add_block(
-            "pubsub_bridge",
-            serde_json::json!({
-                "subscribe_topic": "input",
-                "publish_topic": "output",
-                "gain": 2.0
-            }),
-        );
-        engine.inject_topic("input", 5.0);
-        let _ = engine.tick();
-        assert_eq!(engine.read_topic("output"), Some(10.0));
+        assert!(!engine.disconnect(42));
     }
 
     #[test]
-    fn test_multiple_inject_tick_cycles() {
+    fn test_tick_empty_engine() {
         let mut engine = GraphEngine::new();
-        engine.add_block(
-            "pubsub_bridge",
-            serde_json::json!({
-                "subscribe_topic": "x",
-                "publish_topic": "y",
-                "gain": 3.0
-            }),
-        );
-
-        engine.inject_topic("x", 1.0);
-        let _ = engine.tick();
-        assert_eq!(engine.read_topic("y"), Some(3.0));
-
-        engine.inject_topic("x", 2.0);
-        let _ = engine.tick();
-        assert_eq!(engine.read_topic("y"), Some(6.0));
+        // Ticking with no blocks should succeed (empty DAG).
+        assert!(engine.tick().is_ok());
     }
 
-    // ---- topics() snapshot ----
-
     #[test]
-    fn test_topics_includes_injected_and_published() {
+    fn test_tick_with_constant() {
         let mut engine = GraphEngine::new();
         engine.add_block(
             "constant",
-            serde_json::json!({"value": 10.0, "publish_topic": "from_dag"}),
+            serde_json::json!({"value": 5.0, "publish_topic": "x"}),
         );
-        engine.inject_topic("from_ui", 77.0);
-        let _ = engine.tick();
-
-        let topics = engine.topics();
-        assert_eq!(topics.get("from_dag"), Some(&10.0));
-        assert_eq!(topics.get("from_ui"), Some(&77.0));
+        engine.tick().unwrap();
+        assert_eq!(engine.tick_count(), 1);
+        assert_eq!(engine.read_topic("x"), Some(5.0));
     }
 
-    // ---- reset ----
+    #[test]
+    fn test_inject_and_read_topic() {
+        let mut engine = GraphEngine::new();
+        engine.inject_topic("test", 42.0);
+        assert_eq!(engine.read_topic("test"), Some(42.0));
+    }
 
     #[test]
-    fn test_reset_sim_clears_everything() {
+    fn test_reset_sim() {
         let mut engine = GraphEngine::new();
         engine.add_block(
             "constant",
-            serde_json::json!({"value": 1.0, "publish_topic": "t"}),
+            serde_json::json!({"value": 1.0, "publish_topic": "a"}),
         );
-        engine.inject_topic("ext", 5.0);
-        let _ = engine.tick();
-        assert!(engine.read_topic("t").is_some());
-        assert!(engine.read_topic("ext").is_some());
+        engine.tick().unwrap();
+        assert_eq!(engine.tick_count(), 1);
 
         engine.reset_sim();
-        assert_eq!(engine.read_topic("t"), None);
-        assert_eq!(engine.read_topic("ext"), None);
         assert_eq!(engine.tick_count(), 0);
+        assert!(engine.topics().is_empty());
     }
 
-    // ---- tick_count ----
+    #[test]
+    fn test_topics_includes_injected() {
+        let mut engine = GraphEngine::new();
+        engine.inject_topic("manual", 99.0);
+        let topics = engine.topics();
+        assert_eq!(topics.get("manual"), Some(&99.0));
+    }
 
     #[test]
-    fn test_tick_count_increments() {
+    fn test_update_config() {
         let mut engine = GraphEngine::new();
-        engine.add_block("constant", serde_json::json!({"value": 0.0}));
-        assert_eq!(engine.tick_count(), 0);
-        let _ = engine.tick();
-        assert_eq!(engine.tick_count(), 1);
-        let _ = engine.tick();
-        assert_eq!(engine.tick_count(), 2);
+        let id = engine
+            .add_block("constant", serde_json::json!({"value": 1.0}))
+            .unwrap();
+        engine.update_config(id, "value".to_string(), serde_json::json!(99.0));
+        let blocks = engine.blocks();
+        let (_, _, config) = blocks.iter().find(|(bid, _, _)| *bid == id).unwrap();
+        assert_eq!(config["value"], 99.0);
+    }
+
+    #[test]
+    fn test_remove_block_also_removes_channels() {
+        let mut engine = GraphEngine::new();
+        let a = engine.add_block("constant", serde_json::json!({})).unwrap();
+        let b = engine.add_block("constant", serde_json::json!({})).unwrap();
+        engine.connect(a, 0, b, 0);
+        assert_eq!(engine.channels().len(), 1);
+
+        engine.remove_block(a);
+        assert!(engine.channels().is_empty());
     }
 }
