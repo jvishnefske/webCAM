@@ -414,7 +414,13 @@ mod tests {
     #[test]
     fn runtime_merge_input_values() {
         let mut panel = PanelModel::new("test");
-        let mut w = make_widget(WidgetKind::Gauge { min: 0.0, max: 100.0 }, "Temp");
+        let mut w = make_widget(
+            WidgetKind::Gauge {
+                min: 0.0,
+                max: 100.0,
+            },
+            "Temp",
+        );
         w.channels.push(ChannelBinding {
             topic: "sensor/temp".to_string(),
             direction: ChannelDirection::Input,

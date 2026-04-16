@@ -175,17 +175,35 @@ fn emit_op(out: &mut String, idx: usize, op: &IrOp) {
 
         IrOpKind::Arith(ArithOp::Addf) => {
             let _ = writeln!(out, "    // Op {idx}: arith.addf(%{}, %{})", a(0), a(1));
-            let _ = writeln!(out, "    state.v{} = state.v{} + state.v{};", r(0), a(0), a(1));
+            let _ = writeln!(
+                out,
+                "    state.v{} = state.v{} + state.v{};",
+                r(0),
+                a(0),
+                a(1)
+            );
         }
 
         IrOpKind::Arith(ArithOp::Mulf) => {
             let _ = writeln!(out, "    // Op {idx}: arith.mulf(%{}, %{})", a(0), a(1));
-            let _ = writeln!(out, "    state.v{} = state.v{} * state.v{};", r(0), a(0), a(1));
+            let _ = writeln!(
+                out,
+                "    state.v{} = state.v{} * state.v{};",
+                r(0),
+                a(0),
+                a(1)
+            );
         }
 
         IrOpKind::Arith(ArithOp::Subf) => {
             let _ = writeln!(out, "    // Op {idx}: arith.subf(%{}, %{})", a(0), a(1));
-            let _ = writeln!(out, "    state.v{} = state.v{} - state.v{};", r(0), a(0), a(1));
+            let _ = writeln!(
+                out,
+                "    state.v{} = state.v{} - state.v{};",
+                r(0),
+                a(0),
+                a(1)
+            );
         }
 
         IrOpKind::Arith(ArithOp::Select) => {
@@ -195,8 +213,18 @@ fn emit_op(out: &mut String, idx: usize, op: &IrOp) {
         IrOpKind::Dataflow(DataflowOp::Clamp) => {
             let lo = attr_f64(op, "lo");
             let hi = attr_f64(op, "hi");
-            let _ = writeln!(out, "    // Op {idx}: dataflow.clamp {{lo = {lo}, hi = {hi}}}");
-            let _ = writeln!(out, "    state.v{} = state.v{}.max({}).min({});", r(0), a(0), fmt_f64(lo), fmt_f64(hi));
+            let _ = writeln!(
+                out,
+                "    // Op {idx}: dataflow.clamp {{lo = {lo}, hi = {hi}}}"
+            );
+            let _ = writeln!(
+                out,
+                "    state.v{} = state.v{}.max({}).min({});",
+                r(0),
+                a(0),
+                fmt_f64(lo),
+                fmt_f64(hi)
+            );
         }
 
         IrOpKind::Dataflow(DataflowOp::AdcRead) => {
@@ -207,7 +235,10 @@ fn emit_op(out: &mut String, idx: usize, op: &IrOp) {
 
         IrOpKind::Dataflow(DataflowOp::PwmWrite) => {
             let ch = attr_u8(op, "channel");
-            let _ = writeln!(out, "    // Op {idx}: dataflow.pwm_write {{channel = {ch}}}");
+            let _ = writeln!(
+                out,
+                "    // Op {idx}: dataflow.pwm_write {{channel = {ch}}}"
+            );
             let _ = writeln!(out, "    hw.pwm_write({ch}, state.v{});", a(0));
         }
 
@@ -237,46 +268,80 @@ fn emit_op(out: &mut String, idx: usize, op: &IrOp) {
 
         IrOpKind::Dataflow(DataflowOp::EncoderRead) => {
             let ch = attr_u8(op, "channel");
-            let _ = writeln!(out, "    // Op {idx}: dataflow.encoder_read {{channel = {ch}}}");
-            let _ = writeln!(out, "    let (p, v) = hw.encoder_read({ch}); state.v{} = p; state.v{} = v;", r(0), r(1));
+            let _ = writeln!(
+                out,
+                "    // Op {idx}: dataflow.encoder_read {{channel = {ch}}}"
+            );
+            let _ = writeln!(
+                out,
+                "    let (p, v) = hw.encoder_read({ch}); state.v{} = p; state.v{} = v;",
+                r(0),
+                r(1)
+            );
         }
 
         IrOpKind::Dataflow(DataflowOp::ChannelRead) => {
             let topic = attr_str(op, "topic");
-            let _ = writeln!(out, "    // Op {idx}: dataflow.channel_read {{topic = \"{topic}\"}}");
+            let _ = writeln!(
+                out,
+                "    // Op {idx}: dataflow.channel_read {{topic = \"{topic}\"}}"
+            );
             let _ = writeln!(out, "    state.v{} = hw.channel_read(\"{topic}\");", r(0));
         }
 
         IrOpKind::Dataflow(DataflowOp::ChannelWrite) => {
             let topic = attr_str(op, "topic");
-            let _ = writeln!(out, "    // Op {idx}: dataflow.channel_write {{topic = \"{topic}\"}}");
+            let _ = writeln!(
+                out,
+                "    // Op {idx}: dataflow.channel_write {{topic = \"{topic}\"}}"
+            );
             let _ = writeln!(out, "    hw.channel_write(\"{topic}\", state.v{});", a(0));
         }
 
         IrOpKind::Dataflow(DataflowOp::MessageFieldExtract) => {
             let field = attr_str(op, "field");
-            let _ = writeln!(out, "    // Op {idx}: dataflow.message_field {{field = \"{field}\"}}");
-            let _ = writeln!(out, "    state.v{} = hw.message_field(state.v{}, \"{field}\");", r(0), a(0));
+            let _ = writeln!(
+                out,
+                "    // Op {idx}: dataflow.message_field {{field = \"{field}\"}}"
+            );
+            let _ = writeln!(
+                out,
+                "    state.v{} = hw.message_field(state.v{}, \"{field}\");",
+                r(0),
+                a(0)
+            );
         }
 
         IrOpKind::Dataflow(DataflowOp::StateMachine) => {
-            let _ = writeln!(out, "    // Op {idx}: dataflow.state_machine (not yet implemented)");
+            let _ = writeln!(
+                out,
+                "    // Op {idx}: dataflow.state_machine (not yet implemented)"
+            );
         }
 
         IrOpKind::Func(FuncOp::Call { callee }) if callee == "subscribe" => {
             let topic = attr_str(op, "topic");
-            let _ = writeln!(out, "    // Op {idx}: func.call @subscribe {{topic = \"{topic}\"}}");
+            let _ = writeln!(
+                out,
+                "    // Op {idx}: func.call @subscribe {{topic = \"{topic}\"}}"
+            );
             let _ = writeln!(out, "    state.v{} = hw.subscribe(\"{topic}\");", r(0));
         }
 
         IrOpKind::Func(FuncOp::Call { callee }) if callee == "publish" => {
             let topic = attr_str(op, "topic");
-            let _ = writeln!(out, "    // Op {idx}: func.call @publish {{topic = \"{topic}\"}}");
+            let _ = writeln!(
+                out,
+                "    // Op {idx}: func.call @publish {{topic = \"{topic}\"}}"
+            );
             let _ = writeln!(out, "    hw.publish(\"{topic}\", state.v{});", a(0));
         }
 
         IrOpKind::Func(FuncOp::Call { callee }) => {
-            let _ = writeln!(out, "    // Op {idx}: func.call @{callee} (unsupported callee)");
+            let _ = writeln!(
+                out,
+                "    // Op {idx}: func.call @{callee} (unsupported callee)"
+            );
         }
 
         IrOpKind::Custom(s) => {

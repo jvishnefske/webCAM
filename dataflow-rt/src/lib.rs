@@ -79,21 +79,11 @@ pub trait Peripherals {
         Err(PeripheralError::Unsupported)
     }
     /// Write bytes to an I2C device on the given bus.
-    fn i2c_write(
-        &mut self,
-        _bus: u8,
-        _addr: u8,
-        _data: &[u8],
-    ) -> Result<(), PeripheralError> {
+    fn i2c_write(&mut self, _bus: u8, _addr: u8, _data: &[u8]) -> Result<(), PeripheralError> {
         Err(PeripheralError::Unsupported)
     }
     /// Read bytes from an I2C device on the given bus.
-    fn i2c_read(
-        &mut self,
-        _bus: u8,
-        _addr: u8,
-        _buf: &mut [u8],
-    ) -> Result<(), PeripheralError> {
+    fn i2c_read(&mut self, _bus: u8, _addr: u8, _buf: &mut [u8]) -> Result<(), PeripheralError> {
         Err(PeripheralError::Unsupported)
     }
     /// Write then read (combined transaction) on an I2C bus.

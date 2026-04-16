@@ -170,7 +170,11 @@ mod tests {
         let graph = simple_graph();
         let manifest = full_manifest();
         let diags = validate(&graph, &manifest);
-        assert!(diags.is_empty(), "expected no diagnostics, got: {:?}", diags);
+        assert!(
+            diags.is_empty(),
+            "expected no diagnostics, got: {:?}",
+            diags
+        );
     }
 
     #[test]

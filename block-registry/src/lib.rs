@@ -162,7 +162,8 @@ mod tests {
 
     #[test]
     fn create_block_state_machine_minimal() {
-        let block = create_block("state_machine", r#"{"states":["idle"],"initial":"idle"}"#).unwrap();
+        let block =
+            create_block("state_machine", r#"{"states":["idle"],"initial":"idle"}"#).unwrap();
         assert_eq!(block.block_type(), "state_machine");
     }
 
@@ -350,13 +351,33 @@ mod tests {
     fn create_block_invalid_json_errors() {
         let bad = "not json";
         for bt in &[
-            "constant", "gain", "add", "multiply", "subtract", "clamp",
-            "select", "channel_read", "channel_write", "plot",
-            "json_encode", "json_decode", "pubsub_sink", "pubsub_source",
-            "udp_source", "udp_sink", "adc_source", "pwm_sink",
-            "gpio_out", "gpio_in", "uart_tx", "uart_rx",
-            "state_machine", "encoder", "ssd1306_display",
-            "tmc2209_stepper", "tmc2209_stallguard",
+            "constant",
+            "gain",
+            "add",
+            "multiply",
+            "subtract",
+            "clamp",
+            "select",
+            "channel_read",
+            "channel_write",
+            "plot",
+            "json_encode",
+            "json_decode",
+            "pubsub_sink",
+            "pubsub_source",
+            "udp_source",
+            "udp_sink",
+            "adc_source",
+            "pwm_sink",
+            "gpio_out",
+            "gpio_in",
+            "uart_tx",
+            "uart_rx",
+            "state_machine",
+            "encoder",
+            "ssd1306_display",
+            "tmc2209_stepper",
+            "tmc2209_stallguard",
         ] {
             assert!(create_block(bt, bad).is_err(), "expected error for {bt}");
         }
@@ -409,7 +430,9 @@ mod tests {
                 "uart_tx" | "uart_rx" => r#"{"port":0,"baud":115200}"#,
                 "encoder" => r#"{"channel":0}"#,
                 "ssd1306_display" => r#"{"i2c_bus":0,"address":60}"#,
-                "tmc2209_stepper" => r#"{"uart_port":0,"uart_addr":0,"steps_per_rev":200,"microsteps":16}"#,
+                "tmc2209_stepper" => {
+                    r#"{"uart_port":0,"uart_addr":0,"steps_per_rev":200,"microsteps":16}"#
+                }
                 "tmc2209_stallguard" => r#"{"uart_port":0,"uart_addr":0,"threshold":50}"#,
                 "channel_read" => r#"{"channel":"adc0"}"#,
                 "channel_write" => r#"{"channel":"pwm0"}"#,

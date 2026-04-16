@@ -253,16 +253,22 @@ impl DataflowGraph {
         use crate::dataflow::codegen::topo::topological_sort;
 
         // Build set of delay blocks (z⁻¹ elements) for back-edge exclusion.
-        let delay_blocks: HashSet<graph_model::BlockId> = self.blocks.iter()
+        let delay_blocks: HashSet<graph_model::BlockId> = self
+            .blocks
+            .iter()
             .filter(|(_, block)| block.is_delay())
             .map(|(&id, _)| graph_model::BlockId(id.0))
             .collect();
 
         // Convert to graph_model types for topological sort.
-        let all_ids: Vec<graph_model::BlockId> = self.blocks.keys()
+        let all_ids: Vec<graph_model::BlockId> = self
+            .blocks
+            .keys()
             .map(|id| graph_model::BlockId(id.0))
             .collect();
-        let gm_channels: Vec<graph_model::Channel> = self.channels.iter()
+        let gm_channels: Vec<graph_model::Channel> = self
+            .channels
+            .iter()
             .map(|c| graph_model::Channel {
                 id: graph_model::ChannelId(c.id.0),
                 from_block: graph_model::BlockId(c.from_block.0),
@@ -271,7 +277,8 @@ impl DataflowGraph {
                 to_port: c.to_port,
             })
             .collect();
-        let block_ids: Vec<BlockId> = match topological_sort(&all_ids, &gm_channels, &delay_blocks) {
+        let block_ids: Vec<BlockId> = match topological_sort(&all_ids, &gm_channels, &delay_blocks)
+        {
             Ok(sorted) => sorted.into_iter().map(|id| BlockId(id.0)).collect(),
             Err(_) => {
                 // Fallback to ID order if cycle detected (shouldn't happen with delay exclusion)
@@ -774,12 +781,8 @@ mod tests {
     fn data_driven_channel_read_write() {
         use crate::dataflow::blocks::create_block;
         let mut g = DataflowGraph::new();
-        let cr = g.add_block(
-            create_block("channel_read", r#"{"channel": "adc0"}"#).unwrap(),
-        );
-        let cw = g.add_block(
-            create_block("channel_write", r#"{"channel": "pwm0"}"#).unwrap(),
-        );
+        let cr = g.add_block(create_block("channel_read", r#"{"channel": "adc0"}"#).unwrap());
+        let cw = g.add_block(create_block("channel_write", r#"{"channel": "pwm0"}"#).unwrap());
         g.connect(cr, 0, cw, 0).unwrap();
         g.tick(0.01);
         let snap = g.snapshot();
@@ -990,7 +993,13 @@ mod tests {
     }
 
     /// Helper: build a Channel directly (bypasses graph validation).
-    fn make_channel(id: u32, from_block: u32, from_port: usize, to_block: u32, to_port: usize) -> Channel {
+    fn make_channel(
+        id: u32,
+        from_block: u32,
+        from_port: usize,
+        to_block: u32,
+        to_port: usize,
+    ) -> Channel {
         Channel {
             id: super::super::channel::ChannelId(id),
             from_block: BlockId(from_block),
@@ -1016,17 +1025,17 @@ mod tests {
 
         super::migrate_state_machine_ports(&mut snap);
 
-        assert_eq!(snap.channels[0].to_port, 1, "to_port should be shifted from 0 to 1");
+        assert_eq!(
+            snap.channels[0].to_port, 1,
+            "to_port should be shifted from 0 to 1"
+        );
     }
 
     #[test]
     fn migrate_ignores_non_sm_blocks() {
         // Channel connects to a gain block (not state_machine) — should not be shifted.
         let mut snap = GraphSnapshot {
-            blocks: vec![
-                make_block_snap(1, "constant"),
-                make_block_snap(2, "gain"),
-            ],
+            blocks: vec![make_block_snap(1, "constant"), make_block_snap(2, "gain")],
             channels: vec![make_channel(1, 1, 0, 2, 0)],
             tick_count: 0,
             time: 0.0,
@@ -1034,7 +1043,10 @@ mod tests {
 
         super::migrate_state_machine_ports(&mut snap);
 
-        assert_eq!(snap.channels[0].to_port, 0, "non-SM channel should not be shifted");
+        assert_eq!(
+            snap.channels[0].to_port, 0,
+            "non-SM channel should not be shifted"
+        );
     }
 
     #[test]
@@ -1058,9 +1070,18 @@ mod tests {
 
         super::migrate_state_machine_ports(&mut snap);
 
-        assert_eq!(snap.channels[0].to_port, 1, "guard_0 should shift to port 1");
-        assert_eq!(snap.channels[1].to_port, 2, "guard_1 should shift to port 2");
-        assert_eq!(snap.channels[2].to_port, 3, "guard_2 should shift to port 3");
+        assert_eq!(
+            snap.channels[0].to_port, 1,
+            "guard_0 should shift to port 1"
+        );
+        assert_eq!(
+            snap.channels[1].to_port, 2,
+            "guard_1 should shift to port 2"
+        );
+        assert_eq!(
+            snap.channels[2].to_port, 3,
+            "guard_2 should shift to port 3"
+        );
     }
 
     #[test]
@@ -1072,10 +1093,7 @@ mod tests {
                 make_block_snap(2, "gain"),
                 make_block_snap(3, "register"),
             ],
-            channels: vec![
-                make_channel(1, 1, 0, 2, 0),
-                make_channel(2, 2, 0, 3, 0),
-            ],
+            channels: vec![make_channel(1, 1, 0, 2, 0), make_channel(2, 2, 0, 3, 0)],
             tick_count: 5,
             time: 0.05,
         };

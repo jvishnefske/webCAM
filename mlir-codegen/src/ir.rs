@@ -93,20 +93,23 @@ impl IrOpKind {
             Self::Arith(ArithOp::Subf) => "arith.subf".into(),
             Self::Arith(ArithOp::Select) => "arith.select".into(),
             Self::Func(FuncOp::Call { callee }) => format!("func.call @{callee}"),
-            Self::Dataflow(d) => format!("dataflow.{}", match d {
-                DataflowOp::Clamp => "clamp",
-                DataflowOp::AdcRead => "adc_read",
-                DataflowOp::PwmWrite => "pwm_write",
-                DataflowOp::GpioRead => "gpio_read",
-                DataflowOp::GpioWrite => "gpio_write",
-                DataflowOp::UartRx => "uart_rx",
-                DataflowOp::UartTx => "uart_tx",
-                DataflowOp::EncoderRead => "encoder_read",
-                DataflowOp::ChannelRead => "channel_read",
-                DataflowOp::ChannelWrite => "channel_write",
-                DataflowOp::MessageFieldExtract => "message_field",
-                DataflowOp::StateMachine => "state_machine",
-            }),
+            Self::Dataflow(d) => format!(
+                "dataflow.{}",
+                match d {
+                    DataflowOp::Clamp => "clamp",
+                    DataflowOp::AdcRead => "adc_read",
+                    DataflowOp::PwmWrite => "pwm_write",
+                    DataflowOp::GpioRead => "gpio_read",
+                    DataflowOp::GpioWrite => "gpio_write",
+                    DataflowOp::UartRx => "uart_rx",
+                    DataflowOp::UartTx => "uart_tx",
+                    DataflowOp::EncoderRead => "encoder_read",
+                    DataflowOp::ChannelRead => "channel_read",
+                    DataflowOp::ChannelWrite => "channel_write",
+                    DataflowOp::MessageFieldExtract => "message_field",
+                    DataflowOp::StateMachine => "state_machine",
+                }
+            ),
             Self::Custom(s) => s.clone(),
         }
     }
@@ -213,11 +216,7 @@ impl IrBuilder {
         // That base = next_value_id_before_begin_func = current_next - num_args - (values allocated after begin_func).
         //
         // Simpler approach: count how many op results exist in the current func.
-        let ops_results: u32 = func
-            .ops
-            .iter()
-            .map(|op| op.results.len() as u32)
-            .sum();
+        let ops_results: u32 = func.ops.iter().map(|op| op.results.len() as u32).sum();
         let base = self.next_value_id - num_args as u32 - ops_results;
         ValueId(base + arg_index as u32)
     }
@@ -324,12 +323,7 @@ impl IrBuilder {
 
     /// Emit select: result = cond > 0 ? a : b.
     pub fn select(&mut self, cond: ValueId, a: ValueId, b: ValueId) -> ValueId {
-        self.typed_op(
-            IrOpKind::Arith(ArithOp::Select),
-            &[cond, a, b],
-            &[],
-            1,
-        )[0]
+        self.typed_op(IrOpKind::Arith(ArithOp::Select), &[cond, a, b], &[], 1)[0]
     }
 
     // ── Hardware I/O ops ───────────────────────────────────────────
@@ -410,7 +404,9 @@ impl IrBuilder {
     /// Subscribe: result = func.call @subscribe(topic).
     pub fn subscribe(&mut self, topic: &str) -> ValueId {
         self.typed_op(
-            IrOpKind::Func(FuncOp::Call { callee: "subscribe".into() }),
+            IrOpKind::Func(FuncOp::Call {
+                callee: "subscribe".into(),
+            }),
             &[],
             &[("topic", Attr::Str(topic.to_string()))],
             1,
@@ -420,7 +416,9 @@ impl IrBuilder {
     /// Publish: func.call @publish(topic, value).
     pub fn publish(&mut self, topic: &str, value: ValueId) {
         self.typed_op(
-            IrOpKind::Func(FuncOp::Call { callee: "publish".into() }),
+            IrOpKind::Func(FuncOp::Call {
+                callee: "publish".into(),
+            }),
             &[value],
             &[("topic", Attr::Str(topic.to_string()))],
             0,
@@ -475,9 +473,15 @@ mod tests {
         assert_eq!(module.funcs[0].ops.len(), 3);
 
         // Op 0: constant 5.0
-        assert_eq!(module.funcs[0].ops[0].kind, IrOpKind::Arith(ArithOp::Constant));
+        assert_eq!(
+            module.funcs[0].ops[0].kind,
+            IrOpKind::Arith(ArithOp::Constant)
+        );
         // Op 1: constant 2.0 (gain factor)
-        assert_eq!(module.funcs[0].ops[1].kind, IrOpKind::Arith(ArithOp::Constant));
+        assert_eq!(
+            module.funcs[0].ops[1].kind,
+            IrOpKind::Arith(ArithOp::Constant)
+        );
         // Op 2: mulf
         let mulf_op = &module.funcs[0].ops[2];
         assert_eq!(mulf_op.kind, IrOpKind::Arith(ArithOp::Mulf));
@@ -521,14 +525,24 @@ mod tests {
         assert_eq!(module.funcs[0].ops.len(), 2);
 
         let sub_op = &module.funcs[0].ops[0];
-        assert_eq!(sub_op.kind, IrOpKind::Func(FuncOp::Call { callee: "subscribe".into() }));
+        assert_eq!(
+            sub_op.kind,
+            IrOpKind::Func(FuncOp::Call {
+                callee: "subscribe".into()
+            })
+        );
         assert_eq!(
             sub_op.attrs.get("topic"),
             Some(&Attr::Str("sensor/temp".to_string()))
         );
 
         let pub_op = &module.funcs[0].ops[1];
-        assert_eq!(pub_op.kind, IrOpKind::Func(FuncOp::Call { callee: "publish".into() }));
+        assert_eq!(
+            pub_op.kind,
+            IrOpKind::Func(FuncOp::Call {
+                callee: "publish".into()
+            })
+        );
         assert_eq!(
             pub_op.attrs.get("topic"),
             Some(&Attr::Str("actuator/fan".to_string()))
@@ -577,10 +591,7 @@ mod tests {
         assert_eq!(op.operands, vec![input]);
         assert_eq!(op.results.len(), 2);
         assert_eq!(op.attrs.get("alpha"), Some(&Attr::F64(0.5)));
-        assert_eq!(
-            op.attrs.get("label"),
-            Some(&Attr::Str("test".to_string()))
-        );
+        assert_eq!(op.attrs.get("label"), Some(&Attr::Str("test".to_string())));
         assert_eq!(op.result_types.len(), 2);
     }
 
@@ -729,11 +740,7 @@ mod tests {
         // All ids should be unique
         let mut seen = std::collections::HashSet::new();
         for id in &all_ids {
-            assert!(
-                seen.insert(id),
-                "duplicate ValueId found: {:?}",
-                id
-            );
+            assert!(seen.insert(id), "duplicate ValueId found: {:?}", id);
         }
     }
 }

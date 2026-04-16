@@ -21,7 +21,9 @@ impl Parity {
             0 => Ok(Parity::None),
             1 => Ok(Parity::Odd),
             2 => Ok(Parity::Even),
-            other => Err(format!("invalid parity value: {other} (expected 0, 1, or 2)")),
+            other => Err(format!(
+                "invalid parity value: {other} (expected 0, 1, or 2)"
+            )),
         }
     }
 }

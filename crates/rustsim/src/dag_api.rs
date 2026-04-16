@@ -12,7 +12,6 @@ impl Default for DagHandle {
     }
 }
 
-
 impl DagHandle {
     pub fn new() -> Self {
         DagHandle { dag: Dag::new() }

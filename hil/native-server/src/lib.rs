@@ -199,10 +199,7 @@ async fn post_debug(State(state): State<SharedState>) -> Json<serde_json::Value>
 // ── WebSocket I2C dispatch ──────────────────────────────────────────
 
 #[cfg(not(tarpaulin_include))]
-async fn ws_handler(
-    ws: WebSocketUpgrade,
-    State(state): State<SharedState>,
-) -> impl IntoResponse {
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<SharedState>) -> impl IntoResponse {
     ws.on_upgrade(move |socket| handle_ws(socket, state))
 }
 
@@ -278,7 +275,10 @@ fn handle_list_buses(state: &SharedState) -> Option<Vec<u8>> {
             if let Some((addr, name)) = bus.active_device_info(j) {
                 enc.map(2).ok()?;
                 enc.u32(0).ok()?.u8(addr).ok()?;
-                enc.u32(1).ok()?.str(core::str::from_utf8(name).unwrap_or("?")).ok()?;
+                enc.u32(1)
+                    .ok()?
+                    .str(core::str::from_utf8(name).unwrap_or("?"))
+                    .ok()?;
             }
         }
     }
@@ -288,11 +288,16 @@ fn handle_list_buses(state: &SharedState) -> Option<Vec<u8>> {
 fn handle_add_device(state: &SharedState, data: &[u8]) -> Option<Vec<u8>> {
     let mut dec = minicbor::Decoder::new(data);
     let _map = dec.map().ok()??;
-    let _k0 = dec.u32().ok()?; let _tag = dec.u32().ok()?;
-    let _k1 = dec.u32().ok()?; let bus_idx = dec.u8().ok()?;
-    let _k2 = dec.u32().ok()?; let addr = dec.u8().ok()?;
-    let _k3 = dec.u32().ok()?; let name = dec.str().ok()?;
-    let _k4 = dec.u32().ok()?; let registers = dec.bytes().ok()?;
+    let _k0 = dec.u32().ok()?;
+    let _tag = dec.u32().ok()?;
+    let _k1 = dec.u32().ok()?;
+    let bus_idx = dec.u8().ok()?;
+    let _k2 = dec.u32().ok()?;
+    let addr = dec.u8().ok()?;
+    let _k3 = dec.u32().ok()?;
+    let name = dec.str().ok()?;
+    let _k4 = dec.u32().ok()?;
+    let registers = dec.bytes().ok()?;
     let address = Address::new(addr)?;
     let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
     let bus = st.i2c_buses.get_mut(bus_idx as usize)?;
@@ -305,9 +310,12 @@ fn handle_add_device(state: &SharedState, data: &[u8]) -> Option<Vec<u8>> {
 fn handle_remove_device(state: &SharedState, data: &[u8]) -> Option<Vec<u8>> {
     let mut dec = minicbor::Decoder::new(data);
     let _map = dec.map().ok()??;
-    let _k0 = dec.u32().ok()?; let _tag = dec.u32().ok()?;
-    let _k1 = dec.u32().ok()?; let bus_idx = dec.u8().ok()?;
-    let _k2 = dec.u32().ok()?; let addr = dec.u8().ok()?;
+    let _k0 = dec.u32().ok()?;
+    let _tag = dec.u32().ok()?;
+    let _k1 = dec.u32().ok()?;
+    let bus_idx = dec.u8().ok()?;
+    let _k2 = dec.u32().ok()?;
+    let addr = dec.u8().ok()?;
     let address = Address::new(addr)?;
     let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
     let bus = st.i2c_buses.get_mut(bus_idx as usize)?;
@@ -320,11 +328,16 @@ fn handle_remove_device(state: &SharedState, data: &[u8]) -> Option<Vec<u8>> {
 fn handle_i2c_read(state: &SharedState, data: &[u8]) -> Option<Vec<u8>> {
     let mut dec = minicbor::Decoder::new(data);
     let _map = dec.map().ok()??;
-    let _k0 = dec.u32().ok()?; let _tag = dec.u32().ok()?;
-    let _k1 = dec.u32().ok()?; let bus_idx = dec.u8().ok()?;
-    let _k2 = dec.u32().ok()?; let addr = dec.u8().ok()?;
-    let _k3 = dec.u32().ok()?; let reg = dec.u8().ok()?;
-    let _k4 = dec.u32().ok()?; let len = dec.u8().ok()?;
+    let _k0 = dec.u32().ok()?;
+    let _tag = dec.u32().ok()?;
+    let _k1 = dec.u32().ok()?;
+    let bus_idx = dec.u8().ok()?;
+    let _k2 = dec.u32().ok()?;
+    let addr = dec.u8().ok()?;
+    let _k3 = dec.u32().ok()?;
+    let reg = dec.u8().ok()?;
+    let _k4 = dec.u32().ok()?;
+    let len = dec.u8().ok()?;
     let read_len = (len as usize).min(128);
     let mut read_buf = vec![0u8; read_len];
     let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
@@ -345,10 +358,14 @@ fn handle_i2c_read(state: &SharedState, data: &[u8]) -> Option<Vec<u8>> {
 fn handle_i2c_write(state: &SharedState, data: &[u8]) -> Option<Vec<u8>> {
     let mut dec = minicbor::Decoder::new(data);
     let _map = dec.map().ok()??;
-    let _k0 = dec.u32().ok()?; let _tag = dec.u32().ok()?;
-    let _k1 = dec.u32().ok()?; let bus_idx = dec.u8().ok()?;
-    let _k2 = dec.u32().ok()?; let addr = dec.u8().ok()?;
-    let _k3 = dec.u32().ok()?; let write_data = dec.bytes().ok()?;
+    let _k0 = dec.u32().ok()?;
+    let _tag = dec.u32().ok()?;
+    let _k1 = dec.u32().ok()?;
+    let bus_idx = dec.u8().ok()?;
+    let _k2 = dec.u32().ok()?;
+    let addr = dec.u8().ok()?;
+    let _k3 = dec.u32().ok()?;
+    let write_data = dec.bytes().ok()?;
     let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
     let bus = st.i2c_buses.get_mut(bus_idx as usize)?;
     match bus.write(addr, write_data) {
@@ -363,8 +380,14 @@ fn handle_telemetry(state: &SharedState, tag: u32, data: &[u8]) {
 
     let (actual_tag, seq, ts) = if tag == 56 {
         let s = payload.get("seq").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-        let t = payload.get("timestampMs").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        let inner_tag = payload.get("innerTag").and_then(|v| v.as_u64()).unwrap_or(56) as u8;
+        let t = payload
+            .get("timestampMs")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let inner_tag = payload
+            .get("innerTag")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(56) as u8;
         (inner_tag, s, t)
     } else {
         let seq = st.telemetry_seq;
@@ -374,12 +397,23 @@ fn handle_telemetry(state: &SharedState, tag: u32, data: &[u8]) {
 
     // Log debug trace events (tag 57) to server console
     if actual_tag == 57 {
-        let cat = payload.get("category").and_then(|v| v.as_str()).unwrap_or("?");
-        let data = payload.get("data").cloned().unwrap_or(serde_json::Value::Null);
+        let cat = payload
+            .get("category")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let data = payload
+            .get("data")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         eprintln!("[debug-trace] {cat}: {data}");
     }
 
-    let entry = TelemetryEntry { seq, timestamp_ms: ts, tag: actual_tag, payload };
+    let entry = TelemetryEntry {
+        seq,
+        timestamp_ms: ts,
+        tag: actual_tag,
+        payload,
+    };
     if st.telemetry_log.len() >= 256 {
         st.telemetry_log.pop_front();
     }
@@ -423,7 +457,9 @@ fn parse_telemetry_payload(tag: u32, data: &[u8]) -> serde_json::Value {
             _ => "unknown",
         };
         match dec.datatype() {
-            Ok(minicbor::data::Type::U8 | minicbor::data::Type::U16 | minicbor::data::Type::U32) => {
+            Ok(
+                minicbor::data::Type::U8 | minicbor::data::Type::U16 | minicbor::data::Type::U32,
+            ) => {
                 if let Ok(v) = dec.u32() {
                     map.insert(field_name.to_string(), serde_json::json!(v));
                 }
@@ -456,11 +492,7 @@ async fn get_telemetry(
 ) -> Json<serde_json::Value> {
     let s = state.lock().unwrap_or_else(|e| e.into_inner());
     let since = query.since.unwrap_or(0);
-    let entries: Vec<&TelemetryEntry> = s
-        .telemetry_log
-        .iter()
-        .filter(|e| e.seq >= since)
-        .collect();
+    let entries: Vec<&TelemetryEntry> = s.telemetry_log.iter().filter(|e| e.seq >= since).collect();
     Json(serde_json::json!(entries))
 }
 
@@ -661,12 +693,7 @@ mod tests {
             .expect("request");
         let resp = router.oneshot(req).await.expect("failed");
         assert_eq!(resp.status(), 200);
-        let bytes = resp
-            .into_body()
-            .collect()
-            .await
-            .expect("body")
-            .to_bytes();
+        let bytes = resp.into_body().collect().await.expect("body").to_bytes();
         assert_eq!(&bytes[..], b"hello world");
     }
 
@@ -758,7 +785,8 @@ mod tests {
         // Decode payload
         let mut dec = minicbor::Decoder::new(&r_resp);
         let _ = dec.map().unwrap();
-        let _ = dec.u32().unwrap(); let _ = dec.u32().unwrap();
+        let _ = dec.u32().unwrap();
+        let _ = dec.u32().unwrap();
         let _ = dec.u32().unwrap();
         let payload = dec.bytes().unwrap();
         assert_eq!(payload, &[0xAB, 0xCD]);
@@ -1017,7 +1045,11 @@ mod tests {
     }
 
     fn encode_telemetry_edge_added(
-        from_block: u32, from_port: u32, to_block: u32, to_port: u32, channel_id: u32,
+        from_block: u32,
+        from_port: u32,
+        to_block: u32,
+        to_port: u32,
+        channel_id: u32,
     ) -> Vec<u8> {
         let mut buf = Vec::new();
         let mut enc = minicbor::Encoder::new(&mut buf);
@@ -1350,7 +1382,11 @@ mod tests {
             .expect("request");
         let ps_body = json_body(router.oneshot(ps).await.expect("pubsub")).await;
         // Debug mode adds _dbg/N entries for each value
-        assert!(ps_body.as_object().unwrap().keys().any(|k| k.starts_with("_dbg/")));
+        assert!(ps_body
+            .as_object()
+            .unwrap()
+            .keys()
+            .any(|k| k.starts_with("_dbg/")));
     }
 
     #[test]
@@ -1379,10 +1415,10 @@ mod tests {
         let mut enc = minicbor::Encoder::new(&mut buf);
         enc.map(4).unwrap();
         enc.u32(0).unwrap().u32(56).unwrap();
-        enc.u32(1).unwrap().u32(99).unwrap();  // seq
+        enc.u32(1).unwrap().u32(99).unwrap(); // seq
         enc.u32(2).unwrap().f64(500.0).unwrap(); // timestampMs
-        // Use key 3 mapped to "inner" but store the inner tag as u32 so
-        // handle_telemetry sees "innerTag"
+                                                 // Use key 3 mapped to "inner" but store the inner tag as u32 so
+                                                 // handle_telemetry sees "innerTag"
         enc.u32(3).unwrap().u32(51).unwrap();
         let resp = dispatch_cbor(&state, &buf);
         assert!(resp.is_none());

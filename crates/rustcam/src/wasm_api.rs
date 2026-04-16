@@ -69,8 +69,11 @@ pub fn process_stl_progress(
         "zigzag" => {
             report_progress(on_progress, 0, 1);
             let strategy = toolpath::ZigzagSurfaceStrategy;
-            let surface_params =
-                toolpath::SurfaceParams::new(&mesh, cut_params, scan_direction_from_config(&config));
+            let surface_params = toolpath::SurfaceParams::new(
+                &mesh,
+                cut_params,
+                scan_direction_from_config(&config),
+            );
             let result = strategy.generate_surface(&surface_params);
             report_progress(on_progress, 1, 1);
             result

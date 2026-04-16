@@ -93,8 +93,11 @@ pub fn find_parallel_groups(
             .cloned()
             .collect();
 
-        let sorted_blocks =
-            crate::topo::topological_sort(&component_block_ids, &component_channels, &HashSet::new())?;
+        let sorted_blocks = crate::topo::topological_sort(
+            &component_block_ids,
+            &component_channels,
+            &HashSet::new(),
+        )?;
 
         groups.push(ParallelGroup {
             blocks: sorted_blocks,

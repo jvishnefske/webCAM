@@ -206,7 +206,11 @@ impl<const B: usize, const S: usize> CompiledGraph<B, S> {
 
             // Read inputs
             let mut inputs = [0.0f64; MAX_INPUTS];
-            for (i, inp) in inputs.iter_mut().enumerate().take(block.input_count as usize) {
+            for (i, inp) in inputs
+                .iter_mut()
+                .enumerate()
+                .take(block.input_count as usize)
+            {
                 *inp = self.state[block.input_slots[i] as usize];
             }
 
@@ -360,9 +364,7 @@ pub fn compile<const B: usize, const S: usize>(
         // Constants and source blocks (no inputs) subscribe to clock (slot 0)
         // so they fire on every tick.
         if matches!(opcode, OpCode::Constant(_))
-            || (input_count == 0
-                && output_count > 0
-                && !matches!(opcode, OpCode::Nop))
+            || (input_count == 0 && output_count > 0 && !matches!(opcode, OpCode::Nop))
         {
             let cnt = graph.sub_counts[0] as usize;
             if cnt < MAX_SUBS_PER_SLOT {
@@ -880,10 +882,7 @@ mod tests {
     fn test_ir_op_to_opcode_channel_read() {
         let mut attrs = HashMap::new();
         attrs.insert("topic".to_string(), Attr::I64(42));
-        let opcode = ir_op_to_opcode(
-            &IrOpKind::Dataflow(DataflowOp::ChannelRead),
-            &attrs,
-        );
+        let opcode = ir_op_to_opcode(&IrOpKind::Dataflow(DataflowOp::ChannelRead), &attrs);
         assert_eq!(opcode, OpCode::Subscribe(42));
     }
 
@@ -891,10 +890,7 @@ mod tests {
     fn test_ir_op_to_opcode_channel_write() {
         let mut attrs = HashMap::new();
         attrs.insert("topic".to_string(), Attr::I64(7));
-        let opcode = ir_op_to_opcode(
-            &IrOpKind::Dataflow(DataflowOp::ChannelWrite),
-            &attrs,
-        );
+        let opcode = ir_op_to_opcode(&IrOpKind::Dataflow(DataflowOp::ChannelWrite), &attrs);
         assert_eq!(opcode, OpCode::Publish(7));
     }
 
@@ -902,10 +898,7 @@ mod tests {
     #[test]
     fn test_ir_op_to_opcode_nop_fallback() {
         let attrs = HashMap::new();
-        let opcode = ir_op_to_opcode(
-            &IrOpKind::Custom("unknown.op".to_string()),
-            &attrs,
-        );
+        let opcode = ir_op_to_opcode(&IrOpKind::Custom("unknown.op".to_string()), &attrs);
         assert_eq!(opcode, OpCode::Nop);
     }
 
@@ -928,7 +921,9 @@ mod tests {
     fn test_execute_op_gpio_read() {
         struct MockGpio;
         impl HwBridge for MockGpio {
-            fn gpio_read(&self, _pin: u8) -> f64 { 1.0 }
+            fn gpio_read(&self, _pin: u8) -> f64 {
+                1.0
+            }
         }
         let mut b = IrBuilder::new();
         b.begin_func("tick", &[], &[]);
@@ -942,7 +937,10 @@ mod tests {
     #[test]
     fn test_execute_op_gpio_write() {
         use std::cell::Cell;
-        struct MockGpioW { pin: Cell<u8>, val: Cell<f64> }
+        struct MockGpioW {
+            pin: Cell<u8>,
+            val: Cell<f64>,
+        }
         impl HwBridge for MockGpioW {
             fn gpio_write(&mut self, pin: u8, value: f64) {
                 self.pin.set(pin);
@@ -955,7 +953,10 @@ mod tests {
         b.gpio_write(3, c);
         let module = b.build();
         let mut graph = compile::<TB, TS>(&module).unwrap();
-        let mut hw = MockGpioW { pin: Cell::new(255), val: Cell::new(-1.0) };
+        let mut hw = MockGpioW {
+            pin: Cell::new(255),
+            val: Cell::new(-1.0),
+        };
         graph.tick(1.0, &mut hw);
         assert_eq!(hw.pin.get(), 3);
         assert_eq!(hw.val.get(), 1.0);
@@ -965,7 +966,9 @@ mod tests {
     fn test_execute_op_uart_rx() {
         struct MockUartRx;
         impl HwBridge for MockUartRx {
-            fn uart_read(&self, _port: u8) -> f64 { 42.0 }
+            fn uart_read(&self, _port: u8) -> f64 {
+                42.0
+            }
         }
         let mut b = IrBuilder::new();
         b.begin_func("tick", &[], &[]);
@@ -979,7 +982,10 @@ mod tests {
     #[test]
     fn test_execute_op_uart_tx() {
         use std::cell::Cell;
-        struct MockUartTx { port: Cell<u8>, val: Cell<f64> }
+        struct MockUartTx {
+            port: Cell<u8>,
+            val: Cell<f64>,
+        }
         impl HwBridge for MockUartTx {
             fn uart_write(&mut self, port: u8, value: f64) {
                 self.port.set(port);
@@ -992,7 +998,10 @@ mod tests {
         b.uart_tx(2, c);
         let module = b.build();
         let mut graph = compile::<TB, TS>(&module).unwrap();
-        let mut hw = MockUartTx { port: Cell::new(0), val: Cell::new(0.0) };
+        let mut hw = MockUartTx {
+            port: Cell::new(0),
+            val: Cell::new(0.0),
+        };
         graph.tick(1.0, &mut hw);
         assert_eq!(hw.port.get(), 2);
         assert_eq!(hw.val.get(), 99.0);
@@ -1002,7 +1011,9 @@ mod tests {
     fn test_execute_op_encoder_read() {
         struct MockEncoder;
         impl HwBridge for MockEncoder {
-            fn encoder_read(&self, _ch: u8) -> f64 { 1024.0 }
+            fn encoder_read(&self, _ch: u8) -> f64 {
+                1024.0
+            }
         }
         let mut b = IrBuilder::new();
         b.begin_func("tick", &[], &[]);
@@ -1017,7 +1028,9 @@ mod tests {
     fn test_execute_op_subscribe() {
         struct MockSub;
         impl HwBridge for MockSub {
-            fn subscribe(&self, _topic: u16) -> f64 { 42.0 }
+            fn subscribe(&self, _topic: u16) -> f64 {
+                42.0
+            }
         }
         let mut b = IrBuilder::new();
         b.begin_func("tick", &[], &[]);
@@ -1032,7 +1045,9 @@ mod tests {
     #[test]
     fn test_execute_op_publish() {
         use std::cell::Cell;
-        struct MockPub { val: Cell<f64> }
+        struct MockPub {
+            val: Cell<f64>,
+        }
         impl HwBridge for MockPub {
             fn publish(&mut self, _topic: u16, value: f64) {
                 self.val.set(value);
@@ -1044,7 +1059,9 @@ mod tests {
         b.publish("output", c);
         let module = b.build();
         let mut graph = compile::<TB, TS>(&module).unwrap();
-        let mut hw = MockPub { val: Cell::new(0.0) };
+        let mut hw = MockPub {
+            val: Cell::new(0.0),
+        };
         graph.tick(1.0, &mut hw);
         assert!((hw.val.get() - 7.7).abs() < f64::EPSILON);
     }

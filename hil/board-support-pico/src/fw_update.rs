@@ -45,7 +45,9 @@ impl DfuFlashWriter for PicoDfuWriter {
         let mut aligned = AlignedBuffer([0u8; 4]);
         let config = FirmwareUpdaterConfig::from_linkerfile_blocking(self.flash, self.flash);
         let mut updater = BlockingFirmwareUpdater::new(config, aligned.as_mut());
-        let _ = updater.prepare_update().map_err(|_| DfuError::EraseFailed)?;
+        let _ = updater
+            .prepare_update()
+            .map_err(|_| DfuError::EraseFailed)?;
         Ok(())
     }
 

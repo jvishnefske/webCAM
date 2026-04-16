@@ -245,8 +245,7 @@ pub fn default_config(machine_type: &str) -> String {
 
 /// Process an STL file (testable helper).
 pub fn process_stl_impl(data: &[u8], config_json: &str) -> Result<String, String> {
-    let config: CamConfig =
-        serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+    let config: CamConfig = serde_json::from_str(config_json).map_err(|e| e.to_string())?;
 
     let profile = profile_from_config(&config);
     profile.validate_strategy(&config.strategy)?;
@@ -343,8 +342,7 @@ pub fn process_stl_impl(data: &[u8], config_json: &str) -> Result<String, String
 
 /// Process an SVG string (testable helper).
 pub fn process_svg_impl(svg_text: &str, config_json: &str) -> Result<String, String> {
-    let config: CamConfig =
-        serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+    let config: CamConfig = serde_json::from_str(config_json).map_err(|e| e.to_string())?;
 
     let profile = profile_from_config(&config);
     profile.validate_strategy(&config.strategy)?;
@@ -406,8 +404,7 @@ pub fn process_svg_impl(svg_text: &str, config_json: &str) -> Result<String, Str
 
 /// STL preview (testable helper).
 pub fn preview_stl_impl(data: &[u8], config_json: &str) -> Result<String, String> {
-    let config: CamConfig =
-        serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+    let config: CamConfig = serde_json::from_str(config_json).map_err(|e| e.to_string())?;
     let mesh = stl::parse_stl(data)?;
     let toolpaths = build_toolpaths_stl(&mesh, &config);
 
@@ -440,8 +437,7 @@ pub fn preview_svg_impl(svg_text: &str) -> Result<String, String> {
 
 /// STL sim moves (testable helper).
 pub fn sim_moves_stl_impl(data: &[u8], config_json: &str) -> Result<String, String> {
-    let config: CamConfig =
-        serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+    let config: CamConfig = serde_json::from_str(config_json).map_err(|e| e.to_string())?;
     let mesh = stl::parse_stl(data)?;
     let toolpaths = build_toolpaths_stl(&mesh, &config);
     flatten_moves_impl(&toolpaths)
@@ -449,8 +445,7 @@ pub fn sim_moves_stl_impl(data: &[u8], config_json: &str) -> Result<String, Stri
 
 /// SVG sim moves (testable helper).
 pub fn sim_moves_svg_impl(svg_text: &str, config_json: &str) -> Result<String, String> {
-    let config: CamConfig =
-        serde_json::from_str(config_json).map_err(|e| e.to_string())?;
+    let config: CamConfig = serde_json::from_str(config_json).map_err(|e| e.to_string())?;
     let polylines = svg::parse_svg(svg_text)?;
     let toolpaths = build_toolpaths_svg(&polylines, &config);
     flatten_moves_impl(&toolpaths)
@@ -596,8 +591,7 @@ pub fn sketch_add_constraint_impl(
     value: f64,
     value2: f64,
 ) -> Result<String, String> {
-    let ids: Vec<u32> =
-        serde_json::from_str(ids_json).map_err(|e| e.to_string())?;
+    let ids: Vec<u32> = serde_json::from_str(ids_json).map_err(|e| e.to_string())?;
 
     let constraint = match kind {
         "coincident" if ids.len() >= 2 => sketch_actor::Constraint::Coincident(ids[0], ids[1]),
@@ -1210,7 +1204,10 @@ endsolid test"
     fn test_process_stl_binary_stl_default_strategy() {
         let stl_data = minimal_binary_stl();
         let result = process_stl_impl(&stl_data, "{}");
-        assert!(result.is_ok(), "binary STL with default config should succeed");
+        assert!(
+            result.is_ok(),
+            "binary STL with default config should succeed"
+        );
         let gcode = result.unwrap();
         assert!(gcode.contains("G21"), "should contain metric unit mode");
         assert!(gcode.contains("G90"), "should contain absolute positioning");
@@ -1225,7 +1222,10 @@ endsolid test"
         let result = process_stl_impl(minimal_ascii_stl(), config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
-        assert!(gcode.contains("G0") || gcode.contains("G1"), "should have motion commands");
+        assert!(
+            gcode.contains("G0") || gcode.contains("G1"),
+            "should have motion commands"
+        );
     }
 
     #[test]
@@ -1270,7 +1270,10 @@ endsolid test"
         let result = process_stl_impl(minimal_ascii_stl(), config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
-        assert!(gcode.contains("M3 S8000"), "should use custom spindle speed");
+        assert!(
+            gcode.contains("M3 S8000"),
+            "should use custom spindle speed"
+        );
         assert!(gcode.contains("Z10.000"), "should use custom safe Z");
     }
 
@@ -1282,8 +1285,14 @@ endsolid test"
         let result = process_svg_impl(svg_with_path(), config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
-        assert!(gcode.contains("G1"), "contour should produce G1 cutting moves");
-        assert!(gcode.contains("M3 S12000"), "CNC mill should turn spindle on");
+        assert!(
+            gcode.contains("G1"),
+            "contour should produce G1 cutting moves"
+        );
+        assert!(
+            gcode.contains("M3 S12000"),
+            "CNC mill should turn spindle on"
+        );
     }
 
     #[test]
@@ -1310,14 +1319,19 @@ endsolid test"
         let result = process_svg_impl(svg_with_path(), config_json);
         assert!(result.is_ok());
         let gcode = result.unwrap();
-        assert!(gcode.contains("M4 S0"), "should have dynamic laser mode preamble");
+        assert!(
+            gcode.contains("M4 S0"),
+            "should have dynamic laser mode preamble"
+        );
         assert!(gcode.contains("S75"), "should set laser power to 75");
         assert!(gcode.contains("M5"), "should turn laser off");
         assert!(gcode.contains("M2"), "should end program");
         // Laser cutter should NOT have spindle commands
-        assert!(!gcode.contains("M3 S12000"), "laser should not use M3 spindle on");
+        assert!(
+            !gcode.contains("M3 S12000"),
+            "laser should not use M3 spindle on"
+        );
     }
-
 
     #[test]
     fn test_process_svg_step_down_produces_multiple_layers() {
@@ -1365,7 +1379,6 @@ endsolid test"
         }
     }
 
-
     // ── preview_svg: JSON structure validation ──────────────────────
 
     #[test]
@@ -1382,7 +1395,6 @@ endsolid test"
             }
         }
     }
-
 
     #[test]
     fn test_preview_svg_rect_coordinates_in_range() {
@@ -1415,7 +1427,10 @@ endsolid test"
         let profiles: Vec<MachineProfile> = serde_json::from_str(&json).unwrap();
         let names: Vec<&str> = profiles.iter().map(|p| p.name.as_str()).collect();
         assert!(names.contains(&"CNC Mill"), "should contain CNC Mill");
-        assert!(names.contains(&"Laser Cutter"), "should contain Laser Cutter");
+        assert!(
+            names.contains(&"Laser Cutter"),
+            "should contain Laser Cutter"
+        );
     }
 
     #[test]
@@ -1505,7 +1520,6 @@ endsolid test"
             assert!(mv["rapid"].is_boolean());
         }
     }
-
 
     // ── End-to-end pipeline: STL -> G-code content checks ───────────
 
@@ -1597,7 +1611,6 @@ endsolid test"
         let result = process_stl_impl(&stl_data, r#"{"strategy": "perimeter"}"#);
         assert!(result.is_ok());
     }
-
 
     // ── CamConfig edge cases ────────────────────────────────────────
 
@@ -1856,7 +1869,10 @@ endsolid test"
         assert!(result.is_ok());
         let json = result.unwrap();
         let moves: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
-        assert!(!moves.is_empty(), "should have moves from non-empty toolpaths");
+        assert!(
+            !moves.is_empty(),
+            "should have moves from non-empty toolpaths"
+        );
     }
 
     #[test]
@@ -2125,7 +2141,8 @@ endsolid test"
         sketch_reset();
         let p1: serde_json::Value = serde_json::from_str(&sketch_add_point(0.0, 0.0)).unwrap();
         let id1 = p1["id"].as_u64().unwrap() as u32;
-        let result = sketch_add_constraint_impl("unknown_constraint", &format!("[{id1}]"), 0.0, 0.0);
+        let result =
+            sketch_add_constraint_impl("unknown_constraint", &format!("[{id1}]"), 0.0, 0.0);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown constraint"));
     }

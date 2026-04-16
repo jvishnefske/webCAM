@@ -28,13 +28,14 @@ pub mod runtime;
 
 use lower::GraphSnapshot;
 
-pub use runtime::{
-    BlockDesc, CompiledGraph, HwBridge, NullHw, OpCode, compile,
-    MAX_INPUTS, MAX_OUTPUTS, NO_SLOT,
-};
-pub use ir::{IrModule, IrBuilder, ValueId, IrType, Attr, IrOp, IrFunc, IrOpKind, ArithOp, FuncOp, DataflowOp};
-pub use printer::print_mlir;
 pub use emit_rust::emit_rust;
+pub use ir::{
+    ArithOp, Attr, DataflowOp, FuncOp, IrBuilder, IrFunc, IrModule, IrOp, IrOpKind, IrType, ValueId,
+};
+pub use printer::print_mlir;
+pub use runtime::{
+    compile, BlockDesc, CompiledGraph, HwBridge, NullHw, OpCode, MAX_INPUTS, MAX_OUTPUTS, NO_SLOT,
+};
 
 /// Lower a `GraphSnapshot` (deserialized from JSON) to textual `.mlir`.
 ///
@@ -67,9 +68,7 @@ pub fn compile_to_c(snap: &GraphSnapshot) -> Result<pipeline::PipelineOutput, St
 ///
 /// Lowers the snapshot to a typed IR, then compiles it into an event-driven
 /// graph with default sizes (256 blocks, 1024 slots).
-pub fn build_runtime_graph(
-    json: &str,
-) -> Result<CompiledGraph<256, 1024>, String> {
+pub fn build_runtime_graph(json: &str) -> Result<CompiledGraph<256, 1024>, String> {
     let snap: lower::GraphSnapshot =
         serde_json::from_str(json).map_err(|e| format!("JSON parse error: {e}"))?;
     let ir = lower::lower_graph_ir(&snap)?;

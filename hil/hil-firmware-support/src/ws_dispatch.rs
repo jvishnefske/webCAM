@@ -47,8 +47,7 @@ pub trait I2cBusSet {
     ///
     /// Returns [`BusSetError::InvalidBus`] if the bus index is out of range,
     /// or [`BusSetError::TransactionFailed`] if the I2C transaction fails.
-    fn i2c_read(&mut self, bus: u8, addr: u8, reg: u8, buf: &mut [u8])
-        -> Result<(), BusSetError>;
+    fn i2c_read(&mut self, bus: u8, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), BusSetError>;
 
     /// Writes bytes to an I2C device on the specified bus.
     ///
@@ -243,7 +242,10 @@ pub fn encode_tag_ok(buf: &mut [u8], tag: u32) -> Result<usize, EncodeError> {
 /// # Errors
 ///
 /// Returns [`EncodeError::BufferTooSmall`] if the buffer is too small for the encoded response.
-pub fn encode_bus_list(buf: &mut [u8], inventory: &[(u8, &[(u8, &str)])]) -> Result<usize, EncodeError> {
+pub fn encode_bus_list(
+    buf: &mut [u8],
+    inventory: &[(u8, &[(u8, &str)])],
+) -> Result<usize, EncodeError> {
     let buf_len = buf.len();
     let mut writer: &mut [u8] = buf;
     let mut enc = minicbor::Encoder::new(&mut writer);
@@ -254,7 +256,8 @@ pub fn encode_bus_list(buf: &mut [u8], inventory: &[(u8, &[(u8, &str)])]) -> Res
     enc.u32(3).map_err(|_| EncodeError::BufferTooSmall)?;
     // Key 1: array of bus entries
     enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
-    enc.array(inventory.len() as u64).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.array(inventory.len() as u64)
+        .map_err(|_| EncodeError::BufferTooSmall)?;
 
     let mut bus_i = 0;
     while bus_i < inventory.len() {
@@ -265,7 +268,8 @@ pub fn encode_bus_list(buf: &mut [u8], inventory: &[(u8, &[(u8, &str)])]) -> Res
         enc.u8(bus_idx).map_err(|_| EncodeError::BufferTooSmall)?;
         // Key 1: device array
         enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
-        enc.array(devices.len() as u64).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.array(devices.len() as u64)
+            .map_err(|_| EncodeError::BufferTooSmall)?;
 
         let mut dev_i = 0;
         while dev_i < devices.len() {
@@ -303,7 +307,8 @@ fn encode_bus_list_dynamic<B: I2cBusSet>(buses: &B, buf: &mut [u8]) -> Result<us
     enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
     enc.u32(3).map_err(|_| EncodeError::BufferTooSmall)?;
     enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
-    enc.array(count as u64).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.array(count as u64)
+        .map_err(|_| EncodeError::BufferTooSmall)?;
 
     let mut bus_i = 0u8;
     while bus_i < count {
@@ -312,7 +317,8 @@ fn encode_bus_list_dynamic<B: I2cBusSet>(buses: &B, buf: &mut [u8]) -> Result<us
         enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
         enc.u8(bus_i).map_err(|_| EncodeError::BufferTooSmall)?;
         enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
-        enc.array(dev_count as u64).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.array(dev_count as u64)
+            .map_err(|_| EncodeError::BufferTooSmall)?;
 
         let mut dev_i = 0u8;
         while dev_i < dev_count {
@@ -352,7 +358,8 @@ fn encode_config<B: I2cBusSet>(buses: &B, buf: &mut [u8]) -> Result<usize, Encod
     enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
     enc.u32(35).map_err(|_| EncodeError::BufferTooSmall)?;
     enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
-    enc.array(count as u64).map_err(|_| EncodeError::BufferTooSmall)?;
+    enc.array(count as u64)
+        .map_err(|_| EncodeError::BufferTooSmall)?;
 
     let mut bus_i = 0u8;
     while bus_i < count {
@@ -361,7 +368,8 @@ fn encode_config<B: I2cBusSet>(buses: &B, buf: &mut [u8]) -> Result<usize, Encod
         enc.u32(0).map_err(|_| EncodeError::BufferTooSmall)?;
         enc.u8(bus_i).map_err(|_| EncodeError::BufferTooSmall)?;
         enc.u32(1).map_err(|_| EncodeError::BufferTooSmall)?;
-        enc.array(dev_count as u64).map_err(|_| EncodeError::BufferTooSmall)?;
+        enc.array(dev_count as u64)
+            .map_err(|_| EncodeError::BufferTooSmall)?;
 
         let mut dev_i = 0u8;
         while dev_i < dev_count {
@@ -536,7 +544,13 @@ mod tests {
     }
 
     impl I2cBusSet for MockBusSet {
-        fn i2c_read(&mut self, _bus: u8, _addr: u8, _reg: u8, buf: &mut [u8]) -> Result<(), BusSetError> {
+        fn i2c_read(
+            &mut self,
+            _bus: u8,
+            _addr: u8,
+            _reg: u8,
+            buf: &mut [u8],
+        ) -> Result<(), BusSetError> {
             if self.fail_reads {
                 return Err(BusSetError::TransactionFailed);
             }

@@ -33,9 +33,7 @@
 //! Input ports: `state_in` (Float), then guard ports (`guard_0`, `guard_1`, ..., Float), then one per input_topic (Message).
 //! Output ports: `next_state` (Float), `active_<name>` per state (Float), then one per output_topic (Message).
 
-use module_traits::{
-    Codegen, MessageData, MessageSchema, Module, PortDef, PortKind, Tick, Value,
-};
+use module_traits::{Codegen, MessageData, MessageSchema, Module, PortDef, PortKind, Tick, Value};
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -143,7 +141,10 @@ pub struct TransitionAction {
 #[cfg_attr(feature = "tsify", tsify(into_wasm_abi, from_wasm_abi))]
 pub struct TopicBinding {
     pub topic: String,
-    #[cfg_attr(feature = "tsify", tsify(type = "{ name: string; fields: Array<{ name: string; field_type: string }> }"))]
+    #[cfg_attr(
+        feature = "tsify",
+        tsify(type = "{ name: string; fields: Array<{ name: string; field_type: string }> }")
+    )]
     pub schema: MessageSchema,
 }
 
@@ -188,12 +189,14 @@ impl StateMachineBlock {
     fn check_guard(&self, guard: &TransitionGuard, inputs: &[Option<&Value>]) -> bool {
         match guard {
             TransitionGuard::Unconditional => true,
-            TransitionGuard::GuardPort { port } => inputs
-                .get(*port)
-                .and_then(|v| v.as_ref())
-                .and_then(|v| v.as_float())
-                .unwrap_or(0.0)
-                > 0.5,
+            TransitionGuard::GuardPort { port } => {
+                inputs
+                    .get(*port)
+                    .and_then(|v| v.as_ref())
+                    .and_then(|v| v.as_float())
+                    .unwrap_or(0.0)
+                    > 0.5
+            }
             TransitionGuard::Topic { topic, condition } => {
                 let idx = match self.topic_input_index(topic) {
                     Some(i) => i,
@@ -289,11 +292,7 @@ impl Tick for StateMachineBlock {
         let current_name = self.config.states[current_state].clone();
 
         // Guard and topic inputs start at inputs[1..].
-        let guard_and_topic_inputs = if inputs.len() > 1 {
-            &inputs[1..]
-        } else {
-            &[]
-        };
+        let guard_and_topic_inputs = if inputs.len() > 1 { &inputs[1..] } else { &[] };
 
         // Evaluate transitions from current state (first match wins).
         let mut next_state = current_state;
@@ -318,11 +317,7 @@ impl Tick for StateMachineBlock {
         outputs.push(Some(Value::Float(next_state as f64)));
 
         for i in 0..n_states {
-            outputs.push(Some(Value::Float(if i == next_state {
-                1.0
-            } else {
-                0.0
-            })));
+            outputs.push(Some(Value::Float(if i == next_state { 1.0 } else { 0.0 })));
         }
 
         // For each output topic, emit a Message if an action fired for that topic.
@@ -387,10 +382,7 @@ impl Codegen for StateMachineBlock {
 
             let mut first = true;
             for t in &transitions {
-                let target_idx = states
-                    .iter()
-                    .position(|s| s == &t.to)
-                    .unwrap_or(si);
+                let target_idx = states.iter().position(|s| s == &t.to).unwrap_or(si);
 
                 match &t.guard {
                     TransitionGuard::GuardPort { port } => {
@@ -428,20 +420,20 @@ impl Codegen for StateMachineBlock {
                     }
                     TransitionGuard::Unconditional => {
                         if first {
-                            code.push_str(&format!(
-                                "            {target_idx}\n"
-                            ));
+                            code.push_str(&format!("            {target_idx}\n"));
                         } else {
-                            code.push_str(&format!(
-                                "            else {{ {target_idx} }}\n"
-                            ));
+                            code.push_str(&format!("            else {{ {target_idx} }}\n"));
                         }
                         first = false;
                     }
                 }
             }
 
-            if transitions.is_empty() || transitions.iter().all(|t| !matches!(t.guard, TransitionGuard::Unconditional)) {
+            if transitions.is_empty()
+                || transitions
+                    .iter()
+                    .all(|t| !matches!(t.guard, TransitionGuard::Unconditional))
+            {
                 if !first {
                     code.push_str(&format!("            else {{ {si} }}\n"));
                 } else {
@@ -457,9 +449,7 @@ impl Codegen for StateMachineBlock {
         // Emit active flags
         let mut tuple_parts = vec!["next_state as f64".to_string()];
         for (i, _) in states.iter().enumerate() {
-            tuple_parts.push(format!(
-                "if next_state == {i} {{ 1.0 }} else {{ 0.0 }}"
-            ));
+            tuple_parts.push(format!("if next_state == {i} {{ 1.0 }} else {{ 0.0 }}"));
         }
         code.push_str(&format!("    ({})\n", tuple_parts.join(", ")));
         code.push_str("}\n");
@@ -474,8 +464,7 @@ pub(crate) fn register(reg: &mut Vec<crate::registry::BlockRegistration>) {
         display_name: "State Machine",
         category: "Logic",
         create_from_json: |json| {
-            let cfg: StateMachineConfig =
-                serde_json::from_str(json).map_err(|e| e.to_string())?;
+            let cfg: StateMachineConfig = serde_json::from_str(json).map_err(|e| e.to_string())?;
             Ok(Box::new(StateMachineBlock::from_config(cfg)))
         },
     });
@@ -573,7 +562,7 @@ mod tests {
     fn legacy_initial_state() {
         let mut sm = make_legacy_sm();
         let state_in = Value::Float(0.0); // idle
-        // inputs: [state_in, guard_0, guard_1]
+                                          // inputs: [state_in, guard_0, guard_1]
         let result = sm.tick(&[Some(&state_in)], 0.01);
         // next_state=0 (idle), active_idle=1, active_running=0, active_error=0
         assert_eq!(result[0], Some(Value::Float(0.0)));

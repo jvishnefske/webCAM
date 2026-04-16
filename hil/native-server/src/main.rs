@@ -62,7 +62,9 @@ fn open_browser(url: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd").args(["/C", "start", url]).spawn()?;
+        std::process::Command::new("cmd")
+            .args(["/C", "start", url])
+            .spawn()?;
     }
     Ok(())
 }

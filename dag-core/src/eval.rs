@@ -490,11 +490,11 @@ mod tests {
     }
 
     // =================================================================
-    // inject_topic tests (task-011)
+    // set_topic tests (task-011)
     // =================================================================
 
     #[test]
-    fn test_inject_topic_visible_on_next_tick() {
+    fn test_set_topic_visible_on_next_tick() {
         // Subscribe("sensor") -> Publish("out")
         let mut dag = Dag::new();
         let s = dag.subscribe("sensor").unwrap();
@@ -503,7 +503,7 @@ mod tests {
         let mut state = SimState::new(dag.len());
 
         // Inject before first tick
-        state.inject_topic("sensor", 42.0);
+        state.set_topic("sensor", 42.0);
         state.tick(&dag);
 
         // Subscribe should have read the injected value.
@@ -511,7 +511,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inject_topic_overwrites_existing() {
+    fn test_set_topic_overwrites_existing() {
         let mut dag = Dag::new();
         let c = dag.constant(10.0).unwrap();
         dag.publish("val", c).unwrap();
@@ -521,19 +521,19 @@ mod tests {
         assert_eq!(state.pubsub_value("val"), Some(10.0));
 
         // External injection overwrites the publish
-        state.inject_topic("val", 99.0);
+        state.set_topic("val", 99.0);
         assert_eq!(state.pubsub_value("val"), Some(99.0));
     }
 
     #[test]
-    fn test_inject_topic_new_key() {
+    fn test_set_topic_new_key() {
         let mut dag = Dag::new();
         dag.constant(1.0).unwrap();
 
         let mut state = SimState::new(dag.len());
         assert_eq!(state.pubsub_value("new_topic"), None);
 
-        state.inject_topic("new_topic", 7.5);
+        state.set_topic("new_topic", 7.5);
         assert_eq!(state.pubsub_value("new_topic"), Some(7.5));
     }
 }

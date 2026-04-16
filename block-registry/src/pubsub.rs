@@ -13,7 +13,10 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct PubSubConfig {
     pub topic: String,
-    #[cfg_attr(feature = "tsify", tsify(type = "\"Float\" | \"Bytes\" | \"Text\" | \"Series\" | \"Any\""))]
+    #[cfg_attr(
+        feature = "tsify",
+        tsify(type = "\"Float\" | \"Bytes\" | \"Text\" | \"Series\" | \"Any\"")
+    )]
     pub port_kind: PortKind,
 }
 

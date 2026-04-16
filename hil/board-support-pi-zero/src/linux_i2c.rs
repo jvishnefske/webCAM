@@ -51,9 +51,7 @@ impl LinuxI2cBus {
     ///
     /// Returns [`I2cError`] if the I2C transaction fails.
     pub fn i2c_read(&mut self, addr: u8, reg: u8, buf: &mut [u8]) -> Result<(), I2cError> {
-        self.dev
-            .write_read(addr, &[reg], buf)
-            .map_err(|_| I2cError)
+        self.dev.write_read(addr, &[reg], buf).map_err(|_| I2cError)
     }
 
     /// Performs an I2C write transaction.

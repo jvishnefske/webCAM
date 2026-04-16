@@ -3,10 +3,12 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
-use graph_model::BlockId;
 use crate::concurrency::find_parallel_groups;
+use crate::snapshot::{
+    CodegenBlockSnapshot as BlockSnapshot, CodegenGraphSnapshot as GraphSnapshot,
+};
 use crate::topo::topological_sort;
-use crate::snapshot::{CodegenBlockSnapshot as BlockSnapshot, CodegenGraphSnapshot as GraphSnapshot};
+use graph_model::BlockId;
 use target_registry::binding::TargetWithBinding;
 use target_registry::generators::generator_for;
 use target_registry::target::TargetFamily;
@@ -73,11 +75,7 @@ fn from_graph_model_sub_snapshot(
                         inputs: b.inputs.clone(),
                         outputs: b.outputs.clone(),
                         config: b.config.clone(),
-                        output_values: b
-                            .outputs
-                            .iter()
-                            .map(|_| None)
-                            .collect(),
+                        output_values: b.outputs.iter().map(|_| None).collect(),
                         target: target_family,
                         custom_codegen: None,
                         is_delay: b.is_delay,
@@ -384,7 +382,9 @@ pub trait Peripherals {
 /// Generate the logic crate's lib.rs with State struct and tick() function.
 fn generate_logic_lib_rs(snap: &GraphSnapshot) -> Result<String, String> {
     let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let delay_blocks: HashSet<BlockId> = snap.blocks.iter()
+    let delay_blocks: HashSet<BlockId> = snap
+        .blocks
+        .iter()
         .filter(|b| b.is_delay)
         .map(|b| BlockId(b.id))
         .collect();
@@ -1109,7 +1109,9 @@ fn generate_blocks_rs(snap: &GraphSnapshot) -> Result<String, String> {
 fn generate_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, String> {
     // Collect block IDs and run topological sort.
     let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let delay_blocks: HashSet<BlockId> = snap.blocks.iter()
+    let delay_blocks: HashSet<BlockId> = snap
+        .blocks
+        .iter()
         .filter(|b| b.is_delay)
         .map(|b| BlockId(b.id))
         .collect();
@@ -1210,7 +1212,9 @@ fn generate_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, String> {
 
 fn generate_parallel_main_rs(snap: &GraphSnapshot, dt: f64) -> Result<String, String> {
     let block_ids: Vec<BlockId> = snap.blocks.iter().map(|b| BlockId(b.id)).collect();
-    let delay_blocks: HashSet<BlockId> = snap.blocks.iter()
+    let delay_blocks: HashSet<BlockId> = snap
+        .blocks
+        .iter()
         .filter(|b| b.is_delay)
         .map(|b| BlockId(b.id))
         .collect();
@@ -1351,9 +1355,7 @@ fn build_call_args(
     args.into_iter()
         .enumerate()
         .map(|(i, arg)| {
-            arg.unwrap_or_else(|| {
-                crate::types::rust_default(&block.inputs[i].kind).to_string()
-            })
+            arg.unwrap_or_else(|| crate::types::rust_default(&block.inputs[i].kind).to_string())
         })
         .collect()
 }
@@ -1418,9 +1420,8 @@ pub fn generate_distributed_workspace(
     let gm_snap = to_graph_model_snapshot(snap);
 
     // 1. Partition the graph by target assignment.
-    let partition_result =
-        deployment::partition::partition_graph(&gm_snap, &assignments)
-            .map_err(|e| format!("partition error: {e:?}"))?;
+    let partition_result = deployment::partition::partition_graph(&gm_snap, &assignments)
+        .map_err(|e| format!("partition error: {e:?}"))?;
 
     let has_bridges = !partition_result.bridges.is_empty();
 
@@ -1428,22 +1429,18 @@ pub fn generate_distributed_workspace(
     let target_family_map: HashMap<String, TargetFamily> = snap
         .blocks
         .iter()
-        .filter_map(|b| {
-            b.target
-                .map(|t| (format!("{t:?}").to_lowercase(), t))
-        })
+        .filter_map(|b| b.target.map(|t| (format!("{t:?}").to_lowercase(), t)))
         .collect();
 
     // 2. Generate one workspace per partition.
     let mut workspaces: HashMap<TargetFamily, GeneratedWorkspace> = HashMap::new();
     for (target_str, sub_gm_snap) in &partition_result.partitions {
-        let target_family = target_family_map.get(target_str).ok_or_else(|| {
-            format!("unknown target string in partition: {target_str}")
-        })?;
+        let target_family = target_family_map
+            .get(target_str)
+            .ok_or_else(|| format!("unknown target string in partition: {target_str}"))?;
 
         // Convert partition sub-graph back to rustsim types.
-        let sub_snap =
-            from_graph_model_sub_snapshot(sub_gm_snap, snap, Some(*target_family));
+        let sub_snap = from_graph_model_sub_snapshot(sub_gm_snap, snap, Some(*target_family));
 
         // Find the binding for this target.
         let twb = config
@@ -1495,11 +1492,13 @@ pub fn generate_distributed_workspace(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use graph_model::{PortDef, PortKind, Channel, ChannelId};
+    use crate::snapshot::{
+        CodegenBlockSnapshot as BlockSnapshot, CodegenGraphSnapshot as GraphSnapshot,
+    };
+    use graph_model::{Channel, ChannelId, PortDef, PortKind};
     use module_traits::value::Value;
     use target_registry::binding::{Binding, TargetWithBinding};
     use target_registry::target::TargetFamily;
-    use crate::snapshot::{CodegenBlockSnapshot as BlockSnapshot, CodegenGraphSnapshot as GraphSnapshot};
 
     fn make_constant_snapshot(id: u32, value: f64) -> BlockSnapshot {
         BlockSnapshot {
@@ -2122,7 +2121,8 @@ mod tests {
     fn state_machine_output_fields_in_state_struct_no_sm_field() {
         // State machine with 4 outputs — State struct must have out_5_p0..p3
         // but NO sm_5 field (the old special-casing has been removed).
-        let custom_code = "pub fn block_5(guard_0: f64) -> (f64, f64, f64, f64) { (0.0, 1.0, 0.0, 0.0) }";
+        let custom_code =
+            "pub fn block_5(guard_0: f64) -> (f64, f64, f64, f64) { (0.0, 1.0, 0.0, 0.0) }";
         let snap = GraphSnapshot {
             blocks: vec![
                 make_constant_snapshot(1, 1.0),
@@ -2167,10 +2167,7 @@ mod tests {
             .as_str();
 
         // No sm_5 field — the old special-casing is removed
-        assert!(
-            !lib_rs.contains("sm_5"),
-            "sm_5 field should NOT be present"
-        );
+        assert!(!lib_rs.contains("sm_5"), "sm_5 field should NOT be present");
         // Output fields for tick() to write to
         assert!(lib_rs.contains("out_5_p0: f64"), "Missing out_5_p0 field");
         assert!(lib_rs.contains("out_5_p1: f64"), "Missing out_5_p1 field");
@@ -2851,7 +2848,8 @@ mod tests {
                         ],
                     );
                     sm.custom_codegen = Some(
-                        "pub fn block_11(guard_0: f64) -> (f64, f64, f64) { (0.0, 1.0, 0.0) }".to_string()
+                        "pub fn block_11(guard_0: f64) -> (f64, f64, f64) { (0.0, 1.0, 0.0) }"
+                            .to_string(),
                     );
                     sm
                 },
@@ -3341,11 +3339,7 @@ mod tests {
             channels: vec![],
         };
 
-        let result = from_graph_model_sub_snapshot(
-            &gm_snap,
-            &original,
-            Some(TargetFamily::Rp2040),
-        );
+        let result = from_graph_model_sub_snapshot(&gm_snap, &original, Some(TargetFamily::Rp2040));
         assert_eq!(result.blocks.len(), 2);
         // Block 1 should keep original's output_values
         assert_eq!(result.blocks[0].output_values.len(), 1);
@@ -3360,10 +3354,7 @@ mod tests {
     fn to_graph_model_snapshot_roundtrip() {
         // Test the to_graph_model_snapshot function.
         let snap = GraphSnapshot {
-            blocks: vec![
-                make_constant_snapshot(1, 42.0),
-                make_gain_snapshot(2, 3.0),
-            ],
+            blocks: vec![make_constant_snapshot(1, 42.0), make_gain_snapshot(2, 3.0)],
             channels: vec![ch(1, 1, 0, 2, 0)],
             tick_count: 5,
             time: 2.0,

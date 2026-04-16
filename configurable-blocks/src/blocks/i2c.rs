@@ -174,10 +174,7 @@ impl ConfigurableBlock for I2cMuxBlock {
         Ok(LowerResult {
             dag,
             ports: BlockPorts {
-                inputs: vec![
-                    ("bus".into(), bus_input),
-                    ("select".into(), select_node),
-                ],
+                inputs: vec![("bus".into(), bus_input), ("select".into(), select_node)],
                 outputs,
             },
         })
@@ -242,7 +239,10 @@ mod tests {
         let schema = mux.config_schema();
         match &schema[1].kind {
             FieldKind::Select(opts) => {
-                assert_eq!(opts, &vec!["2".to_string(), "4".to_string(), "8".to_string()]);
+                assert_eq!(
+                    opts,
+                    &vec!["2".to_string(), "4".to_string(), "8".to_string()]
+                );
             }
             other => panic!("expected Select, got {:?}", other),
         }
@@ -280,7 +280,10 @@ mod tests {
     fn test_apply_config_rejects_invalid_num_channels() {
         let mut mux = I2cMuxBlock::default();
         mux.apply_config(&serde_json::json!({"num_channels": 3}));
-        assert_eq!(mux.num_channels, 8, "invalid channel count should be rejected");
+        assert_eq!(
+            mux.num_channels, 8,
+            "invalid channel count should be rejected"
+        );
     }
 
     #[test]
@@ -336,8 +339,10 @@ mod tests {
 
     #[test]
     fn test_declared_channels_respects_num_channels() {
-        let mut mux = I2cMuxBlock::default();
-        mux.num_channels = 2;
+        let mux = I2cMuxBlock {
+            num_channels: 2,
+            ..I2cMuxBlock::default()
+        };
         let channels = mux.declared_channels();
         // 2 downstream + 1 upstream + 1 select = 4
         assert_eq!(channels.len(), 4);
@@ -345,9 +350,11 @@ mod tests {
 
     #[test]
     fn test_declared_channels_respects_bus_topic() {
-        let mut mux = I2cMuxBlock::default();
-        mux.bus_topic = "my_bus".into();
-        mux.num_channels = 2;
+        let mux = I2cMuxBlock {
+            bus_topic: "my_bus".into(),
+            num_channels: 2,
+            ..I2cMuxBlock::default()
+        };
         let channels = mux.declared_channels();
         assert_eq!(channels[0].name, "my_bus");
         assert_eq!(channels[2].name, "my_bus/ch0");
@@ -367,9 +374,11 @@ mod tests {
     fn test_lower_has_subscribe_for_select_topic() {
         let mux = I2cMuxBlock::default();
         let result = mux.lower().expect("lower should succeed");
-        let has_sub = result.dag.nodes().iter().any(|op| {
-            matches!(op, Op::Subscribe(t) if t == "i2c_mux/select")
-        });
+        let has_sub = result
+            .dag
+            .nodes()
+            .iter()
+            .any(|op| matches!(op, Op::Subscribe(t) if t == "i2c_mux/select"));
         assert!(has_sub, "DAG should subscribe to select topic");
     }
 
@@ -377,9 +386,11 @@ mod tests {
     fn test_lower_has_input_for_bus() {
         let mux = I2cMuxBlock::default();
         let result = mux.lower().expect("lower should succeed");
-        let has_input = result.dag.nodes().iter().any(|op| {
-            matches!(op, Op::Input(name) if name == "i2c_mux/bus")
-        });
+        let has_input = result
+            .dag
+            .nodes()
+            .iter()
+            .any(|op| matches!(op, Op::Input(name) if name == "i2c_mux/bus"));
         assert!(has_input, "DAG should have Input for upstream bus");
     }
 
@@ -389,17 +400,21 @@ mod tests {
         let result = mux.lower().expect("lower should succeed");
         for i in 0..8 {
             let topic = format!("i2c_mux/bus/ch{}", i);
-            let has_pub = result.dag.nodes().iter().any(|op| {
-                matches!(op, Op::Publish(t, _) if *t == topic)
-            });
+            let has_pub = result
+                .dag
+                .nodes()
+                .iter()
+                .any(|op| matches!(op, Op::Publish(t, _) if *t == topic));
             assert!(has_pub, "DAG should publish to {}", topic);
         }
     }
 
     #[test]
     fn test_lower_2_channels_has_fewer_nodes() {
-        let mut mux2 = I2cMuxBlock::default();
-        mux2.num_channels = 2;
+        let mux2 = I2cMuxBlock {
+            num_channels: 2,
+            ..I2cMuxBlock::default()
+        };
         let result2 = mux2.lower().expect("lower should succeed");
 
         let mux8 = I2cMuxBlock::default();
@@ -417,9 +432,20 @@ mod tests {
     fn test_lower_ports_has_bus_and_select_inputs() {
         let mux = I2cMuxBlock::default();
         let result = mux.lower().expect("lower should succeed");
-        let input_names: Vec<&str> = result.ports.inputs.iter().map(|(n, _)| n.as_str()).collect();
-        assert!(input_names.contains(&"bus"), "ports should include bus input");
-        assert!(input_names.contains(&"select"), "ports should include select input");
+        let input_names: Vec<&str> = result
+            .ports
+            .inputs
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect();
+        assert!(
+            input_names.contains(&"bus"),
+            "ports should include bus input"
+        );
+        assert!(
+            input_names.contains(&"select"),
+            "ports should include select input"
+        );
     }
 
     #[test]

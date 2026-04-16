@@ -196,7 +196,7 @@ endsolid cube";
     fn test_truncated_binary_stl() {
         // Build a binary STL header that claims 2 triangles but only has data for 1
         let mut data = vec![0u8; 84 + 50]; // enough for 1 triangle
-        // triangle count = 2 (but file only has 134 bytes, needs 184)
+                                           // triangle count = 2 (but file only has 134 bytes, needs 184)
         data[80] = 2;
         data[81] = 0;
         data[82] = 0;

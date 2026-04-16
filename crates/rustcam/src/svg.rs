@@ -555,7 +555,8 @@ mod tests {
 
     #[test]
     fn test_parse_svg_circle() {
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="25"/></svg>"#;
+        let svg =
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="25"/></svg>"#;
         let polylines = parse_svg(svg).unwrap();
         assert!(!polylines.is_empty());
         assert!(polylines[0].closed);
@@ -573,7 +574,8 @@ mod tests {
 
     #[test]
     fn test_parse_svg_polyline() {
-        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg"><polyline points="0,0 50,50 100,0"/></svg>"#;
+        let svg =
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><polyline points="0,0 50,50 100,0"/></svg>"#;
         let polylines = parse_svg(svg).unwrap();
         assert!(!polylines.is_empty());
         assert!(!polylines[0].closed);

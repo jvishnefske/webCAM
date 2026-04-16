@@ -216,8 +216,7 @@ mod tests {
 
     #[test]
     fn create_block_register() {
-        let block =
-            crate::create_block("register", r#"{"initial_value": 3.14}"#).unwrap();
+        let block = crate::create_block("register", r#"{"initial_value": 3.14}"#).unwrap();
         assert_eq!(block.block_type(), "register");
         assert_eq!(block.name(), "Register");
     }
