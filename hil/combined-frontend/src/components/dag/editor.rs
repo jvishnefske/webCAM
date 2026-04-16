@@ -1,11 +1,4 @@
 //! DAG editor panel: palette, canvas, config, deploy.
-//!
-//! Uses [`GraphEngine`] for block/channel management and simulation,
-//! [`storage`] for localStorage persistence, and [`ProjectSidebar`]
-//! for project load/save UI.
-
-use std::cell::RefCell;
-use std::collections::HashMap;
 
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
@@ -14,413 +7,516 @@ use configurable_blocks::lower;
 use configurable_blocks::registry;
 use configurable_blocks::schema::ChannelDirection;
 
-use crate::graph_engine::{BlockId, ChannelId, GraphEngine};
-use crate::sim_util::{format_sim_time, SPEED_PRESETS};
+use crate::sim_mode::SimMode;
 use crate::types::BlockSet;
 
 use super::config_panel::ConfigPanel;
 use super::monitor::MonitorPanel;
 use super::palette::BlockPalette;
-use super::sidebar::ProjectSidebar;
-use super::storage::{self, SavedProject};
 
-// ── Thread-local engine (not Send, same pattern as SimState) ────────────────
+/// Callback that panel widgets use to inject a pubsub value and (in Live mode)
+/// trigger an immediate DAG tick.
+///
+/// Provided via Leptos context so any descendant component can call it.
+pub type InjectTopicCallback = Callback<(String, f64)>;
 
+/// Read a pubsub topic value from the thread-local simulation state.
+///
+/// Returns `None` if no simulation state exists or the topic has not been
+/// published yet.
+pub fn engine_read_topic(topic: &str) -> Option<f64> {
+    SIM.with(|cell| cell.borrow().as_ref().and_then(|s| s.pubsub_value(topic)))
+}
+
+/// Inject a pubsub topic value into the thread-local simulation state.
+///
+/// This writes the value directly into the SimState's internal pubsub map so
+/// that subsequent ticks will see it via `Subscribe` nodes.
+fn engine_inject_topic(topic: &str, value: f64) {
+    SIM.with(|cell| {
+        if let Some(ref mut s) = *cell.borrow_mut() {
+            s.inject_topic(topic, value);
+        }
+    });
+}
+
+// Thread-local simulation state (not Send — lives on the main WASM thread).
+use std::cell::RefCell;
 thread_local! {
-    static ENGINE: RefCell<GraphEngine> = RefCell::new(GraphEngine::new());
+    static SIM: RefCell<Option<dag_core::eval::SimState>> = const { RefCell::new(None) };
 }
 
-/// Run a closure with a mutable reference to the engine.
-fn with_engine<R>(f: impl FnOnce(&mut GraphEngine) -> R) -> R {
-    ENGINE.with(|cell| f(&mut cell.borrow_mut()))
+/// An edge connecting an output port on one block to an input port on another.
+///
+/// Edges are auto-detected by matching `declared_channels()` topic names:
+/// a block with an Output channel named "foo" connects to any block with
+/// an Input channel named "foo".
+#[derive(Clone)]
+struct Edge {
+    /// Block id of the source (output) block.
+    from_block: usize,
+    /// Index of the output port on the source block (0-based among outputs).
+    from_port: usize,
+    /// Block id of the destination (input) block.
+    to_block: usize,
+    /// Index of the input port on the destination block (0-based among inputs).
+    to_port: usize,
 }
-
-/// Run a closure with an immutable reference to the engine.
-fn with_engine_ref<R>(f: impl FnOnce(&GraphEngine) -> R) -> R {
-    ENGINE.with(|cell| f(&cell.borrow()))
-}
-
-// ── Wire drag state ─────────────────────────────────────────────────────────
 
 /// State of an in-progress wire drag from an output port.
 #[derive(Clone, Copy)]
 struct DraggingWire {
-    from_block: BlockId,
+    /// Block id of the source block.
+    from_block: usize,
+    /// Output port index on the source block.
     from_port: usize,
+    /// Current mouse X in SVG coordinates.
     mouse_x: f64,
+    /// Current mouse Y in SVG coordinates.
     mouse_y: f64,
 }
 
-/// State of an in-progress node drag.
-#[derive(Clone, Copy)]
-struct DraggingNode {
-    block_id: BlockId,
-    start_mouse_x: f64,
-    start_mouse_y: f64,
-    start_node_x: f64,
-    start_node_y: f64,
-    moved: bool,
+/// Instance of a placed block on the canvas.
+///
+/// Stores block type + config as serializable data (Send+Sync safe).
+/// The trait object is reconstructed from the registry when needed.
+#[derive(Clone)]
+struct PlacedBlock {
+    id: usize,
+    block_type: String,
+    config: serde_json::Value,
+    x: f64,
+    y: f64,
 }
 
-/// State of an in-progress canvas pan.
-#[derive(Clone, Copy)]
-struct Panning {
-    start_mouse_x: f64,
-    start_mouse_y: f64,
-    start_pan_x: f64,
-    start_pan_y: f64,
+impl PlacedBlock {
+    /// Reconstruct the ConfigurableBlock trait object from the registry.
+    fn reconstruct(&self) -> Option<Box<dyn lower::ConfigurableBlock>> {
+        let mut block = registry::create_block(&self.block_type)?;
+        block.apply_config(&self.config);
+        Some(block)
+    }
 }
 
 #[component]
 pub fn DagEditorPanel() -> impl IntoView {
-    // ── Layout / interaction constants ──────────────────────────────────────
-    const NODE_WIDTH: f64 = 190.0;
-    const PORT_RADIUS: f64 = 6.0;
-    const PORT_SPACING: f64 = 20.0;
-    const PORT_Y_START: f64 = 46.0;
-    const ZOOM_FACTOR: f64 = 1.1;
-    const ZOOM_MIN: f64 = 0.2;
-    const ZOOM_MAX: f64 = 5.0;
-    const DRAG_THRESHOLD: f64 = 3.0;
-
-    // Revision counter — bumped after every engine mutation to trigger re-reads.
-    let (revision, set_revision) = signal(0_u64);
-    let bump = move || set_revision.update(|r| *r += 1);
-
-    // Block positions: GraphEngine does not track positions.
-    let (positions, set_positions) = signal(HashMap::<BlockId, (f64, f64)>::new());
-
-    // Pan / zoom state.
-    let (pan_x, set_pan_x) = signal(0.0_f64);
-    let (pan_y, set_pan_y) = signal(0.0_f64);
-    let (zoom, set_zoom) = signal(1.0_f64);
-
-    // Node drag state.
-    let (dragging_node, set_dragging_node) = signal(None::<DraggingNode>);
-
-    // Panning state.
-    let (panning, set_panning) = signal(None::<Panning>);
+    // Block instances on the canvas
+    let (blocks, set_blocks) = signal(Vec::<PlacedBlock>::new());
+    let (next_id, set_next_id) = signal(1_usize);
 
     // Shared block-set context: push (block_type, config) pairs to deploy panel.
     let set_shared_blocks = use_context::<WriteSignal<BlockSet>>();
 
-    // Sync engine blocks -> shared context.
-    let sync_shared = move || {
+    // Sync local blocks → shared context whenever blocks change.
+    let sync_shared = move |blks: &[PlacedBlock]| {
         if let Some(setter) = set_shared_blocks {
-            let block_set: BlockSet = with_engine_ref(|eng| {
-                eng.blocks()
-                    .iter()
-                    .map(|b| (b.block_type.clone(), b.config.clone()))
-                    .collect()
-            });
+            let block_set: BlockSet = blks
+                .iter()
+                .map(|pb| (pb.block_type.clone(), pb.config.clone()))
+                .collect();
             setter.set(block_set);
         }
     };
 
-    // Selected block / channel.
-    let (selected_id, set_selected_id) = signal(None::<BlockId>);
-    let (selected_channel, set_selected_channel) = signal(None::<ChannelId>);
+    // Selected block
+    let (selected_id, set_selected_id) = signal(None::<usize>);
 
-    // Wire drag state.
+    // Wire drag state: Some while dragging from an output port.
     let (dragging_wire, set_dragging_wire) = signal(None::<DraggingWire>);
 
-    // Project name.
-    let (project_name, set_project_name) = signal("untitled".to_string());
-
-    // ── Auto-save debounce ──────────────────────────────────────────────────
-
-    // We use a revision counter to detect changes. When revision changes,
-    // schedule a save after 2 seconds (debounced via gloo Timeout).
-    //
-    // The timeout handle is stored in a thread_local so we can cancel it
-    // on subsequent changes (debounce).
-    thread_local! {
-        static AUTOSAVE_HANDLE: RefCell<Option<gloo_timers::callback::Timeout>> = const { RefCell::new(None) };
-    }
-
-    let schedule_autosave = move || {
-        let name = project_name.get_untracked();
-        if name.is_empty() {
-            return;
-        }
-        // Cancel any pending autosave.
-        AUTOSAVE_HANDLE.with(|cell| {
-            *cell.borrow_mut() = None;
-        });
-        let pos = positions.get_untracked();
-        let timeout = gloo_timers::callback::Timeout::new(2_000, move || {
-            let snapshot = with_engine_ref(|eng| eng.snapshot());
-            let project = SavedProject {
-                name: name.clone(),
-                snapshot,
-                positions: pos,
-                saved_at: String::new(),
-            };
-            let _ = storage::save_project(&project);
-        });
-        AUTOSAVE_HANDLE.with(|cell| {
-            *cell.borrow_mut() = Some(timeout);
-        });
-    };
-
-    // Watch revision and schedule autosave.
-    Effect::new(move |_| {
-        let _rev = revision.get(); // track
-        schedule_autosave();
-    });
-
-    // ── Config signals derived from selection ───────────────────────────────
-
+    // Config signals derived from selection
     let selected_block_type = Signal::derive(move || {
-        let _rev = revision.get();
         let sel = selected_id.get()?;
-        with_engine_ref(|eng| {
-            let blk = eng.block(sel)?;
-            let block = blk.reconstruct()?;
-            Some(block.display_name().to_string())
-        })
+        let blks = blocks.get();
+        let pb = blks.iter().find(|b| b.id == sel)?;
+        let block = pb.reconstruct()?;
+        Some(block.display_name().to_string())
     });
 
     let config_fields = Signal::derive(move || {
-        let _rev = revision.get();
-        let sel = selected_id.get();
-        match sel {
-            Some(id) => with_engine_ref(|eng| {
-                eng.block(id)
-                    .and_then(|b| b.reconstruct())
-                    .map(|b| b.config_schema())
-                    .unwrap_or_default()
-            }),
+        let sel = match selected_id.get() {
+            Some(s) => s,
+            None => return Vec::new(),
+        };
+        let blks = blocks.get();
+        match blks.iter().find(|b| b.id == sel) {
+            Some(pb) => pb
+                .reconstruct()
+                .map(|b| b.config_schema())
+                .unwrap_or_default(),
             None => Vec::new(),
         }
     });
 
     let config_values = Signal::derive(move || {
-        let _rev = revision.get();
-        let sel = selected_id.get();
-        match sel {
-            Some(id) => with_engine_ref(|eng| {
-                eng.block(id)
-                    .map(|b| b.config.clone())
-                    .unwrap_or_else(|| serde_json::Value::Object(Default::default()))
-            }),
+        let sel = match selected_id.get() {
+            Some(s) => s,
+            None => return serde_json::Value::Object(Default::default()),
+        };
+        let blks = blocks.get();
+        match blks.iter().find(|b| b.id == sel) {
+            Some(pb) => pb.config.clone(),
             None => serde_json::Value::Object(Default::default()),
         }
     });
 
     let channels_text = Signal::derive(move || {
-        let _rev = revision.get();
         let sel = match selected_id.get() {
             Some(s) => s,
             None => return String::new(),
         };
-        with_engine_ref(|eng| {
-            let blk = match eng.block(sel) {
-                Some(b) => b,
-                None => return String::new(),
-            };
-            let block = match blk.reconstruct() {
-                Some(b) => b,
-                None => return String::new(),
-            };
-
-            // Declared channels from the block schema.
-            let chs = block.declared_channels();
-            let mut lines: Vec<String> = chs
-                .iter()
-                .map(|ch| {
-                    let dir = match ch.direction {
-                        ChannelDirection::Input => "IN",
-                        ChannelDirection::Output => "OUT",
-                    };
-                    let kind = format!("{:?}", ch.kind).to_lowercase();
-                    format!("{} {} [{}]", dir, ch.name, kind)
-                })
-                .collect();
-
-            // Connected channels from the engine.
-            let connected = eng.channels_for_block(sel);
-            if !connected.is_empty() {
-                lines.push(String::new());
-                lines.push("-- Connections --".into());
-                for ch in connected {
-                    if ch.from_block == sel {
-                        lines.push(format!(
-                            "  OUT[{}] -> block {} IN[{}] ({})",
-                            ch.from_port, ch.to_block, ch.to_port, ch.topic
-                        ));
-                    } else {
-                        lines.push(format!(
-                            "  IN[{}] <- block {} OUT[{}] ({})",
-                            ch.to_port, ch.from_block, ch.from_port, ch.topic
-                        ));
-                    }
+        let blks = blocks.get();
+        match blks.iter().find(|b| b.id == sel) {
+            Some(pb) => match pb.reconstruct() {
+                Some(block) => {
+                    let chs = block.declared_channels();
+                    chs.iter()
+                        .map(|ch| {
+                            let dir = match ch.direction {
+                                ChannelDirection::Input => "IN",
+                                ChannelDirection::Output => "OUT",
+                            };
+                            let kind = format!("{:?}", ch.kind).to_lowercase();
+                            format!("{} {} [{}]", dir, ch.name, kind)
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 }
-            }
-
-            lines.join("\n")
-        })
-    });
-
-    let il_text = Signal::derive(move || {
-        let _rev = revision.get();
-        let sel = match selected_id.get() {
-            Some(s) => s,
-            None => return String::new(),
-        };
-        with_engine_ref(|eng| {
-            eng.block(sel)
-                .and_then(|b| b.reconstruct())
-                .map(|block| {
-                    lower::lower_to_il_text(block.as_ref())
-                        .unwrap_or_else(|e| format!("Error: {}", e))
-                })
-                .unwrap_or_default()
-        })
-    });
-
-    // ── Edges from engine channels ──────────────────────────────────────────
-
-    // Structured edge data derived from the engine's channels.
-    let edges = Signal::derive(move || {
-        let _rev = revision.get();
-        with_engine_ref(|eng| eng.channels().to_vec())
-    });
-
-    // ── Deploy status ───────────────────────────────────────────────────────
-    let (deploy_status, set_deploy_status) = signal(String::new());
-
-    // ── Sim state signals ───────────────────────────────────────────────────
-    let (sim_topics, set_sim_topics) = signal(std::collections::BTreeMap::<String, f64>::new());
-    let (sim_tick_count, set_sim_tick_count) = signal(0_u64);
-    let (sim_running, set_sim_running) = signal(false);
-
-    // ── Callbacks ───────────────────────────────────────────────────────────
-
-    // Add block from palette.
-    let on_add_block = Callback::new(move |block_type: String| {
-        if let Some(block) = registry::create_block(&block_type) {
-            let config = block.config_json();
-            let id = with_engine(|eng| eng.add_block(&block_type, config));
-            if let Some(id) = id {
-                let count = with_engine_ref(|eng| eng.block_count());
-                let x = 30.0 + ((count - 1) % 3) as f64 * 220.0;
-                let y = 30.0 + ((count - 1) / 3) as f64 * 120.0;
-                set_positions.update(|p| {
-                    p.insert(id, (x, y));
-                });
-                sync_shared();
-                bump();
-                set_selected_id.set(Some(id));
-                set_selected_channel.set(None);
-            }
+                None => String::new(),
+            },
+            None => String::new(),
         }
     });
 
-    // Config change handler.
+    let il_text = Signal::derive(move || {
+        let sel = match selected_id.get() {
+            Some(s) => s,
+            None => return String::new(),
+        };
+        let blks = blocks.get();
+        match blks.iter().find(|b| b.id == sel) {
+            Some(pb) => match pb.reconstruct() {
+                Some(block) => lower::lower_to_il_text(block.as_ref())
+                    .unwrap_or_else(|e| format!("Error: {}", e)),
+                None => String::new(),
+            },
+            None => String::new(),
+        }
+    });
+
+    // Auto-detect edges by matching output topic names to input topic names.
+    let edges = Signal::derive(move || {
+        let blks = blocks.get();
+        // Collect (block_id, port_index, topic_name) for every output channel.
+        let mut outputs: Vec<(usize, usize, String)> = Vec::new();
+        // Collect (block_id, port_index, topic_name) for every input channel.
+        let mut inputs: Vec<(usize, usize, String)> = Vec::new();
+
+        for pb in blks.iter() {
+            if let Some(block) = pb.reconstruct() {
+                let channels = block.declared_channels();
+                let mut in_idx = 0_usize;
+                let mut out_idx = 0_usize;
+                for ch in &channels {
+                    match ch.direction {
+                        ChannelDirection::Output => {
+                            outputs.push((pb.id, out_idx, ch.name.clone()));
+                            out_idx += 1;
+                        }
+                        ChannelDirection::Input => {
+                            inputs.push((pb.id, in_idx, ch.name.clone()));
+                            in_idx += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        let mut result = Vec::<Edge>::new();
+        for (out_id, out_port, ref topic) in &outputs {
+            for (in_id, in_port, ref in_topic) in &inputs {
+                if topic == in_topic && out_id != in_id {
+                    result.push(Edge {
+                        from_block: *out_id,
+                        from_port: *out_port,
+                        to_block: *in_id,
+                        to_port: *in_port,
+                    });
+                }
+            }
+        }
+        result
+    });
+
+    // Deploy status
+    let (deploy_status, set_deploy_status) = signal(String::new());
+
+    // Add block from palette
+    let on_add_block = Callback::new(move |block_type: String| {
+        if let Some(block) = registry::create_block(&block_type) {
+            let id = next_id.get();
+            set_next_id.set(id + 1);
+            let count = blocks.get().len();
+            let x = 30.0 + (count % 3) as f64 * 220.0;
+            let y = 30.0 + (count / 3) as f64 * 120.0;
+            let config = block.config_json();
+            set_blocks.update(|v| {
+                v.push(PlacedBlock {
+                    id,
+                    block_type: block_type.clone(),
+                    config,
+                    x,
+                    y,
+                });
+            });
+            sync_shared(&blocks.get());
+            set_selected_id.set(Some(id));
+        }
+    });
+
+    // Config change handler
     let on_config_change = Callback::new(move |(key, value): (String, serde_json::Value)| {
         let sel = match selected_id.get_untracked() {
             Some(s) => s,
             None => return,
         };
-        with_engine(|eng| eng.update_config(sel, key, value));
-        sync_shared();
-        bump();
+        set_blocks.update(|blks| {
+            if let Some(pb) = blks.iter_mut().find(|b| b.id == sel) {
+                // Update the stored config JSON directly
+                if let serde_json::Value::Object(ref mut map) = pb.config {
+                    map.insert(key, value);
+                }
+            }
+        });
+        sync_shared(&blocks.get());
     });
 
-    // Delete selected block or channel.
+    // Delete selected block
     let on_delete = move |_| {
-        // If a channel is selected, delete the channel.
-        if let Some(ch_id) = selected_channel.get_untracked() {
-            with_engine(|eng| eng.disconnect(ch_id));
-            set_selected_channel.set(None);
-            sync_shared();
-            bump();
-            return;
-        }
-        // Otherwise delete selected block.
         if let Some(sel) = selected_id.get_untracked() {
-            with_engine(|eng| eng.remove_block(sel));
-            set_positions.update(|p| {
-                p.remove(&sel);
-            });
-            sync_shared();
-            bump();
+            set_blocks.update(|v| v.retain(|b| b.id != sel));
+            sync_shared(&blocks.get());
             set_selected_id.set(None);
         }
     };
 
-    // ── Simulation handlers ─────────────────────────────────────────────────
+    // Simulation state (persists pubsub values across ticks)
+    let (sim_topics, set_sim_topics) = signal(std::collections::BTreeMap::<String, f64>::new());
+    let (sim_tick_count, set_sim_tick_count) = signal(0_u64);
+    let (sim_mode, set_sim_mode) = signal(SimMode::Stopped);
 
+    // Counter bumped by inject_topic; watched by an Effect in Live mode.
+    let (live_trigger, set_live_trigger) = signal(0_u64);
+
+    // Helper: build merged DAG from current blocks
+    let build_dag = move || -> Result<dag_core::op::Dag, String> {
+        let blks = blocks.get();
+        if blks.is_empty() {
+            return Err("No blocks".into());
+        }
+        let mut combined = dag_core::op::Dag::new();
+        for pb in blks.iter() {
+            let block = pb
+                .reconstruct()
+                .ok_or_else(|| format!("Unknown block type: {}", pb.block_type))?;
+            let result = block.lower().map_err(|e| format!("Lower error: {:?}", e))?;
+            let offset = combined.len() as u16;
+            for op in result.dag.nodes() {
+                let adjusted = offset_op(op, offset);
+                combined
+                    .add_op(adjusted)
+                    .map_err(|e| format!("Merge error: {:?}", e))?;
+            }
+        }
+        Ok(combined)
+    };
+
+    // Helper: ensure SimState exists for the current DAG size.
+    let ensure_sim = move |dag: &dag_core::op::Dag| {
+        SIM.with(|cell| {
+            let mut sim = cell.borrow_mut();
+            if sim.is_none() {
+                *sim = Some(dag_core::eval::SimState::new(dag.len()));
+            }
+        });
+    };
+
+    // Helper: tick the SimState and propagate results to signals.
+    let do_tick = move |dag: &dag_core::op::Dag| {
+        SIM.with(|cell| {
+            if let Some(ref mut s) = *cell.borrow_mut() {
+                s.tick(dag);
+                set_sim_topics.set(s.topics().clone());
+                set_sim_tick_count.set(s.tick_count());
+            }
+        });
+    };
+
+    // Provide inject-topic callback to descendant components.
+    //
+    // Panel widgets call this to write a value into the sim's pubsub map.
+    // In Live mode the Effect below will notice the bumped `live_trigger`
+    // and immediately tick the DAG.
+    let inject_cb: InjectTopicCallback = Callback::new(move |(topic, value): (String, f64)| {
+        engine_inject_topic(&topic, value);
+        // Bump the live trigger so the Effect fires.
+        set_live_trigger.update(|n| *n += 1);
+    });
+    provide_context(inject_cb);
+
+    // Live-mode Effect: when live_trigger is bumped and mode is Live,
+    // immediately tick the DAG and update signals.
+    Effect::new(move |_| {
+        let _trigger = live_trigger.get(); // subscribe to changes
+        if sim_mode.get_untracked() != SimMode::Live {
+            return;
+        }
+        let dag = match build_dag() {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        ensure_sim(&dag);
+        do_tick(&dag);
+    });
+
+    // Step: single tick (works in any mode)
     let on_step = move |_| {
-        let result = with_engine(|eng| eng.tick());
-        match result {
-            Ok(()) => {
-                let (topics, count) = with_engine_ref(|eng| (eng.topics(), eng.tick_count()));
-                set_sim_topics.set(topics);
-                set_sim_tick_count.set(count);
-                set_deploy_status.set(format!(
-                    "Tick {} ({} topics)",
-                    count,
-                    sim_topics.get_untracked().len()
-                ));
-            }
-            Err(e) => set_deploy_status.set(e),
-        }
-    };
-
-    let on_reset = move |_| {
-        with_engine(|eng| eng.reset_sim());
-        set_sim_topics.set(std::collections::BTreeMap::new());
-        set_sim_tick_count.set(0);
-        set_sim_running.set(false);
-        set_deploy_status.set("Reset".into());
-    };
-
-    let on_play_pause = move |_| {
-        let running = sim_running.get();
-        if running {
-            set_sim_running.set(false);
-            set_deploy_status.set("Paused".into());
-        } else {
-            // Verify DAG can build.
-            let result = with_engine_ref(|eng| eng.build_dag());
-            if let Err(e) = result {
-                set_deploy_status.set(e);
-                return;
-            }
-            set_sim_running.set(true);
-            set_deploy_status.set("Running...".into());
-
-            gloo_timers::callback::Interval::new(100, move || {
-                if !sim_running.get_untracked() {
-                    return;
-                }
-                let result = with_engine(|eng| eng.tick());
-                if result.is_ok() {
-                    let (topics, count) = with_engine_ref(|eng| (eng.topics(), eng.tick_count()));
-                    set_sim_topics.set(topics);
-                    set_sim_tick_count.set(count);
-                }
-            })
-            .forget();
-        }
-    };
-
-    // Deploy: lower all blocks, merge DAGs, CBOR encode, POST to MCU.
-    let on_deploy = move |_| {
-        let dag_result = with_engine_ref(|eng| eng.build_dag());
-        let dag = match dag_result {
+        let dag = match build_dag() {
             Ok(d) => d,
             Err(e) => {
                 set_deploy_status.set(e);
                 return;
             }
         };
+        SIM.with(|cell| {
+            let mut sim = cell.borrow_mut();
+            if sim.is_none() || sim.as_ref().is_some_and(|s| s.tick_count() == 0) {
+                *sim = Some(dag_core::eval::SimState::new(dag.len()));
+            }
+            if let Some(ref mut s) = *sim {
+                s.tick(&dag);
+                set_sim_topics.set(s.topics().clone());
+                set_sim_tick_count.set(s.tick_count());
+                set_deploy_status.set(format!(
+                    "Tick {} ({} topics)",
+                    s.tick_count(),
+                    s.topics().len()
+                ));
+            }
+        });
+    };
 
-        let cbor_bytes = dag_core::cbor::encode_dag(&dag);
-        let node_count = dag.len();
+    // Reset: stop everything and clear SimState
+    let on_reset = move |_| {
+        SIM.with(|cell| {
+            if let Some(ref mut s) = *cell.borrow_mut() {
+                s.reset();
+                set_sim_topics.set(std::collections::BTreeMap::new());
+                set_sim_tick_count.set(0);
+            }
+        });
+        set_sim_mode.set(SimMode::Stopped);
+        set_deploy_status.set("Reset".into());
+    };
 
+    // Play/Pause toggle
+    let on_play_pause = move |_| {
+        let mode = sim_mode.get();
+        if mode == SimMode::Playing {
+            set_sim_mode.set(SimMode::Stopped);
+            set_deploy_status.set("Paused".into());
+        } else {
+            // Rebuild DAG and start ticking
+            let dag = match build_dag() {
+                Ok(d) => d,
+                Err(e) => {
+                    set_deploy_status.set(e);
+                    return;
+                }
+            };
+            ensure_sim(&dag);
+            set_sim_mode.set(SimMode::Playing);
+            set_deploy_status.set("Running...".into());
+
+            // Start tick loop via gloo_timers (100ms = 10Hz)
+            let set_topics = set_sim_topics;
+            let set_tick = set_sim_tick_count;
+            gloo_timers::callback::Interval::new(100, move || {
+                if sim_mode.get_untracked() != SimMode::Playing {
+                    return; // not playing — interval keeps firing but we skip
+                }
+                let dag = match build_dag() {
+                    Ok(d) => d,
+                    Err(_) => return,
+                };
+                SIM.with(|cell| {
+                    if let Some(ref mut s) = *cell.borrow_mut() {
+                        s.tick(&dag);
+                        set_topics.set(s.topics().clone());
+                        set_tick.set(s.tick_count());
+                    }
+                });
+            })
+            .forget();
+        }
+    };
+
+    // Live mode toggle
+    let on_live = move |_| {
+        let mode = sim_mode.get();
+        if mode == SimMode::Live {
+            set_sim_mode.set(SimMode::Stopped);
+            set_deploy_status.set("Live off".into());
+        } else {
+            // Ensure SimState is initialised so inject + tick work immediately.
+            if let Ok(dag) = build_dag() {
+                ensure_sim(&dag);
+            }
+            set_sim_mode.set(SimMode::Live);
+            set_deploy_status.set("Live".into());
+        }
+    };
+
+    // Deploy: lower all blocks, merge DAGs, CBOR encode, POST to MCU
+    let on_deploy = move |_| {
+        let blks = blocks.get();
+        if blks.is_empty() {
+            set_deploy_status.set("No blocks to deploy".into());
+            return;
+        }
+
+        // Merge all blocks into a single DAG
+        let mut combined = dag_core::op::Dag::new();
+        for pb in blks.iter() {
+            let block = match pb.reconstruct() {
+                Some(b) => b,
+                None => {
+                    set_deploy_status.set(format!("Unknown block type: {}", pb.block_type));
+                    return;
+                }
+            };
+            let result = match block.lower() {
+                Ok(r) => r,
+                Err(e) => {
+                    set_deploy_status.set(format!("Lower error: {:?}", e));
+                    return;
+                }
+            };
+            // Append ops from this block's DAG into combined, adjusting node refs
+            let offset = combined.len() as u16;
+            for op in result.dag.nodes() {
+                let adjusted = offset_op(op, offset);
+                if let Err(e) = combined.add_op(adjusted) {
+                    set_deploy_status.set(format!("Merge error: {:?}", e));
+                    return;
+                }
+            }
+        }
+
+        let cbor_bytes = dag_core::cbor::encode_dag(&combined);
+        let node_count = combined.len();
+
+        // POST to MCU via fetch API
         set_deploy_status.set(format!(
             "Deploying {} nodes ({} bytes)...",
             node_count,
@@ -436,7 +532,7 @@ pub fn DagEditorPanel() -> impl IntoView {
         });
     };
 
-    // Tick MCU remotely.
+    // Tick: POST /api/tick to evaluate the deployed DAG once
     let _on_tick = move |_: web_sys::MouseEvent| {
         let status_setter = set_deploy_status;
         wasm_bindgen_futures::spawn_local(async move {
@@ -447,269 +543,38 @@ pub fn DagEditorPanel() -> impl IntoView {
         });
     };
 
-    // ── Sidebar callbacks ───────────────────────────────────────────────────
-
-    let on_save = Callback::new(move |()| {
-        let name = project_name.get_untracked();
-        if name.is_empty() {
-            set_deploy_status.set("Enter a project name first".into());
-            return;
-        }
-        let snapshot = with_engine_ref(|eng| eng.snapshot());
-        let pos = positions.get_untracked();
-        let project = SavedProject {
-            name,
-            snapshot,
-            positions: pos,
-            saved_at: String::new(),
-        };
-        match storage::save_project(&project) {
-            Ok(()) => set_deploy_status.set("Project saved".into()),
-            Err(e) => set_deploy_status.set(format!("Save error: {e}")),
-        }
-    });
-
-    let on_load = Callback::new(move |name: String| match storage::load_project(&name) {
-        Ok(project) => {
-            with_engine(|eng| eng.restore(&project.snapshot));
-            set_positions.set(project.positions);
-            set_project_name.set(project.name);
-            set_selected_id.set(None);
-            set_selected_channel.set(None);
-            sync_shared();
-            bump();
-            set_deploy_status.set("Project loaded".into());
-        }
-        Err(e) => set_deploy_status.set(format!("Load error: {e}")),
-    });
-
-    let on_new = Callback::new(move |()| {
-        with_engine(|eng| {
-            *eng = GraphEngine::new();
-        });
-        set_positions.set(HashMap::new());
-        set_project_name.set("untitled".into());
-        set_selected_id.set(None);
-        set_selected_channel.set(None);
-        sync_shared();
-        bump();
-        set_deploy_status.set("New project".into());
-    });
-
-    // ── Keyboard handler (Delete key for edge deletion) ─────────────────────
-
-    // We handle keydown on the SVG container div.
-    let on_keydown = move |ev: web_sys::KeyboardEvent| {
-        if ev.key() == "Delete" || ev.key() == "Backspace" {
-            if let Some(ch_id) = selected_channel.get_untracked() {
-                with_engine(|eng| eng.disconnect(ch_id));
-                set_selected_channel.set(None);
-                sync_shared();
-                bump();
-                ev.prevent_default();
-            }
-        }
-    };
-
-    // ── Local state for transport/batch/export ────────────────────────────
-    let (speed, set_speed) = signal(1.0_f64);
-    let (dt, set_dt) = signal(0.01_f64);
-    let (batch_input, set_batch_input) = signal("100".to_string());
-
-    // Export target checkboxes
-    let (export_host, set_export_host) = signal(true);
-    let (export_rp2040, set_export_rp2040) = signal(false);
-    let (export_stm32f4, set_export_stm32f4) = signal(false);
-    let (export_esp32c3, set_export_esp32c3) = signal(false);
-
-    // Batch run handler
-    let on_batch_run = move |_| {
-        if let Ok(n) = batch_input.get_untracked().parse::<u32>() {
-            if n > 0 {
-                // Build DAG first
-                let result = with_engine_ref(|eng| eng.build_dag());
-                if let Err(e) = result {
-                    set_deploy_status.set(e);
-                    return;
-                }
-                for _ in 0..n {
-                    let _ = with_engine(|eng| eng.tick());
-                }
-                let (topics, count) = with_engine_ref(|eng| (eng.topics(), eng.tick_count()));
-                set_sim_topics.set(topics);
-                set_sim_tick_count.set(count);
-                set_deploy_status.set(format!("Batch: {} ticks done (tick {})", n, count));
-            }
-        }
-    };
-
-    // ── View ────────────────────────────────────────────────────────────────
-
     view! {
+        <h2 class="section-title">"DAG Editor"</h2>
         <div class="dag-editor-layout">
-            // ── Left sidebar: all controls stacked ──────────────────────────
-            <div class="dag-sidebar">
-                // Project section
-                <section>
-                    <ProjectSidebar
-                        project_name=project_name
-                        set_project_name=set_project_name
-                        on_save=on_save
-                        on_load=on_load
-                        on_new=on_new
-                    />
-                </section>
+            // Left: palette
+            <BlockPalette on_add=on_add_block />
 
-                // Blocks palette section
-                <section>
-                    <h2 class="dag-section-head">"BLOCKS"</h2>
-                    <BlockPalette on_add=on_add_block />
-                </section>
-
-                // Inspector section
-                <section>
-                    <h2 class="dag-section-head">"INSPECTOR"</h2>
-                    <ConfigPanel
-                        block_type=selected_block_type
-                        config_fields=config_fields
-                        config_values=config_values
-                        on_change=on_config_change
-                        channels_text=channels_text
-                        il_text=il_text
-                    />
-                    <button class="btn btn-danger btn-sm" style="margin-top:6px" on:click=on_delete>
-                        "Delete Block"
+            // Center: canvas
+            <div class="dag-canvas-container">
+                <div class="dag-toolbar">
+                    <button
+                        class=move || if sim_mode.get() == SimMode::Playing { "btn btn-danger" } else { "btn btn-primary" }
+                        on:click=on_play_pause
+                    >
+                        {move || if sim_mode.get() == SimMode::Playing { "Pause" } else { "Play" }}
                     </button>
-                </section>
-
-                // Transport section
-                <section>
-                    <h2 class="dag-section-head">"TRANSPORT"</h2>
-                    <div class="dag-transport-row">
-                        <button
-                            class=move || if sim_running.get() { "btn btn-danger btn-sm" } else { "btn btn-primary btn-sm" }
-                            on:click=on_play_pause
-                        >
-                            {move || if sim_running.get() { "Pause" } else { "Play" }}
-                        </button>
-                        <button class="btn btn-secondary btn-sm" on:click=on_step>"Step"</button>
-                        <button class="btn btn-secondary btn-sm" on:click=on_reset>"Reset"</button>
-                    </div>
-                    <div class="dag-transport-row">
-                        <div class="dag-transport-field">
-                            "dt:"
-                            <input
-                                type="number"
-                                prop:value=move || format!("{}", dt.get())
-                                step="0.001"
-                                min="0.0001"
-                                on:change=move |ev| {
-                                    let val = event_target_value(&ev);
-                                    if let Ok(d) = val.parse::<f64>() {
-                                        if d > 0.0 { set_dt.set(d); }
-                                    }
-                                }
-                            />
-                        </div>
-                        <div class="dag-transport-field">
-                            "Speed:"
-                            <select
-                                on:change=move |ev| {
-                                    let val = event_target_value(&ev);
-                                    if let Ok(s) = val.parse::<f64>() { set_speed.set(s); }
-                                }
-                            >
-                                {SPEED_PRESETS.iter().map(|(val, label)| {
-                                    let selected = *val == 1.0;
-                                    let val_str = val.to_string();
-                                    let label_str = label.to_string();
-                                    view! {
-                                        <option value=val_str selected=selected>{label_str}</option>
-                                    }
-                                }).collect_view()}
-                            </select>
-                        </div>
-                    </div>
-                    <div class="dag-transport-info">
-                        {move || format!(
-                            "Tick {} | t = {} | {}x",
-                            sim_tick_count.get(),
-                            format_sim_time(sim_tick_count.get(), dt.get()),
-                            speed.get(),
-                        )}
-                    </div>
+                    <button
+                        class=move || if sim_mode.get() == SimMode::Live { "btn btn-success" } else { "btn btn-secondary" }
+                        on:click=on_live
+                    >
+                        {move || if sim_mode.get() == SimMode::Live { "\u{25CF} Live" } else { "Live" }}
+                    </button>
+                    <button class="btn btn-secondary" on:click=on_step>"Step"</button>
+                    <button class="btn btn-secondary" on:click=on_reset>"Reset"</button>
+                    <button class="btn btn-secondary" on:click=on_deploy>"Deploy"</button>
+                    <button class="btn btn-danger" on:click=on_delete>"Delete"</button>
                     <span class="dag-status">{move || deploy_status.get()}</span>
-                </section>
-
-                // Batch section
-                <section>
-                    <h2 class="dag-section-head">"BATCH"</h2>
-                    <div class="dag-batch-row">
-                        <span style="font-size:0.75rem;color:var(--text-dim)">"Steps:"</span>
-                        <input
-                            type="number"
-                            prop:value=move || batch_input.get()
-                            min="1"
-                            on:input=move |ev| { set_batch_input.set(event_target_value(&ev)); }
-                        />
-                        <button class="btn btn-primary btn-sm" on:click=on_batch_run>"Run"</button>
-                    </div>
-                </section>
-
-                // Export section
-                <section>
-                    <h2 class="dag-section-head">"EXPORT"</h2>
-                    <div class="dag-export-targets">
-                        <label class="dag-export-target">
-                            <input type="checkbox" prop:checked=move || export_host.get()
-                                on:change=move |ev| { set_export_host.set(event_target_checked(&ev)); } />
-                            "Host (Sim)"
-                        </label>
-                        <label class="dag-export-target">
-                            <input type="checkbox" prop:checked=move || export_rp2040.get()
-                                on:change=move |ev| { set_export_rp2040.set(event_target_checked(&ev)); } />
-                            "RP2040"
-                        </label>
-                        <label class="dag-export-target">
-                            <input type="checkbox" prop:checked=move || export_stm32f4.get()
-                                on:change=move |ev| { set_export_stm32f4.set(event_target_checked(&ev)); } />
-                            "STM32F4"
-                        </label>
-                        <label class="dag-export-target">
-                            <input type="checkbox" prop:checked=move || export_esp32c3.get()
-                                on:change=move |ev| { set_export_esp32c3.set(event_target_checked(&ev)); } />
-                            "ESP32-C3"
-                        </label>
-                    </div>
-                    <button class="btn btn-primary btn-sm" style="width:100%">"Generate & Download"</button>
-                </section>
-
-                // HIL section
-                <section>
-                    <h2 class="dag-section-head">"HIL"</h2>
-                    <div class="dag-hil-url">"ws://169.254.1.61:8080"</div>
-                    <div class="dag-hil-btns">
-                        <button class="btn btn-secondary btn-sm">"Connect"</button>
-                        <button class="btn btn-primary btn-sm" on:click=on_deploy>"Deploy MCU"</button>
-                    </div>
-                </section>
-
-                // Monitor section (collapsible)
-                <section>
-                    <MonitorPanel topics=sim_topics tick_count=sim_tick_count />
-                </section>
-            </div>
-
-            // ── Center canvas ───────────────────────────────────────────────
-            <div
-                class="dag-canvas-container"
-                tabindex="0"
-                on:keydown=on_keydown
-            >
+                </div>
                 <svg
                     class="dag-canvas"
-                    viewBox="0 0 900 500"
+                    viewBox="0 0 700 400"
                     on:mousedown=move |ev: web_sys::MouseEvent| {
+                        // Start wire drag if mousedown is on an output port circle.
                         let target = match ev.target() {
                             Some(t) => t,
                             None => return,
@@ -718,225 +583,65 @@ pub fn DagEditorPanel() -> impl IntoView {
                             Ok(e) => e,
                             Err(_) => return,
                         };
-
-                        // 1. Edge selection (data-channel-id).
-                        if let Some(ch_id_str) = el.get_attribute("data-channel-id") {
-                            if let Ok(ch_id) = ch_id_str.parse::<u32>() {
-                                set_selected_channel.set(Some(ch_id));
-                                set_selected_id.set(None);
-                                ev.prevent_default();
-                                return;
-                            }
-                        }
-
-                        // 2. Wire drag from output port (data-side="out").
                         let side = el.get_attribute("data-side").unwrap_or_default();
-                        if side == "out" {
-                            let block_id: BlockId = match el.get_attribute("data-block-id")
-                                .and_then(|s| s.parse().ok()) {
-                                Some(v) => v,
-                                None => return,
-                            };
-                            let port_idx: usize = match el.get_attribute("data-port-idx")
-                                .and_then(|s| s.parse().ok()) {
-                                Some(v) => v,
-                                None => return,
-                            };
-                            let svg_el = match el.closest("svg") {
-                                Ok(Some(s)) => s,
-                                _ => return,
-                            };
-                            let (mx, my) = client_to_world(
-                                &svg_el,
-                                ev.client_x() as f64,
-                                ev.client_y() as f64,
-                                pan_x.get_untracked(),
-                                pan_y.get_untracked(),
-                                zoom.get_untracked(),
-                            );
-                            set_dragging_wire.set(Some(DraggingWire {
-                                from_block: block_id,
-                                from_port: port_idx,
-                                mouse_x: mx,
-                                mouse_y: my,
-                            }));
-                            ev.prevent_default();
+                        if side != "out" {
                             return;
                         }
-
-                        // Also allow wire drag start from input ports — skip them for node drag.
-                        if side == "in" {
-                            return;
-                        }
-
-                        // 3. Node drag: walk up the DOM looking for data-block-id on a <g>.
-                        {
-                            let mut current: Option<web_sys::Element> = Some(el.clone());
-                            while let Some(node) = current {
-                                if node.has_attribute("data-block-id") {
-                                    if let Some(bid_str) = node.get_attribute("data-block-id") {
-                                        if let Ok(bid) = bid_str.parse::<BlockId>() {
-                                            let svg_el = match node.closest("svg") {
-                                                Ok(Some(s)) => s,
-                                                _ => return,
-                                            };
-                                            let (wx, wy) = client_to_world(
-                                                &svg_el,
-                                                ev.client_x() as f64,
-                                                ev.client_y() as f64,
-                                                pan_x.get_untracked(),
-                                                pan_y.get_untracked(),
-                                                zoom.get_untracked(),
-                                            );
-                                            let pos = positions.get_untracked();
-                                            let (nx, ny) = pos.get(&bid).copied().unwrap_or((0.0, 0.0));
-                                            set_dragging_node.set(Some(DraggingNode {
-                                                block_id: bid,
-                                                start_mouse_x: wx,
-                                                start_mouse_y: wy,
-                                                start_node_x: nx,
-                                                start_node_y: ny,
-                                                moved: false,
-                                            }));
-                                            ev.prevent_default();
-                                            return;
-                                        }
-                                    }
-                                }
-                                current = node.parent_element();
-                            }
-                        }
-
-                        // 4. Pan: shift+click or middle mouse button.
-                        if ev.shift_key() || ev.button() == 1 {
-                            let svg_el = match el.closest("svg") {
-                                Ok(Some(s)) => s,
-                                _ => return,
-                            };
-                            let rect = svg_el.get_bounding_client_rect();
-                            let sx = (ev.client_x() as f64 - rect.left()) * 900.0 / rect.width();
-                            let sy = (ev.client_y() as f64 - rect.top()) * 500.0 / rect.height();
-                            set_panning.set(Some(Panning {
-                                start_mouse_x: sx,
-                                start_mouse_y: sy,
-                                start_pan_x: pan_x.get_untracked(),
-                                start_pan_y: pan_y.get_untracked(),
-                            }));
-                            ev.prevent_default();
-                            return;
-                        }
-
-                        // 5. Clicked on empty canvas — deselect.
-                        set_selected_channel.set(None);
-                        set_selected_id.set(None);
+                        let block_id: usize = match el.get_attribute("data-block-id")
+                            .and_then(|s| s.parse().ok()) {
+                            Some(v) => v,
+                            None => return,
+                        };
+                        let port_idx: usize = match el.get_attribute("data-port-idx")
+                            .and_then(|s| s.parse().ok()) {
+                            Some(v) => v,
+                            None => return,
+                        };
+                        // Compute SVG coordinates from client position
+                        let svg_el = match el.closest("svg") {
+                            Ok(Some(s)) => s,
+                            _ => return,
+                        };
+                        let (mx, my) = client_to_svg(&svg_el, ev.client_x() as f64, ev.client_y() as f64);
+                        set_dragging_wire.set(Some(DraggingWire {
+                            from_block: block_id,
+                            from_port: port_idx,
+                            mouse_x: mx,
+                            mouse_y: my,
+                        }));
+                        ev.prevent_default();
                     }
                     on:mousemove=move |ev: web_sys::MouseEvent| {
-                        // Node drag.
-                        if let Some(dn) = dragging_node.get_untracked() {
-                            let svg_el_opt = ev.current_target()
-                                .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
-                            let svg_el = match svg_el_opt {
-                                Some(e) => e,
-                                None => return,
-                            };
-                            let (wx, wy) = client_to_world(
-                                &svg_el,
-                                ev.client_x() as f64,
-                                ev.client_y() as f64,
-                                pan_x.get_untracked(),
-                                pan_y.get_untracked(),
-                                zoom.get_untracked(),
-                            );
-                            let dx = wx - dn.start_mouse_x;
-                            let dy = wy - dn.start_mouse_y;
-                            let dist = (dx * dx + dy * dy).sqrt();
-                            let moved = dn.moved || dist > DRAG_THRESHOLD;
-                            if moved {
-                                let new_x = dn.start_node_x + dx;
-                                let new_y = dn.start_node_y + dy;
-                                set_positions.update(|p| {
-                                    p.insert(dn.block_id, (new_x, new_y));
-                                });
+                        // Update drag line endpoint while dragging.
+                        if dragging_wire.get_untracked().is_none() {
+                            return;
+                        }
+                        let target = match ev.current_target() {
+                            Some(t) => t,
+                            None => return,
+                        };
+                        let svg_el: web_sys::Element = match target.dyn_into() {
+                            Ok(e) => e,
+                            Err(_) => return,
+                        };
+                        let (mx, my) = client_to_svg(&svg_el, ev.client_x() as f64, ev.client_y() as f64);
+                        set_dragging_wire.update(|dw| {
+                            if let Some(ref mut w) = dw {
+                                w.mouse_x = mx;
+                                w.mouse_y = my;
                             }
-                            set_dragging_node.set(Some(DraggingNode {
-                                moved,
-                                ..dn
-                            }));
-                            ev.prevent_default();
-                            return;
-                        }
-
-                        // Pan drag.
-                        if let Some(pan) = panning.get_untracked() {
-                            let svg_el_opt = ev.current_target()
-                                .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
-                            let svg_el = match svg_el_opt {
-                                Some(e) => e,
-                                None => return,
-                            };
-                            let rect = svg_el.get_bounding_client_rect();
-                            let sx = (ev.client_x() as f64 - rect.left()) * 900.0 / rect.width();
-                            let sy = (ev.client_y() as f64 - rect.top()) * 500.0 / rect.height();
-                            set_pan_x.set(pan.start_pan_x + (sx - pan.start_mouse_x));
-                            set_pan_y.set(pan.start_pan_y + (sy - pan.start_mouse_y));
-                            ev.prevent_default();
-                            return;
-                        }
-
-                        // Wire drag.
-                        if dragging_wire.get_untracked().is_some() {
-                            let target = match ev.current_target() {
-                                Some(t) => t,
-                                None => return,
-                            };
-                            let svg_el: web_sys::Element = match target.dyn_into() {
-                                Ok(e) => e,
-                                Err(_) => return,
-                            };
-                            let (mx, my) = client_to_world(
-                                &svg_el,
-                                ev.client_x() as f64,
-                                ev.client_y() as f64,
-                                pan_x.get_untracked(),
-                                pan_y.get_untracked(),
-                                zoom.get_untracked(),
-                            );
-                            set_dragging_wire.update(|dw| {
-                                if let Some(ref mut w) = dw {
-                                    w.mouse_x = mx;
-                                    w.mouse_y = my;
-                                }
-                            });
-                        }
+                        });
                     }
                     on:mouseup=move |ev: web_sys::MouseEvent| {
-                        // Finish node drag.
-                        if let Some(dn) = dragging_node.get_untracked() {
-                            set_dragging_node.set(None);
-                            if dn.moved {
-                                // Position already updated in mousemove; just bump revision.
-                                bump();
-                            } else {
-                                // No movement — treat as a click to select.
-                                set_selected_id.set(Some(dn.block_id));
-                                set_selected_channel.set(None);
-                            }
-                            return;
-                        }
-
-                        // Finish panning.
-                        if panning.get_untracked().is_some() {
-                            set_panning.set(None);
-                            return;
-                        }
-
-                        // Finish wire drag.
+                        // Complete or cancel wire drag.
                         let wire = match dragging_wire.get_untracked() {
                             Some(w) => w,
                             None => return,
                         };
+                        // Clear drag state first.
                         set_dragging_wire.set(None);
 
+                        // Check if mouseup target is an input port.
                         let target = match ev.target() {
                             Some(t) => t,
                             None => return,
@@ -947,9 +652,9 @@ pub fn DagEditorPanel() -> impl IntoView {
                         };
                         let side = el.get_attribute("data-side").unwrap_or_default();
                         if side != "in" {
-                            return;
+                            return; // Dropped on empty canvas — cancel.
                         }
-                        let to_block: BlockId = match el.get_attribute("data-block-id")
+                        let to_block: usize = match el.get_attribute("data-block-id")
                             .and_then(|s| s.parse().ok()) {
                             Some(v) => v,
                             None => return,
@@ -960,64 +665,66 @@ pub fn DagEditorPanel() -> impl IntoView {
                             None => return,
                         };
 
+                        // Do not wire a block to itself.
                         if wire.from_block == to_block {
                             return;
                         }
 
-                        // Store edge in GraphEngine.
-                        let ch_id = with_engine(|eng| {
-                            eng.connect(wire.from_block, wire.from_port, to_block, to_port)
+                        // Generate auto-topic name.
+                        let auto_topic = format!("wire_{}_{}", wire.from_block, wire.from_port);
+
+                        // Update configs for both source and target blocks.
+                        set_blocks.update(|blks| {
+                            // --- Source block: set the output channel's config key ---
+                            if let Some(src_pb) = blks.iter().find(|b| b.id == wire.from_block) {
+                                if let Some(src_block) = src_pb.reconstruct() {
+                                    let channels = src_block.declared_channels();
+                                    let out_channels: Vec<_> = channels.iter()
+                                        .filter(|c| c.direction == ChannelDirection::Output)
+                                        .collect();
+                                    if let Some(out_ch) = out_channels.get(wire.from_port) {
+                                        if let Some(key) = find_config_key_for_channel(&src_pb.config, &out_ch.name) {
+                                            // Now mutably borrow to update
+                                            if let Some(src_mut) = blks.iter_mut().find(|b| b.id == wire.from_block) {
+                                                if let serde_json::Value::Object(ref mut map) = src_mut.config {
+                                                    map.insert(key, serde_json::Value::String(auto_topic.clone()));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // --- Target block: set the input channel's config key ---
+                            if let Some(dst_pb) = blks.iter().find(|b| b.id == to_block) {
+                                if let Some(dst_block) = dst_pb.reconstruct() {
+                                    let channels = dst_block.declared_channels();
+                                    let in_channels: Vec<_> = channels.iter()
+                                        .filter(|c| c.direction == ChannelDirection::Input)
+                                        .collect();
+                                    if let Some(in_ch) = in_channels.get(to_port) {
+                                        if let Some(key) = find_config_key_for_channel(&dst_pb.config, &in_ch.name) {
+                                            if let Some(dst_mut) = blks.iter_mut().find(|b| b.id == to_block) {
+                                                if let serde_json::Value::Object(ref mut map) = dst_mut.config {
+                                                    map.insert(key, serde_json::Value::String(auto_topic.clone()));
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         });
-
-                        if ch_id.is_some() {
-                            // Also update block configs with auto-topic names for codegen compat.
-                            let auto_topic = with_engine_ref(|eng| {
-                                eng.channels()
-                                    .iter()
-                                    .find(|ch| Some(ch.id) == ch_id)
-                                    .map(|ch| ch.topic.clone())
-                                    .unwrap_or_default()
-                            });
-                            update_block_config_topic(wire.from_block, wire.from_port, ChannelDirection::Output, &auto_topic);
-                            update_block_config_topic(to_block, to_port, ChannelDirection::Input, &auto_topic);
-                            sync_shared();
-                            bump();
-                        }
-                    }
-                    on:wheel=move |ev: web_sys::WheelEvent| {
-                        ev.prevent_default();
-                        let svg_el_opt = ev.current_target()
-                            .and_then(|t| t.dyn_into::<web_sys::Element>().ok());
-                        let svg_el = match svg_el_opt {
-                            Some(e) => e,
-                            None => return,
-                        };
-                        let rect = svg_el.get_bounding_client_rect();
-                        // Mouse position in SVG viewport coords.
-                        let mx = (ev.client_x() as f64 - rect.left()) * 900.0 / rect.width();
-                        let my = (ev.client_y() as f64 - rect.top()) * 500.0 / rect.height();
-
-                        let old_zoom = zoom.get_untracked();
-                        let direction = if ev.delta_y() < 0.0 { 1.0 } else { -1.0 };
-                        let new_zoom = (old_zoom * ZOOM_FACTOR.powf(direction)).clamp(ZOOM_MIN, ZOOM_MAX);
-
-                        // Zoom toward mouse: adjust pan so the world point under cursor stays fixed.
-                        let old_pan_x = pan_x.get_untracked();
-                        let old_pan_y = pan_y.get_untracked();
-                        set_pan_x.set(mx - (mx - old_pan_x) * new_zoom / old_zoom);
-                        set_pan_y.set(my - (my - old_pan_y) * new_zoom / old_zoom);
-                        set_zoom.set(new_zoom);
+                        sync_shared(&blocks.get());
                     }
                 >
-                    <g class="dag-world" transform=move || format!("translate({},{}) scale({})", pan_x.get(), pan_y.get(), zoom.get())>
-                    // Dashed drag line
+                    // Dashed drag line (rendered when dragging a wire)
                     {move || {
                         let dw = dragging_wire.get();
-                        let pos = positions.get();
+                        let blks = blocks.get();
                         dw.and_then(|w| {
-                            let (sx, sy) = pos.get(&w.from_block)?;
-                            let x1 = sx + NODE_WIDTH;
-                            let y1 = sy + PORT_Y_START + w.from_port as f64 * PORT_SPACING;
+                            let src = blks.iter().find(|b| b.id == w.from_block)?;
+                            let x1 = src.x + 190.0;
+                            let y1 = src.y + 46.0 + w.from_port as f64 * 16.0;
                             let x2 = w.mouse_x;
                             let y2 = w.mouse_y;
                             let cpx = f64::max((x2 - x1).abs() * 0.4, 30.0);
@@ -1041,19 +748,20 @@ pub fn DagEditorPanel() -> impl IntoView {
                         })
                     }}
                     {move || {
-                        let _rev = revision.get();
-                        let pos = positions.get();
+                        let blks = blocks.get();
                         let edge_list = edges.get();
-                        let sel_ch = selected_channel.get();
 
-                        // Edge paths
+                        // Edge paths (rendered first so they appear behind nodes)
                         let edge_views = edge_list.iter().filter_map(|edge| {
-                            let (sx, sy) = pos.get(&edge.from_block)?;
-                            let (dx, dy) = pos.get(&edge.to_block)?;
-                            let x1 = sx + NODE_WIDTH;
-                            let y1 = sy + PORT_Y_START + edge.from_port as f64 * PORT_SPACING;
-                            let x2 = *dx;
-                            let y2 = dy + PORT_Y_START + edge.to_port as f64 * PORT_SPACING;
+                            let src = blks.iter().find(|b| b.id == edge.from_block)?;
+                            let dst = blks.iter().find(|b| b.id == edge.to_block)?;
+                            // Output port: right side of src block
+                            let x1 = src.x + 190.0;
+                            let y1 = src.y + 46.0 + edge.from_port as f64 * 16.0;
+                            // Input port: left side of dst block
+                            let x2 = dst.x;
+                            let y2 = dst.y + 46.0 + edge.to_port as f64 * 16.0;
+                            // Cubic bezier control point x-offset
                             let cpx = f64::max((x2 - x1).abs() * 0.4, 30.0);
                             let d = format!(
                                 "M {},{} C {},{} {},{} {},{}",
@@ -1062,81 +770,54 @@ pub fn DagEditorPanel() -> impl IntoView {
                                 x2 - cpx, y2,
                                 x2, y2
                             );
-                            let is_selected = sel_ch == Some(edge.id);
-                            let stroke = if is_selected { "#ef4444" } else { "#6b7280" };
-                            let width = if is_selected { "3" } else { "2" };
-                            let ch_id_str = edge.id.to_string();
-                            // Invisible fat hit area for easier click target
-                            let hit_d = d.clone();
-                            let hit_ch_id = ch_id_str.clone();
                             Some(view! {
-                                <path
-                                    d=hit_d
-                                    fill="none"
-                                    stroke="transparent"
-                                    stroke-width="12"
-                                    attr:data-channel-id=hit_ch_id
-                                    class="dag-edge-hit"
-                                    style="cursor:pointer"
-                                />
                                 <path
                                     d=d
                                     fill="none"
-                                    stroke=stroke
-                                    stroke-width=width
-                                    attr:data-channel-id=ch_id_str
+                                    stroke="#6b7280"
+                                    stroke-width="2"
                                     class="dag-edge"
-                                    style="pointer-events:none"
                                 />
                             })
                         }).collect_view();
 
                         // Block nodes
-                        let blocks_data: Vec<_> = with_engine_ref(|eng| {
-                            eng.blocks().iter().map(|b| {
-                                let block = b.reconstruct();
-                                let name = block.as_ref()
-                                    .map(|bl| bl.display_name().to_string())
-                                    .unwrap_or_else(|| b.block_type.clone());
-                                let bt = b.block_type.clone();
-                                let channels = block.as_ref()
-                                    .map(|bl| bl.declared_channels())
-                                    .unwrap_or_default();
-                                (b.id, name, bt, channels)
-                            }).collect()
-                        });
-
-                        let node_views = blocks_data.into_iter().map(|(id, name, bt, channels)| {
-                            let (x, y) = pos.get(&id).copied().unwrap_or((30.0, 30.0));
+                        let node_views = blks.iter().map(|pb| {
+                            let id = pb.id;
+                            let x = pb.x;
+                            let y = pb.y;
+                            let block = pb.reconstruct();
+                            let name = block.as_ref().map(|b| b.display_name().to_string()).unwrap_or_else(|| pb.block_type.clone());
+                            let bt = pb.block_type.clone();
                             let is_selected = move || selected_id.get() == Some(id);
+                            let channels = block.as_ref().map(|b| b.declared_channels()).unwrap_or_default();
                             let in_count = channels.iter()
                                 .filter(|c| c.direction == ChannelDirection::Input).count();
                             let out_count = channels.iter()
                                 .filter(|c| c.direction == ChannelDirection::Output).count();
-                            let height = 50.0 + (in_count.max(out_count) as f64) * PORT_SPACING;
-                            let node_w_str = NODE_WIDTH.to_string();
+                            let height = 50.0 + (in_count.max(out_count) as f64) * 16.0;
 
                             view! {
                                 <g
                                     class=move || if is_selected() { "dag-node selected" } else { "dag-node" }
                                     transform=format!("translate({},{})", x, y)
-                                    attr:data-block-id=id.to_string()
+                                    on:click=move |_| set_selected_id.set(Some(id))
                                 >
                                     <rect
-                                        width=node_w_str.clone() height=height rx="6" ry="6"
+                                        width="190" height=height rx="6" ry="6"
                                         class="dag-node-rect"
                                     />
                                     <text x="95" y="18" class="dag-node-title">{name}</text>
                                     <text x="95" y="32" class="dag-node-type">{bt}</text>
                                     // Input ports
                                     {channels.iter().filter(|c| c.direction == ChannelDirection::Input).enumerate().map(|(i, ch)| {
-                                        let py = PORT_Y_START + i as f64 * PORT_SPACING;
+                                        let py = 46.0 + i as f64 * 16.0;
                                         let label = ch.name.clone();
                                         let bid = id.to_string();
                                         let pidx = i.to_string();
                                         view! {
                                             <circle
-                                                cx="0" cy=py r=PORT_RADIUS
+                                                cx="0" cy=py r="4"
                                                 class="dag-port dag-port-in"
                                                 attr:data-block-id=bid
                                                 attr:data-port-idx=pidx
@@ -1147,13 +828,13 @@ pub fn DagEditorPanel() -> impl IntoView {
                                     }).collect_view()}
                                     // Output ports
                                     {channels.iter().filter(|c| c.direction == ChannelDirection::Output).enumerate().map(|(i, ch)| {
-                                        let py = PORT_Y_START + i as f64 * PORT_SPACING;
+                                        let py = 46.0 + i as f64 * 16.0;
                                         let label = ch.name.clone();
                                         let bid = id.to_string();
                                         let pidx = i.to_string();
                                         view! {
                                             <circle
-                                                cx=node_w_str.clone() cy=py r=PORT_RADIUS
+                                                cx="190" cy=py r="4"
                                                 class="dag-port dag-port-out"
                                                 attr:data-block-id=bid
                                                 attr:data-port-idx=pidx
@@ -1171,60 +852,30 @@ pub fn DagEditorPanel() -> impl IntoView {
                             <g class="dag-nodes">{node_views}</g>
                         }
                     }}
-                    </g>
                 </svg>
             </div>
 
-            // ── Right pane (placeholder for Plot/Pins/I2C) ──────────────────
-            <div class="dag-right-pane">
-                <div class="dag-right-tabs">
-                    <button class="dag-right-tab active">"PLOT"</button>
-                    <button class="dag-right-tab">"PINS"</button>
-                    <button class="dag-right-tab">"I2C"</button>
-                </div>
-                <div class="dag-right-content">
-                    <p class="text-dim" style="font-size: 12px;">
-                        "Plot will appear here during simulation"
-                    </p>
-                </div>
-            </div>
+            // Bottom: live monitor
+            <MonitorPanel topics=sim_topics tick_count=sim_tick_count />
+
+            // Right: config panel
+            <ConfigPanel
+                block_type=selected_block_type
+                config_fields=config_fields
+                config_values=config_values
+                on_change=on_config_change
+                channels_text=channels_text
+                il_text=il_text
+            />
         </div>
     }
 }
 
-/// Update a block's config in the engine to set the topic name for a specific port.
-///
-/// Finds the config key corresponding to the given channel direction and port index,
-/// then sets it to `topic`.
-fn update_block_config_topic(
-    block_id: BlockId,
-    port_idx: usize,
-    direction: ChannelDirection,
-    topic: &str,
-) {
-    with_engine(|eng| {
-        let config = match eng.block(block_id) {
-            Some(b) => b.config.clone(),
-            None => return,
-        };
-        let block = match eng.block(block_id).and_then(|b| b.reconstruct()) {
-            Some(b) => b,
-            None => return,
-        };
-        let channels = block.declared_channels();
-        let filtered: Vec<_> = channels
-            .iter()
-            .filter(|c| c.direction == direction)
-            .collect();
-        if let Some(ch) = filtered.get(port_idx) {
-            if let Some(key) = find_config_key_for_channel(&config, &ch.name) {
-                eng.update_config(block_id, key, serde_json::Value::String(topic.to_string()));
-            }
-        }
-    });
-}
-
 /// Find the config key whose current value matches `channel_name`.
+///
+/// Blocks store channel topic names as string values in their config JSON.
+/// For example, `{"input_topic": "add/a", "output_topic": "add/out"}`.
+/// Given channel_name="add/a", this returns Some("input_topic").
 fn find_config_key_for_channel(config: &serde_json::Value, channel_name: &str) -> Option<String> {
     let obj = config.as_object()?;
     for (key, val) in obj {
@@ -1237,25 +888,54 @@ fn find_config_key_for_channel(config: &serde_json::Value, channel_name: &str) -
     None
 }
 
-/// Convert mouse client coordinates to world coordinates (SVG viewport -> inverse of pan/zoom).
-fn client_to_world(
-    svg: &web_sys::Element,
-    client_x: f64,
-    client_y: f64,
-    pan_x: f64,
-    pan_y: f64,
-    zoom: f64,
-) -> (f64, f64) {
+/// Convert mouse client coordinates to SVG user-space coordinates.
+///
+/// Uses the SVG element's bounding rect and viewBox to map screen pixels
+/// to the SVG coordinate system.
+fn client_to_svg(svg: &web_sys::Element, client_x: f64, client_y: f64) -> (f64, f64) {
     let rect = svg.get_bounding_client_rect();
     let rect_w = rect.width();
     let rect_h = rect.height();
-    // Map to SVG viewport coords (viewBox is 900x500).
-    let vb_w = 900.0;
-    let vb_h = 500.0;
-    let sx = (client_x - rect.left()) * vb_w / rect_w;
-    let sy = (client_y - rect.top()) * vb_h / rect_h;
-    // Invert the world transform: world = (svg - pan) / zoom
-    ((sx - pan_x) / zoom, (sy - pan_y) / zoom)
+    // viewBox is "0 0 700 400" — extract via attribute or use defaults
+    let (vb_w, vb_h) = svg
+        .get_attribute("viewBox")
+        .and_then(|vb| {
+            let parts: Vec<f64> = vb
+                .split_whitespace()
+                .filter_map(|s| s.parse().ok())
+                .collect();
+            if parts.len() == 4 {
+                Some((parts[2], parts[3]))
+            } else {
+                None
+            }
+        })
+        .unwrap_or((700.0, 400.0));
+
+    let scale_x = vb_w / rect_w;
+    let scale_y = vb_h / rect_h;
+    let x = (client_x - rect.left()) * scale_x;
+    let y = (client_y - rect.top()) * scale_y;
+    (x, y)
+}
+
+/// Offset all NodeId references in an Op by a given amount.
+fn offset_op(op: &dag_core::op::Op, offset: u16) -> dag_core::op::Op {
+    use dag_core::op::Op;
+    match op {
+        Op::Const(v) => Op::Const(*v),
+        Op::Input(name) => Op::Input(name.clone()),
+        Op::Output(name, src) => Op::Output(name.clone(), src + offset),
+        Op::Add(a, b) => Op::Add(a + offset, b + offset),
+        Op::Mul(a, b) => Op::Mul(a + offset, b + offset),
+        Op::Sub(a, b) => Op::Sub(a + offset, b + offset),
+        Op::Div(a, b) => Op::Div(a + offset, b + offset),
+        Op::Pow(a, b) => Op::Pow(a + offset, b + offset),
+        Op::Neg(a) => Op::Neg(a + offset),
+        Op::Relu(a) => Op::Relu(a + offset),
+        Op::Subscribe(topic) => Op::Subscribe(topic.clone()),
+        Op::Publish(topic, src) => Op::Publish(topic.clone(), src + offset),
+    }
 }
 
 /// POST CBOR DAG to the Pico2 HTTP API.
@@ -1317,12 +997,4 @@ async fn tick_mcu() -> Result<String, String> {
         .map_err(|e| format!("{:?}", e))?;
 
     Ok(text.as_string().unwrap_or_default())
-}
-
-/// Extract the checked state from a checkbox change event.
-fn event_target_checked(ev: &leptos::ev::Event) -> bool {
-    ev.target()
-        .and_then(|t| t.dyn_into::<web_sys::HtmlInputElement>().ok())
-        .map(|el| el.checked())
-        .unwrap_or(false)
 }
