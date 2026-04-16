@@ -1,10 +1,10 @@
 //! Block registry trait: catalog of available block types.
 //! Target registry trait: catalog of supported deployment targets.
 
+use crate::Module;
 use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
-use crate::Module;
 
 /// Metadata about a block type for UI palette display.
 pub struct BlockTypeInfo {

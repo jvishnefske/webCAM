@@ -122,8 +122,7 @@ impl DeploymentProfile {
 
     /// Assign a block to a specific board node.
     pub fn assign_block(&mut self, block_id: u32, node_id: &str) {
-        self.node_assignments
-            .insert(block_id, node_id.to_string());
+        self.node_assignments.insert(block_id, node_id.to_string());
     }
 
     /// Convert this profile into a [`DeploymentManifest`] suitable for codegen.
@@ -168,24 +167,22 @@ impl DeploymentProfile {
                     id: b.node_id.clone(),
                     mcu_family: b.mcu_family.clone(),
                     board: None,
-                    rust_target: mcu.map(|m| {
-                        match m.core {
-                            module_traits::inventory::CpuCore::CortexM0Plus => {
-                                "thumbv6m-none-eabi".to_string()
-                            }
-                            module_traits::inventory::CpuCore::CortexM4
-                            | module_traits::inventory::CpuCore::CortexM4F => {
-                                "thumbv7em-none-eabihf".to_string()
-                            }
-                            module_traits::inventory::CpuCore::CortexM7 => {
-                                "thumbv7em-none-eabihf".to_string()
-                            }
-                            module_traits::inventory::CpuCore::RiscV32IMC => {
-                                "riscv32imc-unknown-none-elf".to_string()
-                            }
-                            module_traits::inventory::CpuCore::HostSim => {
-                                "x86_64-unknown-linux-gnu".to_string()
-                            }
+                    rust_target: mcu.map(|m| match m.core {
+                        module_traits::inventory::CpuCore::CortexM0Plus => {
+                            "thumbv6m-none-eabi".to_string()
+                        }
+                        module_traits::inventory::CpuCore::CortexM4
+                        | module_traits::inventory::CpuCore::CortexM4F => {
+                            "thumbv7em-none-eabihf".to_string()
+                        }
+                        module_traits::inventory::CpuCore::CortexM7 => {
+                            "thumbv7em-none-eabihf".to_string()
+                        }
+                        module_traits::inventory::CpuCore::RiscV32IMC => {
+                            "riscv32imc-unknown-none-elf".to_string()
+                        }
+                        module_traits::inventory::CpuCore::HostSim => {
+                            "x86_64-unknown-linux-gnu".to_string()
                         }
                     }),
                 }
@@ -258,10 +255,7 @@ pub enum ValidationError {
         node_id: String,
     },
     /// A block references a node_id that is not listed in `boards`.
-    UnknownBoard {
-        block_id: u32,
-        node_id: String,
-    },
+    UnknownBoard { block_id: u32, node_id: String },
 }
 
 impl fmt::Display for ValidationError {
@@ -298,10 +292,7 @@ impl fmt::Display for ValidationError {
                 "block {}('{}') has hardware channel '{}' but no PeripheralBinding for node '{}'",
                 block_id, block_type, channel_name, node_id
             ),
-            ValidationError::UnknownBoard {
-                block_id,
-                node_id,
-            } => write!(
+            ValidationError::UnknownBoard { block_id, node_id } => write!(
                 f,
                 "block {} is assigned to node '{}' which is not in the boards list",
                 block_id, node_id
@@ -348,9 +339,10 @@ pub fn validate_profile(
                 continue;
             }
 
-            let has_binding = profile.peripheral_assignments.iter().any(|pb| {
-                pb.block_id == block_id && pb.port_name == channel.name
-            });
+            let has_binding = profile
+                .peripheral_assignments
+                .iter()
+                .any(|pb| pb.block_id == block_id && pb.port_name == channel.name);
 
             if !has_binding {
                 errors.push(ValidationError::MissingPeripheralBinding {
@@ -380,7 +372,10 @@ pub fn validate_profile(
     // Group peripheral_assignments by node.
     let mut bindings_by_node: HashMap<&str, Vec<&PeripheralBinding>> = HashMap::new();
     for pb in &profile.peripheral_assignments {
-        bindings_by_node.entry(pb.node.as_str()).or_default().push(pb);
+        bindings_by_node
+            .entry(pb.node.as_str())
+            .or_default()
+            .push(pb);
     }
 
     for (node, bindings) in &bindings_by_node {
@@ -481,9 +476,7 @@ pub fn validate_multi_board(
 
             // Check that a binding exists for this block+port+node combination.
             let has_binding = profile.peripheral_assignments.iter().any(|pb| {
-                pb.block_id == block_id
-                    && pb.port_name == channel.name
-                    && pb.node == *node_id
+                pb.block_id == block_id && pb.port_name == channel.name && pb.node == *node_id
             });
 
             if !has_binding {
@@ -575,20 +568,22 @@ mod tests {
         profile
             .channel_map
             .insert("sensor/temp".into(), "node0/temp".into());
-        profile
-            .node_assignments
-            .insert(1, "mcu_0".to_string());
-        profile
-            .node_assignments
-            .insert(2, "mcu_1".to_string());
+        profile.node_assignments.insert(1, "mcu_0".to_string());
+        profile.node_assignments.insert(2, "mcu_1".to_string());
 
         let json = serde_json::to_string(&profile).expect("serialize");
         let decoded: DeploymentProfile = serde_json::from_str(&json).expect("deserialize");
 
         assert_eq!(decoded.name, "test_profile");
         assert_eq!(decoded.channel_map.remap("sensor/temp"), "node0/temp");
-        assert_eq!(decoded.node_assignments.get(&1).map(String::as_str), Some("mcu_0"));
-        assert_eq!(decoded.node_assignments.get(&2).map(String::as_str), Some("mcu_1"));
+        assert_eq!(
+            decoded.node_assignments.get(&1).map(String::as_str),
+            Some("mcu_0")
+        );
+        assert_eq!(
+            decoded.node_assignments.get(&2).map(String::as_str),
+            Some("mcu_1")
+        );
         assert!(decoded.peripheral_assignments.is_empty());
     }
 
@@ -611,15 +606,31 @@ mod tests {
     use module_traits::deployment::{PeripheralBinding, PeripheralConfig, PinBinding};
 
     /// Build a minimal PeripheralBinding for test use.
-    fn make_binding(block_id: u32, port_name: &str, node: &str, pins: Vec<&str>) -> PeripheralBinding {
+    fn make_binding(
+        block_id: u32,
+        port_name: &str,
+        node: &str,
+        pins: Vec<&str>,
+    ) -> PeripheralBinding {
         PeripheralBinding {
             block_id,
             port_name: port_name.into(),
             node: node.into(),
             peripheral: "ADC1".into(),
-            pins: pins.into_iter().map(|p| PinBinding { signal: "IN".into(), pin: p.into(), af: None }).collect(),
+            pins: pins
+                .into_iter()
+                .map(|p| PinBinding {
+                    signal: "IN".into(),
+                    pin: p.into(),
+                    af: None,
+                })
+                .collect(),
             dma: None,
-            config: PeripheralConfig::Adc { channel: 0, resolution_bits: 12, sample_time: 0 },
+            config: PeripheralConfig::Adc {
+                channel: 0,
+                resolution_bits: 12,
+                sample_time: 0,
+            },
         }
     }
 
@@ -628,9 +639,7 @@ mod tests {
     fn validate_profile_no_hardware_channels_ok() {
         let profile = DeploymentProfile::new("test");
         // PID block only uses PubSub channels.
-        let blocks: Vec<(String, serde_json::Value)> = vec![
-            ("pid".into(), serde_json::json!({})),
-        ];
+        let blocks: Vec<(String, serde_json::Value)> = vec![("pid".into(), serde_json::json!({}))];
         assert!(validate_profile(&profile, &blocks).is_ok());
     }
 
@@ -638,9 +647,8 @@ mod tests {
     #[test]
     fn validate_profile_missing_hardware_binding_error() {
         let profile = DeploymentProfile::new("test");
-        let blocks: Vec<(String, serde_json::Value)> = vec![
-            ("adc".into(), serde_json::json!({"channel_name": "adc0"})),
-        ];
+        let blocks: Vec<(String, serde_json::Value)> =
+            vec![("adc".into(), serde_json::json!({"channel_name": "adc0"}))];
         let errors = validate_profile(&profile, &blocks).unwrap_err();
         assert!(
             errors.iter().any(|e| matches!(
@@ -714,9 +722,8 @@ mod tests {
         let binding = make_binding(0, "adc0", "motor_ctrl", vec!["GP26"]);
         profile.peripheral_assignments.push(binding);
 
-        let blocks: Vec<(String, serde_json::Value)> = vec![
-            ("adc".into(), serde_json::json!({"channel_name": "adc0"})),
-        ];
+        let blocks: Vec<(String, serde_json::Value)> =
+            vec![("adc".into(), serde_json::json!({"channel_name": "adc0"}))];
 
         assert!(
             validate_profile(&profile, &blocks).is_ok(),
@@ -766,15 +773,31 @@ mod tests {
         let manifest = profile.to_manifest(100.0);
 
         assert_eq!(manifest.topology.nodes.len(), 2);
-        assert!(manifest.topology.nodes.iter().any(|n| n.id == "motor_ctrl" && n.mcu_family == "Rp2040"));
-        assert!(manifest.topology.nodes.iter().any(|n| n.id == "sensor_hub" && n.mcu_family == "Stm32f4"));
+        assert!(manifest
+            .topology
+            .nodes
+            .iter()
+            .any(|n| n.id == "motor_ctrl" && n.mcu_family == "Rp2040"));
+        assert!(manifest
+            .topology
+            .nodes
+            .iter()
+            .any(|n| n.id == "sensor_hub" && n.mcu_family == "Stm32f4"));
         assert_eq!(manifest.tasks.len(), 2);
 
-        let motor_task = manifest.tasks.iter().find(|t| t.node == "motor_ctrl").unwrap();
+        let motor_task = manifest
+            .tasks
+            .iter()
+            .find(|t| t.node == "motor_ctrl")
+            .unwrap();
         assert!(motor_task.blocks.contains(&0));
         assert!(motor_task.blocks.contains(&1));
 
-        let sensor_task = manifest.tasks.iter().find(|t| t.node == "sensor_hub").unwrap();
+        let sensor_task = manifest
+            .tasks
+            .iter()
+            .find(|t| t.node == "sensor_hub")
+            .unwrap();
         assert_eq!(sensor_task.blocks, vec![2]);
     }
 
@@ -836,9 +859,8 @@ mod tests {
     #[test]
     fn validate_multi_board_empty_boards_passes() {
         let profile = DeploymentProfile::new("empty");
-        let blocks: Vec<(String, serde_json::Value)> = vec![
-            ("adc".into(), serde_json::json!({"channel_name": "adc0"})),
-        ];
+        let blocks: Vec<(String, serde_json::Value)> =
+            vec![("adc".into(), serde_json::json!({"channel_name": "adc0"}))];
         // No boards → legacy mode → always passes.
         assert!(validate_multi_board(&profile, &blocks).is_ok());
     }
@@ -860,9 +882,7 @@ mod tests {
         let mut profile = DeploymentProfile::new("bad_board");
         profile.add_board("board_a", "Rp2040");
         profile.assign_block(0, "nonexistent");
-        let blocks: Vec<(String, serde_json::Value)> = vec![
-            ("pid".into(), serde_json::json!({})),
-        ];
+        let blocks: Vec<(String, serde_json::Value)> = vec![("pid".into(), serde_json::json!({}))];
         let errors = validate_multi_board(&profile, &blocks).unwrap_err();
         assert!(errors.iter().any(|e| matches!(
             e,
@@ -880,9 +900,8 @@ mod tests {
         let binding = make_binding(0, "adc0", "board_a", vec!["GP26"]);
         profile.peripheral_assignments.push(binding);
 
-        let blocks: Vec<(String, serde_json::Value)> = vec![
-            ("adc".into(), serde_json::json!({"channel_name": "adc0"})),
-        ];
+        let blocks: Vec<(String, serde_json::Value)> =
+            vec![("adc".into(), serde_json::json!({"channel_name": "adc0"}))];
         let errors = validate_multi_board(&profile, &blocks).unwrap_err();
         assert!(errors.iter().any(|e| matches!(
             e,
@@ -903,9 +922,13 @@ mod tests {
         profile.assign_block(0, "board_a");
         profile.assign_block(1, "board_b");
         // Binding for block 0 on board_a
-        profile.peripheral_assignments.push(make_binding(0, "adc0", "board_a", vec!["GP26"]));
+        profile
+            .peripheral_assignments
+            .push(make_binding(0, "adc0", "board_a", vec!["GP26"]));
         // Binding for block 1 on board_b
-        profile.peripheral_assignments.push(make_binding(1, "adc1", "board_b", vec!["PA0"]));
+        profile
+            .peripheral_assignments
+            .push(make_binding(1, "adc1", "board_b", vec!["PA0"]));
 
         let blocks: Vec<(String, serde_json::Value)> = vec![
             ("adc".into(), serde_json::json!({"channel_name": "adc0"})),
@@ -985,10 +1008,7 @@ mod tests {
         assert_eq!(manifest.topology.nodes.len(), 1);
         let node = &manifest.topology.nodes[0];
         assert_eq!(node.mcu_family, "Stm32g0b1");
-        assert_eq!(
-            node.rust_target.as_deref(),
-            Some("thumbv6m-none-eabi")
-        );
+        assert_eq!(node.rust_target.as_deref(), Some("thumbv6m-none-eabi"));
     }
 
     // ── ValidationError::Display ───────────────────────────────────────

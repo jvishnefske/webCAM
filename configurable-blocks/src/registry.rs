@@ -117,6 +117,9 @@ mod tests {
         let json = palette_json();
         let parsed: serde_json::Value = serde_json::from_str(&json).expect("invalid JSON");
         assert!(parsed.is_array(), "palette_json should return a JSON array");
-        assert!(!parsed.as_array().unwrap().is_empty(), "palette should not be empty");
+        assert!(
+            !parsed.as_array().unwrap().is_empty(),
+            "palette should not be empty"
+        );
     }
 }

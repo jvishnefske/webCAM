@@ -41,10 +41,16 @@ pub fn generate_node_crate(
     let mut files = Vec::new();
 
     files.push((format!("{prefix}/Cargo.toml"), gen_cargo_toml(node_id, mcu)));
-    files.push((format!("{prefix}/.cargo/config.toml"), gen_cargo_config(mcu)));
+    files.push((
+        format!("{prefix}/.cargo/config.toml"),
+        gen_cargo_config(mcu),
+    ));
     files.push((format!("{prefix}/memory.x"), gen_memory_x(mcu)));
     files.push((format!("{prefix}/build.rs"), gen_build_rs()));
-    files.push((format!("{prefix}/src/main.rs"), gen_main_rs(node_id, mcu, tasks, dag, manifest)?));
+    files.push((
+        format!("{prefix}/src/main.rs"),
+        gen_main_rs(node_id, mcu, tasks, dag, manifest)?,
+    ));
 
     Ok(files)
 }
@@ -76,7 +82,8 @@ pub fn generate_all_crates_partitioned(
         let mcu = module_traits::inventory::mcu_for(&node.mcu_family)
             .ok_or_else(|| format!("unknown MCU family: {}", node.mcu_family))?;
 
-        let node_tasks: Vec<TaskBinding> = manifest.tasks
+        let node_tasks: Vec<TaskBinding> = manifest
+            .tasks
             .iter()
             .filter(|t| t.node == node.id)
             .cloned()
@@ -132,10 +139,18 @@ fn gen_cargo_toml(node_id: &str, mcu: &McuDef) -> String {
     writeln!(out, "edition = \"2021\"").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "[dependencies]").unwrap();
-    writeln!(out, "dag-core = {{ path = \"../dag-core\", default-features = false }}").unwrap();
+    writeln!(
+        out,
+        "dag-core = {{ path = \"../dag-core\", default-features = false }}"
+    )
+    .unwrap();
     writeln!(out, "embassy-executor = {{ version = \"0.7\", features = [\"arch-cortex-m\", \"executor-thread\"] }}").unwrap();
     writeln!(out, "embassy-time = \"0.4\"").unwrap();
-    writeln!(out, "{embassy_hal} = {{ version = \"0.4\", {hal_features} }}").unwrap();
+    writeln!(
+        out,
+        "{embassy_hal} = {{ version = \"0.4\", {hal_features} }}"
+    )
+    .unwrap();
     if !extra_deps.is_empty() {
         writeln!(out, "{extra_deps}").unwrap();
     }
@@ -212,7 +227,10 @@ fn gen_build_rs() -> String {
 }
 
 /// Collect peripheral bindings for this node, split into ADC and PWM groups.
-fn partition_bindings<'a>(node_id: &str, manifest: &'a DeploymentManifest) -> (Vec<&'a PeripheralBinding>, Vec<&'a PeripheralBinding>) {
+fn partition_bindings<'a>(
+    node_id: &str,
+    manifest: &'a DeploymentManifest,
+) -> (Vec<&'a PeripheralBinding>, Vec<&'a PeripheralBinding>) {
     let mut adc_bindings = Vec::new();
     let mut pwm_bindings = Vec::new();
 
@@ -243,7 +261,11 @@ fn emit_hardware_channels_struct(
     for (i, b) in adc_bindings.iter().enumerate() {
         let pin = b.pins.first().map(|p| p.pin.as_str()).unwrap_or("PIN_26");
         writeln!(out, "    /// ADC for port \"{}\" on {}", b.port_name, pin).unwrap();
-        writeln!(out, "    adc_{i}: Adc<'static, embassy_rp::peripherals::ADC>,").unwrap();
+        writeln!(
+            out,
+            "    adc_{i}: Adc<'static, embassy_rp::peripherals::ADC>,"
+        )
+        .unwrap();
         writeln!(out, "    adc_pin_{i}: AdcChannel<'static>,").unwrap();
     }
 
@@ -264,11 +286,20 @@ fn emit_hardware_channels_struct(
     writeln!(out).unwrap();
 
     // --- ChannelReader impl (reads from cache) ---
-    writeln!(out, "impl dag_core::eval::ChannelReader for HardwareChannels {{").unwrap();
+    writeln!(
+        out,
+        "impl dag_core::eval::ChannelReader for HardwareChannels {{"
+    )
+    .unwrap();
     writeln!(out, "    fn read(&self, name: &str) -> f64 {{").unwrap();
     writeln!(out, "        match name {{").unwrap();
     for (i, b) in adc_bindings.iter().enumerate() {
-        writeln!(out, "            \"{}\" => self.adc_cache[{i}],", b.port_name).unwrap();
+        writeln!(
+            out,
+            "            \"{}\" => self.adc_cache[{i}],",
+            b.port_name
+        )
+        .unwrap();
     }
     writeln!(out, "            _ => 0.0,").unwrap();
     writeln!(out, "        }}").unwrap();
@@ -286,7 +317,11 @@ fn emit_hardware_channels_struct(
             writeln!(out, "    /// Read all ADC channels and cache the results.").unwrap();
             writeln!(out, "    async fn read_all_adc(&mut self) {{").unwrap();
             for i in 0..adc_bindings.len() {
-                writeln!(out, "        let raw_{i} = self.adc_{i}.read(&mut self.adc_pin_{i}).await;").unwrap();
+                writeln!(
+                    out,
+                    "        let raw_{i} = self.adc_{i}.read(&mut self.adc_pin_{i}).await;"
+                )
+                .unwrap();
                 writeln!(out, "        self.adc_cache[{i}] = raw_{i} as f64;").unwrap();
             }
             writeln!(out, "    }}").unwrap();
@@ -296,7 +331,11 @@ fn emit_hardware_channels_struct(
         // write_pwm_outputs: dispatches DAG output values to PWM duty cycles
         if !pwm_bindings.is_empty() {
             writeln!(out, "    /// Apply DAG output values to PWM duty cycles.").unwrap();
-            writeln!(out, "    fn write_pwm_outputs(&mut self, result: &dag_core::eval::EvalResult) {{").unwrap();
+            writeln!(
+                out,
+                "    fn write_pwm_outputs(&mut self, result: &dag_core::eval::EvalResult) {{"
+            )
+            .unwrap();
             writeln!(out, "        for (name, val) in &result.outputs {{").unwrap();
             writeln!(out, "            match name.as_str() {{").unwrap();
             for (i, b) in pwm_bindings.iter().enumerate() {
@@ -327,7 +366,11 @@ fn emit_peripheral_init(
         let pin = b.pins.first().map(|p| p.pin.as_str()).unwrap_or("PIN_26");
         let pin_upper = pin.to_uppercase();
         writeln!(out, "    let adc_{i} = Adc::new(p.ADC, Irqs);").unwrap();
-        writeln!(out, "    let adc_pin_{i} = AdcChannel::new_pin(p.{pin_upper}, Pull::None);").unwrap();
+        writeln!(
+            out,
+            "    let adc_pin_{i} = AdcChannel::new_pin(p.{pin_upper}, Pull::None);"
+        )
+        .unwrap();
     }
 
     // PWM init
@@ -339,10 +382,27 @@ fn emit_peripheral_init(
             _ => 25000,
         };
         let slice = b.peripheral.to_uppercase();
-        writeln!(out, "    let mut pwm_config_{i} = embassy_rp::pwm::Config::default();").unwrap();
-        writeln!(out, "    pwm_config_{i}.divider = 125.into(); // 1 MHz tick from 125 MHz clock").unwrap();
-        writeln!(out, "    pwm_config_{i}.top = {};", 1_000_000u32.saturating_div(freq.max(1))).unwrap();
-        writeln!(out, "    let pwm_{i} = Pwm::new_output_a(p.{slice}, p.{pin_upper}, pwm_config_{i});").unwrap();
+        writeln!(
+            out,
+            "    let mut pwm_config_{i} = embassy_rp::pwm::Config::default();"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    pwm_config_{i}.divider = 125.into(); // 1 MHz tick from 125 MHz clock"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    pwm_config_{i}.top = {};",
+            1_000_000u32.saturating_div(freq.max(1))
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "    let pwm_{i} = Pwm::new_output_a(p.{slice}, p.{pin_upper}, pwm_config_{i});"
+        )
+        .unwrap();
     }
 
     writeln!(out).unwrap();
@@ -392,14 +452,24 @@ fn gen_main_rs(
         writeln!(out, "use embassy_rp::bind_interrupts;").unwrap();
         writeln!(out).unwrap();
         writeln!(out, "bind_interrupts!(struct Irqs {{").unwrap();
-        writeln!(out, "    ADC_IRQ_FIFO => embassy_rp::adc::InterruptHandler;").unwrap();
+        writeln!(
+            out,
+            "    ADC_IRQ_FIFO => embassy_rp::adc::InterruptHandler;"
+        )
+        .unwrap();
         writeln!(out, "}});").unwrap();
     }
     writeln!(out).unwrap();
 
     // Embed the DAG as a CBOR constant
     let cbor_bytes = cbor::encode_dag(dag);
-    writeln!(out, "/// CBOR-encoded DAG ({} nodes, {} bytes)", dag.len(), cbor_bytes.len()).unwrap();
+    writeln!(
+        out,
+        "/// CBOR-encoded DAG ({} nodes, {} bytes)",
+        dag.len(),
+        cbor_bytes.len()
+    )
+    .unwrap();
     write!(out, "const DAG_CBOR: &[u8] = &[").unwrap();
     for (i, byte) in cbor_bytes.iter().enumerate() {
         if i % 16 == 0 {
@@ -424,14 +494,22 @@ fn gen_main_rs(
     writeln!(out).unwrap();
     writeln!(out, "impl PubSub {{").unwrap();
     writeln!(out, "    const fn new() -> Self {{").unwrap();
-    writeln!(out, "        Self {{ topics: [(\"\", 0.0); 16], count: 0 }}").unwrap();
+    writeln!(
+        out,
+        "        Self {{ topics: [(\"\", 0.0); 16], count: 0 }}"
+    )
+    .unwrap();
     writeln!(out, "    }}").unwrap();
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
     writeln!(out, "impl dag_core::eval::PubSubReader for PubSub {{").unwrap();
     writeln!(out, "    fn read(&self, topic: &str) -> f64 {{").unwrap();
     writeln!(out, "        for i in 0..self.count {{").unwrap();
-    writeln!(out, "            if self.topics[i].0 == topic {{ return self.topics[i].1; }}").unwrap();
+    writeln!(
+        out,
+        "            if self.topics[i].0 == topic {{ return self.topics[i].1; }}"
+    )
+    .unwrap();
     writeln!(out, "        }}").unwrap();
     writeln!(out, "        0.0").unwrap();
     writeln!(out, "    }}").unwrap();
@@ -454,18 +532,33 @@ fn gen_main_rs(
     writeln!(out, "        .expect(\"CBOR DAG decode failed\");").unwrap();
     writeln!(out, "    let mut values = [0.0_f64; {}];", dag.len()).unwrap();
     writeln!(out, "    let mut pubsub = PubSub::new();").unwrap();
-    writeln!(out, "    defmt::info!(\"DAG loaded: {{}} nodes\", dag.len());").unwrap();
+    writeln!(
+        out,
+        "    defmt::info!(\"DAG loaded: {{}} nodes\", dag.len());"
+    )
+    .unwrap();
     writeln!(out).unwrap();
 
     // Generate ticker for the first periodic task (or default 50Hz)
-    let tick_hz = tasks.iter().find_map(|t| match &t.trigger {
-        TaskTrigger::Periodic { hz } => Some(*hz),
-        _ => None,
-    }).unwrap_or(50.0);
+    let tick_hz = tasks
+        .iter()
+        .find_map(|t| match &t.trigger {
+            TaskTrigger::Periodic { hz } => Some(*hz),
+            _ => None,
+        })
+        .unwrap_or(50.0);
     let tick_ms = (1000.0 / tick_hz) as u64;
 
-    writeln!(out, "    let mut ticker = Ticker::every(Duration::from_millis({tick_ms}));").unwrap();
-    writeln!(out, "    defmt::info!(\"tick rate: {{}}Hz ({{}}ms)\", {tick_hz:.0}, {tick_ms});").unwrap();
+    writeln!(
+        out,
+        "    let mut ticker = Ticker::every(Duration::from_millis({tick_ms}));"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "    defmt::info!(\"tick rate: {{}}Hz ({{}}ms)\", {tick_hz:.0}, {tick_ms});"
+    )
+    .unwrap();
     writeln!(out).unwrap();
 
     // Main loop
@@ -512,8 +605,16 @@ fn gen_main_rs(
     writeln!(out, "                }}").unwrap();
     writeln!(out, "            }}").unwrap();
     writeln!(out, "            if !found && pubsub.count < 16 {{").unwrap();
-    writeln!(out, "                // Topics come from the DAG CBOR constant so are 'static.").unwrap();
-    writeln!(out, "                pubsub.topics[pubsub.count] = (topic, *val);").unwrap();
+    writeln!(
+        out,
+        "                // Topics come from the DAG CBOR constant so are 'static."
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "                pubsub.topics[pubsub.count] = (topic, *val);"
+    )
+    .unwrap();
     writeln!(out, "                pubsub.count += 1;").unwrap();
     writeln!(out, "            }}").unwrap();
     writeln!(out, "        }}").unwrap();
@@ -607,7 +708,10 @@ mod tests {
         let manifest = simple_manifest();
         let dag = simple_dag();
         let files = generate_all_crates(&manifest, &dag).unwrap();
-        let cargo = files.iter().find(|(p, _)| p.ends_with("Cargo.toml")).unwrap();
+        let cargo = files
+            .iter()
+            .find(|(p, _)| p.ends_with("Cargo.toml"))
+            .unwrap();
 
         assert!(cargo.1.contains("embassy-rp"));
         assert!(cargo.1.contains("dag-core"));
@@ -629,7 +733,10 @@ mod tests {
         let manifest = simple_manifest();
         let dag = simple_dag();
         let files = generate_all_crates(&manifest, &dag).unwrap();
-        let cfg = files.iter().find(|(p, _)| p.ends_with("config.toml")).unwrap();
+        let cfg = files
+            .iter()
+            .find(|(p, _)| p.ends_with("config.toml"))
+            .unwrap();
 
         assert!(cfg.1.contains("thumbv6m-none-eabi"));
         assert!(cfg.1.contains("probe-rs run"));
@@ -748,7 +855,10 @@ mod tests {
             main.1.contains("AdcChannel::new_pin(p.PIN_26, Pull::None)"),
             "missing ADC pin init"
         );
-        assert!(main.1.contains("read_all_adc"), "missing ADC read helper call");
+        assert!(
+            main.1.contains("read_all_adc"),
+            "missing ADC read helper call"
+        );
     }
 
     #[test]
@@ -776,7 +886,8 @@ mod tests {
         let main = files.iter().find(|(p, _)| p.ends_with("main.rs")).unwrap();
 
         assert!(
-            main.1.contains("impl dag_core::eval::ChannelReader for HardwareChannels"),
+            main.1
+                .contains("impl dag_core::eval::ChannelReader for HardwareChannels"),
             "missing ChannelReader impl"
         );
         // The match arm should map "adc0" to the cached value
@@ -793,10 +904,22 @@ mod tests {
         let files = generate_all_crates(&manifest, &dag).unwrap();
         let main = files.iter().find(|(p, _)| p.ends_with("main.rs")).unwrap();
 
-        assert!(main.1.contains("use embassy_rp::adc::"), "missing ADC import");
-        assert!(main.1.contains("use embassy_rp::pwm::Pwm"), "missing PWM import");
-        assert!(main.1.contains("use embassy_rp::gpio::Pull"), "missing Pull import");
-        assert!(main.1.contains("bind_interrupts!"), "missing bind_interrupts macro");
+        assert!(
+            main.1.contains("use embassy_rp::adc::"),
+            "missing ADC import"
+        );
+        assert!(
+            main.1.contains("use embassy_rp::pwm::Pwm"),
+            "missing PWM import"
+        );
+        assert!(
+            main.1.contains("use embassy_rp::gpio::Pull"),
+            "missing Pull import"
+        );
+        assert!(
+            main.1.contains("bind_interrupts!"),
+            "missing bind_interrupts macro"
+        );
     }
 
     #[test]

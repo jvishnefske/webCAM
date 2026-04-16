@@ -61,6 +61,12 @@ pub enum PortKind {
     Series,
     Any,
     Message(MessageSchema),
+    /// A port carrying a value with a specific DAG type.
+    ///
+    /// Only available when the `typed-ports` feature is enabled on `module-traits`
+    /// and the `dag-core` crate is present.
+    #[cfg(feature = "typed-ports")]
+    Typed(dag_core::types::DagType),
 }
 
 /// Metadata for a single port.
@@ -286,8 +292,13 @@ mod tests {
     #[test]
     fn test_field_type_serde_roundtrip() {
         let types = vec![
-            FieldType::F32, FieldType::F64, FieldType::U8,
-            FieldType::U16, FieldType::U32, FieldType::I32, FieldType::Bool,
+            FieldType::F32,
+            FieldType::F64,
+            FieldType::U8,
+            FieldType::U16,
+            FieldType::U32,
+            FieldType::I32,
+            FieldType::Bool,
         ];
         for ft in &types {
             let json = serde_json::to_string(ft).expect("serialize FieldType");
@@ -301,8 +312,14 @@ mod tests {
         let schema = MessageSchema {
             name: String::from("motor_cmd"),
             fields: vec![
-                MessageField { name: String::from("speed"), field_type: FieldType::F32 },
-                MessageField { name: String::from("dir"), field_type: FieldType::Bool },
+                MessageField {
+                    name: String::from("speed"),
+                    field_type: FieldType::F32,
+                },
+                MessageField {
+                    name: String::from("dir"),
+                    field_type: FieldType::Bool,
+                },
             ],
         };
         assert_eq!(schema.name, "motor_cmd");
@@ -315,9 +332,10 @@ mod tests {
     fn test_message_schema_serde_roundtrip() {
         let schema = MessageSchema {
             name: String::from("sensor"),
-            fields: vec![
-                MessageField { name: String::from("temp"), field_type: FieldType::F32 },
-            ],
+            fields: vec![MessageField {
+                name: String::from("temp"),
+                field_type: FieldType::F32,
+            }],
         };
         let json = serde_json::to_string(&schema).expect("serialize");
         let restored: MessageSchema = serde_json::from_str(&json).expect("deserialize");
@@ -328,9 +346,10 @@ mod tests {
     fn test_port_kind_message_serde_roundtrip() {
         let schema = MessageSchema {
             name: String::from("cmd"),
-            fields: vec![
-                MessageField { name: String::from("val"), field_type: FieldType::F64 },
-            ],
+            fields: vec![MessageField {
+                name: String::from("val"),
+                field_type: FieldType::F64,
+            }],
         };
         let kind = PortKind::Message(schema);
         let json = serde_json::to_string(&kind).expect("serialize");
@@ -342,10 +361,7 @@ mod tests {
     fn test_message_data_construction() {
         let msg = MessageData {
             schema_name: String::from("motor_cmd"),
-            fields: vec![
-                (String::from("speed"), 1.5),
-                (String::from("dir"), 1.0),
-            ],
+            fields: vec![(String::from("speed"), 1.5), (String::from("dir"), 1.0)],
         };
         assert_eq!(msg.schema_name, "motor_cmd");
         assert_eq!(msg.fields.len(), 2);
@@ -384,5 +400,58 @@ mod tests {
         let val = Value::Message(data.clone());
         assert_eq!(val.as_message(), Some(&data));
         assert_eq!(Value::Float(1.0).as_message(), None);
+    }
+
+    // --- PortKind::Typed tests (only compiled with typed-ports feature) ---
+
+    #[cfg(feature = "typed-ports")]
+    #[test]
+    fn test_port_kind_typed_serde_roundtrip() {
+        let kind = PortKind::Typed(dag_core::types::DagType::I32);
+        let json = serde_json::to_string(&kind).expect("serialize Typed(I32)");
+        let restored: PortKind = serde_json::from_str(&json).expect("deserialize Typed(I32)");
+        assert_eq!(kind, restored);
+    }
+
+    #[cfg(feature = "typed-ports")]
+    #[test]
+    fn test_port_kind_typed_f32_serde_roundtrip() {
+        let kind = PortKind::Typed(dag_core::types::DagType::F32);
+        let json = serde_json::to_string(&kind).expect("serialize Typed(F32)");
+        let restored: PortKind = serde_json::from_str(&json).expect("deserialize Typed(F32)");
+        assert_eq!(kind, restored);
+    }
+
+    #[cfg(feature = "typed-ports")]
+    #[test]
+    fn test_port_kind_typed_struct_serde_roundtrip() {
+        let kind = PortKind::Typed(dag_core::types::DagType::Struct {
+            name: String::from("Sensor"),
+            fields: vec![
+                (String::from("temp"), dag_core::types::DagType::F32),
+                (String::from("ok"), dag_core::types::DagType::Bool),
+            ],
+        });
+        let json = serde_json::to_string(&kind).expect("serialize Typed(Struct)");
+        let restored: PortKind = serde_json::from_str(&json).expect("deserialize Typed(Struct)");
+        assert_eq!(kind, restored);
+    }
+
+    #[cfg(feature = "typed-ports")]
+    #[test]
+    fn test_port_kind_typed_does_not_equal_float() {
+        let typed = PortKind::Typed(dag_core::types::DagType::F64);
+        let float = PortKind::Float;
+        assert_ne!(typed, float);
+    }
+
+    /// Existing PortKind::Float still works unchanged, even with the feature enabled.
+    #[test]
+    fn test_port_kind_float_unchanged() {
+        let kind = PortKind::Float;
+        let json = serde_json::to_string(&kind).expect("serialize Float");
+        let restored: PortKind = serde_json::from_str(&json).expect("deserialize Float");
+        assert_eq!(kind, restored);
+        assert_eq!(json, "\"Float\"");
     }
 }

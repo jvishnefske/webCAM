@@ -29,10 +29,10 @@ pub mod value;
 pub use analysis::{AnalysisMetadata, AnalysisModel};
 pub use codegen_trait::Codegen;
 pub use function_def::{
-    FuncPortDef, FunctionDef, FunctionOp, ParamDef, ParamKind, builtin_function_defs,
+    builtin_function_defs, FuncPortDef, FunctionDef, FunctionOp, ParamDef, ParamKind,
 };
 pub use module::Module;
+pub use registry::{BlockRegistry, BlockTypeInfo, TargetInfo, TargetRegistry};
 pub use sim::{PeripheralError, SimModel, SimPeripherals};
 pub use tick::Tick;
-pub use registry::{BlockRegistry, BlockTypeInfo, TargetInfo, TargetRegistry};
 pub use value::{FieldType, MessageData, MessageField, MessageSchema, PortDef, PortKind, Value};
