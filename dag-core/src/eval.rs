@@ -145,6 +145,14 @@ impl SimState {
         &self.pubsub
     }
 
+    /// Externally set (inject) a pubsub topic value.
+    ///
+    /// The value is immediately visible to `Subscribe` ops on the next
+    /// `tick()` call, just as if a `Publish` op had written it.
+    pub fn set_topic(&mut self, topic: &str, value: f64) {
+        self.pubsub.insert(topic.into(), value);
+    }
+
     /// Reset simulation state: clear tick counter, pubsub store, and values.
     pub fn reset(&mut self) {
         self.tick = 0;
