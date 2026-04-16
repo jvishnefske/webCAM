@@ -3,6 +3,7 @@
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 /// Reference to a struct definition in the TypeRegistry.
 pub type TypeId = u16;
@@ -149,7 +150,117 @@ impl DagType {
         }
     }
 }
+// ---------------------------------------------------------------------------
+// StructField / StructDef
+// ---------------------------------------------------------------------------
 
+/// A named field in a struct definition.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct StructField {
+    pub name: String,
+    pub ty: DagType,
+}
+
+/// A named product type — a struct with ordered, typed fields.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct StructDef {
+    pub name: String,
+    pub fields: Vec<StructField>,
+}
+
+impl StructDef {
+    /// Total byte width if all fields are fixed-size scalars.
+    ///
+    /// Returns `None` if any field has a variable-size or registry-dependent
+    /// type (e.g. `Bytes`, `Text`, `Array`, `Struct(TypeId)`).
+    pub fn byte_width(&self) -> Option<usize> {
+        self.fields
+            .iter()
+            .try_fold(0usize, |acc, field| Some(acc + field.ty.byte_width()?))
+    }
+
+    /// Find a field by name, returning `(byte_offset, &DagType)`.
+    ///
+    /// The offset is computed as the sum of `byte_width()` of all preceding
+    /// fields. Returns `None` if the field is not found **or** if any
+    /// preceding field has a variable-size type.
+    pub fn field_offset(&self, name: &str) -> Option<(usize, &DagType)> {
+        let mut offset = 0usize;
+        for field in &self.fields {
+            if field.name == name {
+                return Some((offset, &field.ty));
+            }
+            offset += field.ty.byte_width()?;
+        }
+        None
+    }
+
+    /// Get a field by its positional index.
+    pub fn field_by_index(&self, idx: usize) -> Option<&StructField> {
+        self.fields.get(idx)
+    }
+
+    /// Number of fields in this struct.
+    pub fn field_count(&self) -> usize {
+        self.fields.len()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TypeRegistry
+// ---------------------------------------------------------------------------
+
+/// Registry of struct type definitions.
+///
+/// Types are registered once and referenced by [`TypeId`]. IDs are assigned
+/// sequentially starting from 0.
+#[derive(Debug, Clone, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TypeRegistry {
+    defs: Vec<StructDef>,
+}
+
+impl TypeRegistry {
+    /// Create an empty registry.
+    pub fn new() -> Self {
+        Self { defs: Vec::new() }
+    }
+
+    /// Register a struct definition, returning its [`TypeId`].
+    ///
+    /// IDs are assigned sequentially (0, 1, 2, ...).
+    pub fn register(&mut self, def: StructDef) -> TypeId {
+        let id = self.defs.len() as TypeId;
+        self.defs.push(def);
+        id
+    }
+
+    /// Look up a struct definition by its [`TypeId`].
+    pub fn get(&self, id: TypeId) -> Option<&StructDef> {
+        self.defs.get(id as usize)
+    }
+
+    /// Find a struct definition by name, returning `(TypeId, &StructDef)`.
+    pub fn find_by_name(&self, name: &str) -> Option<(TypeId, &StructDef)> {
+        self.defs
+            .iter()
+            .enumerate()
+            .find(|(_, def)| def.name == name)
+            .map(|(i, def)| (i as TypeId, def))
+    }
+
+    /// Number of registered struct definitions.
+    pub fn len(&self) -> usize {
+        self.defs.len()
+    }
+
+    /// Returns `true` if no struct definitions have been registered.
+    pub fn is_empty(&self) -> bool {
+        self.defs.is_empty()
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,5 +666,291 @@ mod tests {
             )))));
             assert_eq!(roundtrip(&ty), ty);
         }
+    }
+
+    // -- StructDef -------------------------------------------------------
+    #[test]
+    fn struct_byte_width_all_fixed() {
+        let def = StructDef {
+            name: "Point3D".to_string(),
+            fields: vec![
+                StructField {
+                    name: "x".to_string(),
+                    ty: DagType::F64,
+                },
+                StructField {
+                    name: "y".to_string(),
+                    ty: DagType::F64,
+                },
+                StructField {
+                    name: "z".to_string(),
+                    ty: DagType::F64,
+                },
+            ],
+        };
+        assert_eq!(def.byte_width(), Some(24));
+    }
+
+    #[test]
+    fn struct_byte_width_none_when_variable_field() {
+        let def = StructDef {
+            name: "Msg".to_string(),
+            fields: vec![
+                StructField {
+                    name: "id".to_string(),
+                    ty: DagType::U32,
+                },
+                StructField {
+                    name: "payload".to_string(),
+                    ty: DagType::Bytes,
+                },
+            ],
+        };
+        assert_eq!(def.byte_width(), None);
+    }
+
+    #[test]
+    fn struct_byte_width_none_when_text_field() {
+        let def = StructDef {
+            name: "Named".to_string(),
+            fields: vec![StructField {
+                name: "label".to_string(),
+                ty: DagType::Text,
+            }],
+        };
+        assert_eq!(def.byte_width(), None);
+    }
+
+    #[test]
+    fn struct_byte_width_none_with_nested_struct() {
+        // Struct(TypeId) has no intrinsic byte_width (needs registry).
+        let def = StructDef {
+            name: "Wrapper".to_string(),
+            fields: vec![
+                StructField {
+                    name: "header".to_string(),
+                    ty: DagType::U8,
+                },
+                StructField {
+                    name: "inner".to_string(),
+                    ty: DagType::Struct(0),
+                },
+            ],
+        };
+        assert_eq!(def.byte_width(), None);
+    }
+
+    #[test]
+    fn struct_field_offset_first_and_last() {
+        let def = StructDef {
+            name: "Pair".to_string(),
+            fields: vec![
+                StructField {
+                    name: "a".to_string(),
+                    ty: DagType::U16,
+                },
+                StructField {
+                    name: "b".to_string(),
+                    ty: DagType::I32,
+                },
+                StructField {
+                    name: "c".to_string(),
+                    ty: DagType::F64,
+                },
+            ],
+        };
+        // First field at offset 0
+        let (off, ty) = def.field_offset("a").unwrap();
+        assert_eq!(off, 0);
+        assert_eq!(ty, &DagType::U16);
+
+        // Second field at offset 2 (U16 = 2 bytes)
+        let (off, ty) = def.field_offset("b").unwrap();
+        assert_eq!(off, 2);
+        assert_eq!(ty, &DagType::I32);
+
+        // Last field at offset 6 (2 + 4)
+        let (off, ty) = def.field_offset("c").unwrap();
+        assert_eq!(off, 6);
+        assert_eq!(ty, &DagType::F64);
+
+        // Non-existent field
+        assert!(def.field_offset("z").is_none());
+    }
+
+    #[test]
+    fn struct_field_offset_none_with_variable_preceding() {
+        let def = StructDef {
+            name: "Msg".to_string(),
+            fields: vec![
+                StructField {
+                    name: "payload".to_string(),
+                    ty: DagType::Bytes,
+                },
+                StructField {
+                    name: "checksum".to_string(),
+                    ty: DagType::U32,
+                },
+            ],
+        };
+        // Cannot compute offset past a variable-size field
+        assert!(def.field_offset("checksum").is_none());
+        // First variable-size field is at offset 0
+        let (off, ty) = def.field_offset("payload").unwrap();
+        assert_eq!(off, 0);
+        assert_eq!(ty, &DagType::Bytes);
+    }
+
+    #[test]
+    fn struct_field_by_index_valid_and_out_of_bounds() {
+        let def = StructDef {
+            name: "Single".to_string(),
+            fields: vec![StructField {
+                name: "val".to_string(),
+                ty: DagType::F32,
+            }],
+        };
+        let f = def.field_by_index(0).unwrap();
+        assert_eq!(f.name, "val");
+        assert_eq!(f.ty, DagType::F32);
+
+        assert!(def.field_by_index(1).is_none());
+        assert!(def.field_by_index(999).is_none());
+    }
+
+    #[test]
+    fn struct_field_count() {
+        let empty = StructDef {
+            name: "Empty".to_string(),
+            fields: vec![],
+        };
+        assert_eq!(empty.field_count(), 0);
+
+        let three = StructDef {
+            name: "Triple".to_string(),
+            fields: vec![
+                StructField {
+                    name: "a".to_string(),
+                    ty: DagType::U8,
+                },
+                StructField {
+                    name: "b".to_string(),
+                    ty: DagType::U16,
+                },
+                StructField {
+                    name: "c".to_string(),
+                    ty: DagType::U32,
+                },
+            ],
+        };
+        assert_eq!(three.field_count(), 3);
+    }
+
+    // -- TypeRegistry ----------------------------------------------------
+
+    #[test]
+    fn registry_sequential_ids() {
+        let mut reg = TypeRegistry::new();
+        let id0 = reg.register(StructDef {
+            name: "A".to_string(),
+            fields: vec![],
+        });
+        let id1 = reg.register(StructDef {
+            name: "B".to_string(),
+            fields: vec![],
+        });
+        let id2 = reg.register(StructDef {
+            name: "C".to_string(),
+            fields: vec![],
+        });
+        assert_eq!(id0, 0);
+        assert_eq!(id1, 1);
+        assert_eq!(id2, 2);
+    }
+
+    #[test]
+    fn registry_get_valid_and_invalid() {
+        let mut reg = TypeRegistry::new();
+        let id = reg.register(StructDef {
+            name: "Foo".to_string(),
+            fields: vec![StructField {
+                name: "x".to_string(),
+                ty: DagType::F64,
+            }],
+        });
+
+        let def = reg.get(id).unwrap();
+        assert_eq!(def.name, "Foo");
+        assert_eq!(def.fields.len(), 1);
+
+        assert!(reg.get(99).is_none());
+    }
+
+    #[test]
+    fn registry_find_by_name_found_and_not_found() {
+        let mut reg = TypeRegistry::new();
+        reg.register(StructDef {
+            name: "Alpha".to_string(),
+            fields: vec![],
+        });
+        reg.register(StructDef {
+            name: "Beta".to_string(),
+            fields: vec![],
+        });
+
+        let (id, def) = reg.find_by_name("Beta").unwrap();
+        assert_eq!(id, 1);
+        assert_eq!(def.name, "Beta");
+
+        assert!(reg.find_by_name("Gamma").is_none());
+    }
+
+    #[test]
+    fn registry_len_and_is_empty() {
+        let mut reg = TypeRegistry::new();
+        assert!(reg.is_empty());
+        assert_eq!(reg.len(), 0);
+
+        reg.register(StructDef {
+            name: "T".to_string(),
+            fields: vec![],
+        });
+        assert!(!reg.is_empty());
+        assert_eq!(reg.len(), 1);
+    }
+
+    // -- Dag integration (type_registry) ---------------------------------
+
+    #[test]
+    fn dag_new_has_empty_type_registry() {
+        let dag = crate::op::Dag::new();
+        assert!(dag.type_registry().is_empty());
+        assert_eq!(dag.type_registry().len(), 0);
+    }
+
+    #[test]
+    fn dag_register_type_and_retrieve() {
+        let mut dag = crate::op::Dag::new();
+        let id = dag.register_type(StructDef {
+            name: "Sensor".to_string(),
+            fields: vec![
+                StructField {
+                    name: "value".to_string(),
+                    ty: DagType::F64,
+                },
+                StructField {
+                    name: "timestamp".to_string(),
+                    ty: DagType::U64,
+                },
+            ],
+        });
+        assert_eq!(id, 0);
+
+        let reg = dag.type_registry();
+        assert_eq!(reg.len(), 1);
+        let def = reg.get(id).unwrap();
+        assert_eq!(def.name, "Sensor");
+        assert_eq!(def.field_count(), 2);
+        assert_eq!(def.byte_width(), Some(16)); // 8 + 8
     }
 }

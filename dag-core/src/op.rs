@@ -1,6 +1,8 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use crate::types::{StructDef, TypeId, TypeRegistry};
+
 pub type NodeId = u16;
 pub type ChannelName = String;
 pub type Topic = String;
@@ -39,11 +41,15 @@ pub enum DagError {
 
 pub struct Dag {
     nodes: Vec<Op>,
+    type_registry: TypeRegistry,
 }
 
 impl Dag {
     pub fn new() -> Self {
-        Dag { nodes: Vec::new() }
+        Dag {
+            nodes: Vec::new(),
+            type_registry: TypeRegistry::new(),
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -87,6 +93,16 @@ impl Dag {
         let id = current as NodeId;
         self.nodes.push(op);
         Ok(id)
+    }
+
+    /// Register a struct type definition, returning its [`TypeId`].
+    pub fn register_type(&mut self, def: StructDef) -> TypeId {
+        self.type_registry.register(def)
+    }
+
+    /// Borrow the type registry.
+    pub fn type_registry(&self) -> &TypeRegistry {
+        &self.type_registry
     }
 }
 

@@ -438,7 +438,9 @@ mod tests {
     fn test_decode_op_indefinite_length_error() {
         // CBOR indefinite-length array start (0x9F) followed by a u8 tag and float,
         // then indefinite break (0xFF).  Op::decode requires a definite-length array.
-        let bytes = &[0x9F, 0x00, 0xFB, 0x40, 0x45, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF];
+        let bytes = &[
+            0x9F, 0x00, 0xFB, 0x40, 0x45, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF,
+        ];
         let result = minicbor::decode::<Op>(bytes);
         assert!(result.is_err());
     }
