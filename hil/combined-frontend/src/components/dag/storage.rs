@@ -82,7 +82,7 @@ fn local_storage() -> Result<web_sys::Storage, String> {
         .ok_or_else(|| "localStorage not available".to_string())
 }
 
-// ── Tests ────────────────────────────────────────────────────────────────────
+// -- Tests ---------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -145,11 +145,11 @@ mod tests {
             saved_at: String::new(),
         };
 
-        // Serialize and deserialize
+        // Serialize and deserialize.
         let json = serde_json::to_string(&project).unwrap();
         let loaded: SavedProject = serde_json::from_str(&json).unwrap();
 
-        // Restore into a new engine
+        // Restore into a new engine.
         let mut engine2 = GraphEngine::new();
         engine2.restore(&loaded.snapshot);
 

@@ -29,7 +29,7 @@ pub fn EdgePath(
             stroke="transparent"
             stroke-width="12"
             class="df-edge-hit"
-            style="cursor:pointer"
+            style="cursor:pointer;pointer-events:stroke"
             data-ch=channel_id.to_string()
             on:click=move |ev| {
                 ev.stop_propagation();
