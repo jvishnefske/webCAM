@@ -187,6 +187,18 @@ mod tests {
                 data: vec![0xFF; 256],
             },
             messages::Request::FwFinish { crc32: 0x12345678 },
+            messages::Request::TelemetryBlockUpdated {
+                block_id: 1,
+                block_type: "gain".to_string(),
+                config_json: "{}".to_string(),
+            },
+            messages::Request::TelemetryConnectionCreated {
+                from_block: 1,
+                from_port: 0,
+                to_block: 2,
+                to_port: 0,
+                channel_id: 0x01000200,
+            },
         ];
         for req in &variants {
             let bytes = messages::encode_request(req);

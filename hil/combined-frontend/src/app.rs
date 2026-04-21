@@ -1,6 +1,7 @@
 //! Root application component with mode navigation and shared state.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use leptos::prelude::*;
@@ -26,6 +27,15 @@ pub enum AppMode {
     Dataflow,
     Panel,
 }
+
+/// Live topic map: DAG tick loop writes snapshots here; Panel widgets read for display.
+#[derive(Clone, Copy)]
+pub struct SimTopics(pub RwSignal<BTreeMap<String, f64>>);
+
+/// External inputs: Panel widgets write here; DAG tick loop merges into SimState
+/// before each tick so Subscribe blocks see them.
+#[derive(Clone, Copy)]
+pub struct ExternalInputs(pub RwSignal<BTreeMap<String, f64>>);
 
 /// Sub-tab within Dataflow mode (the existing HIL tabs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -190,6 +200,13 @@ pub fn App() -> impl IntoView {
     let (shared_blocks, set_shared_blocks) = signal(BlockSet::new());
     provide_context(shared_blocks);
     provide_context(set_shared_blocks);
+
+    // -- Shared runtime topics (DAG-written, Panel-read) --
+    provide_context(SimTopics(RwSignal::new(BTreeMap::<String, f64>::new())));
+    // -- External inputs (Panel-written, DAG-consumed) --
+    provide_context(ExternalInputs(
+        RwSignal::new(BTreeMap::<String, f64>::new()),
+    ));
 
     // -- Provide context --
     let ctx = AppContext {

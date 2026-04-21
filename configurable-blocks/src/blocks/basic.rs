@@ -20,7 +20,7 @@ impl Default for ConstantBlock {
     fn default() -> Self {
         Self {
             value: 1.0,
-            publish_topic: String::new(),
+            publish_topic: "const_out".into(),
         }
     }
 }
@@ -1325,7 +1325,7 @@ mod tests {
         // config json roundtrip
         let json = block.config_json();
         assert_eq!(json["value"], 1.0);
-        assert_eq!(json["publish_topic"], "");
+        assert_eq!(json["publish_topic"], "const_out");
 
         // apply_config
         let new_config = serde_json::json!({"value": 99.0, "publish_topic": "sensor/out"});
@@ -1354,7 +1354,11 @@ mod tests {
 
     #[test]
     fn test_constant_no_publish_channels_empty() {
-        let block = ConstantBlock::default(); // publish_topic is empty
+        // Constructed directly with empty topic: no output channel declared.
+        let block = ConstantBlock {
+            value: 1.0,
+            publish_topic: String::new(),
+        };
         let channels = block.declared_channels();
         assert!(channels.is_empty());
     }
@@ -1365,14 +1369,14 @@ mod tests {
         // Only update value, leave publish_topic unchanged
         block.apply_config(&serde_json::json!({"value": 42.0}));
         assert_eq!(block.value, 42.0);
-        assert_eq!(block.publish_topic, ""); // unchanged
+        assert_eq!(block.publish_topic, "const_out"); // unchanged from default
     }
 
     #[test]
     fn test_constant_default_values() {
         let block = ConstantBlock::default();
         assert_eq!(block.value, 1.0);
-        assert_eq!(block.publish_topic, "");
+        assert_eq!(block.publish_topic, "const_out");
     }
 
     #[test]
@@ -1382,7 +1386,7 @@ mod tests {
         let value_field = schema.iter().find(|f| f.key == "value").unwrap();
         assert_eq!(value_field.default, serde_json::json!(1.0));
         let topic_field = schema.iter().find(|f| f.key == "publish_topic").unwrap();
-        assert_eq!(topic_field.default, serde_json::json!(""));
+        assert_eq!(topic_field.default, serde_json::json!("const_out"));
     }
 
     // ===================================================================

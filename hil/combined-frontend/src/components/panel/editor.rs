@@ -6,6 +6,7 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
 use super::types::*;
+use crate::app::{ExternalInputs, SimTopics};
 
 // ---------------------------------------------------------------------------
 // LocalStorage helpers
@@ -46,8 +47,10 @@ pub fn PanelEditor() -> impl IntoView {
     // -- Selection --
     let (selected_id, set_selected_id) = signal(None::<u32>);
 
-    // -- Live topic values --
-    let (topic_values, set_topic_values) = signal(BTreeMap::<String, f64>::new());
+    // -- Live topic values (DAG tick loop writes; we read) --
+    let sim_topics = use_context::<SimTopics>().expect("SimTopics must be provided via context");
+    let external_inputs =
+        use_context::<ExternalInputs>().expect("ExternalInputs must be provided via context");
 
     // -- Drag state --
     let (dragging, set_dragging) = signal(None::<DragState>);
@@ -225,10 +228,11 @@ pub fn PanelEditor() -> impl IntoView {
                 {move || {
                     let p = panel.get();
                     let sel = selected_id.get();
-                    let topics = topic_values.get();
+                    let topics = sim_topics.0.get();
+                    let ext_snapshot = external_inputs.0.get();
                     p.widgets.iter().map(|w| {
                         let is_selected = sel == Some(w.id);
-                        render_widget(w, is_selected, &topics)
+                        render_widget(w, is_selected, &topics, &ext_snapshot, external_inputs)
                     }).collect_view()
                 }}
             </div>
@@ -249,7 +253,7 @@ pub fn PanelEditor() -> impl IntoView {
                             render_inspector(
                                 widget,
                                 set_panel,
-                                set_topic_values,
+                                sim_topics,
                                 on_delete_selected,
                             )
                         },
@@ -293,7 +297,13 @@ fn find_widget_ancestor(el: &web_sys::Element) -> Option<web_sys::Element> {
 // Widget rendering
 // ---------------------------------------------------------------------------
 
-fn render_widget(w: &Widget, selected: bool, topics: &BTreeMap<String, f64>) -> impl IntoView {
+fn render_widget(
+    w: &Widget,
+    selected: bool,
+    topics: &BTreeMap<String, f64>,
+    external_inputs_snapshot: &BTreeMap<String, f64>,
+    external_inputs: ExternalInputs,
+) -> impl IntoView {
     let border = if selected {
         "2px solid #60a5fa"
     } else {
@@ -312,13 +322,28 @@ fn render_widget(w: &Widget, selected: bool, topics: &BTreeMap<String, f64>) -> 
         border = border,
     );
 
-    // Resolve the first input binding's topic value.
-    let input_val = w
+    // Collect output-binding topics (written on interaction).
+    let out_topics: Vec<String> = w
         .bindings
         .iter()
-        .find(|b| b.direction == BindingDirection::Input)
-        .and_then(|b| topics.get(&b.topic))
+        .filter(|b| b.direction == BindingDirection::Output && !b.topic.is_empty())
+        .map(|b| b.topic.clone())
+        .collect();
+
+    // Resolve the effective display value:
+    //   Output binding → show our last-published value (from external_inputs).
+    //   Input binding  → show what the DAG has put into sim_topics.
+    let input_val = out_topics
+        .first()
+        .and_then(|t| external_inputs_snapshot.get(t))
         .copied()
+        .or_else(|| {
+            w.bindings
+                .iter()
+                .find(|b| b.direction == BindingDirection::Input)
+                .and_then(|b| topics.get(&b.topic))
+                .copied()
+        })
         .unwrap_or(0.0);
 
     let id = w.id;
@@ -328,14 +353,26 @@ fn render_widget(w: &Widget, selected: bool, topics: &BTreeMap<String, f64>) -> 
     let inner = match &w.kind {
         WidgetKind::Toggle => {
             let checked = input_val > 0.5;
+            let out_for_click = out_topics.clone();
+            let on_toggle = move |ev: web_sys::MouseEvent| {
+                ev.stop_propagation();
+                let new_val = if checked { 0.0 } else { 1.0 };
+                if !out_for_click.is_empty() {
+                    external_inputs.0.update(|m| {
+                        for t in &out_for_click {
+                            m.insert(t.clone(), new_val);
+                        }
+                    });
+                }
+            };
             view! {
-                <div>
+                <div on:mousedown=on_toggle>
                     <div style="font-weight:600; margin-bottom:2px;">{label}</div>
                     <div style=move || {
                         if checked {
-                            "width:32px;height:18px;background:#22c55e;border-radius:9px;position:relative;"
+                            "width:32px;height:18px;background:#22c55e;border-radius:9px;position:relative;cursor:pointer;"
                         } else {
-                            "width:32px;height:18px;background:#555;border-radius:9px;position:relative;"
+                            "width:32px;height:18px;background:#555;border-radius:9px;position:relative;cursor:pointer;"
                         }
                     }>
                         <div style=move || {
@@ -355,6 +392,21 @@ fn render_widget(w: &Widget, selected: bool, topics: &BTreeMap<String, f64>) -> 
             let max = *max;
             let step = *step;
             let val = input_val.clamp(min, max);
+            let out_for_input = out_topics.clone();
+            let on_slide = move |ev: web_sys::Event| {
+                let v: f64 = event_target_value(&ev).parse().unwrap_or(0.0);
+                if !out_for_input.is_empty() {
+                    external_inputs.0.update(|m| {
+                        for t in &out_for_input {
+                            m.insert(t.clone(), v);
+                        }
+                    });
+                }
+            };
+            let on_mousedown = |ev: web_sys::MouseEvent| {
+                // Prevent the workspace drag handler from stealing focus.
+                ev.stop_propagation();
+            };
             view! {
                 <div style="width:100%; text-align:center;">
                     <div style="font-weight:600; margin-bottom:2px;">{label}</div>
@@ -365,6 +417,8 @@ fn render_widget(w: &Widget, selected: bool, topics: &BTreeMap<String, f64>) -> 
                         prop:max=max.to_string()
                         prop:step=step.to_string()
                         prop:value=val.to_string()
+                        on:input=on_slide
+                        on:mousedown=on_mousedown
                     />
                     <div style="font-size:10px; color:#aaa;">{format!("{val:.1}")}</div>
                 </div>
@@ -399,9 +453,35 @@ fn render_widget(w: &Widget, selected: bool, topics: &BTreeMap<String, f64>) -> 
             .into_any()
         }
         WidgetKind::Button => {
+            let out_down = out_topics.clone();
+            let out_up = out_topics.clone();
+            let on_down = move |ev: web_sys::MouseEvent| {
+                ev.stop_propagation();
+                if !out_down.is_empty() {
+                    external_inputs.0.update(|m| {
+                        for t in &out_down {
+                            m.insert(t.clone(), 1.0);
+                        }
+                    });
+                }
+            };
+            let on_up = move |_ev: web_sys::MouseEvent| {
+                if !out_up.is_empty() {
+                    external_inputs.0.update(|m| {
+                        for t in &out_up {
+                            m.insert(t.clone(), 0.0);
+                        }
+                    });
+                }
+            };
             view! {
                 <div style="text-align:center;">
-                    <button class="btn btn-primary" style="font-size:11px; padding:2px 8px;">
+                    <button
+                        class="btn btn-primary"
+                        style="font-size:11px; padding:2px 8px;"
+                        on:mousedown=on_down
+                        on:mouseup=on_up
+                    >
                         {label}
                     </button>
                 </div>
@@ -439,11 +519,12 @@ fn render_widget(w: &Widget, selected: bool, topics: &BTreeMap<String, f64>) -> 
 fn render_inspector(
     widget: Widget,
     set_panel: WriteSignal<PanelModel>,
-    set_topic_values: WriteSignal<BTreeMap<String, f64>>,
+    sim_topics: SimTopics,
     on_delete: impl Fn(web_sys::MouseEvent) + 'static,
 ) -> AnyView {
     let wid = widget.id;
     let kind = widget.kind.clone();
+    let schema = widget.kind.binding_schema();
     let bindings = widget.bindings.clone();
 
     // Label change handler.
@@ -540,100 +621,72 @@ fn render_inspector(
         _ => view! { <div></div> }.into_any(),
     };
 
-    // Bindings list.
-    let bindings_view = bindings
+    // Bindings are a fixed schema per widget kind. User cannot add/remove —
+    // only the topic of each role is editable. For Input roles we suggest
+    // known topics from sim_topics; for Output roles the topic is auto-filled.
+    let datalist_id = format!("topics-{wid}");
+    let datalist_id_for_view = datalist_id.clone();
+    let bindings_view = schema
         .iter()
         .enumerate()
-        .map(|(idx, binding)| {
-            let dir_str = match binding.direction {
-                BindingDirection::Input => "Input",
-                BindingDirection::Output => "Output",
+        .map(|(idx, role)| {
+            let topic = bindings
+                .get(idx)
+                .map(|b| b.topic.clone())
+                .unwrap_or_default();
+            let role_name = role.name;
+            let dir_label = match role.direction {
+                BindingDirection::Input => "in",
+                BindingDirection::Output => "out",
             };
-            let topic = binding.topic.clone();
-
-            let on_dir_change = move |ev: web_sys::Event| {
-                let val = event_target_value(&ev);
-                let new_dir = if val == "Output" {
-                    BindingDirection::Output
-                } else {
-                    BindingDirection::Input
-                };
-                set_panel.update(|p| {
-                    if let Some(w) = p.get_widget_mut(wid) {
-                        if let Some(b) = w.bindings.get_mut(idx) {
-                            b.direction = new_dir;
-                        }
-                    }
-                });
-            };
+            let is_input = role.direction == BindingDirection::Input;
+            let list_id = datalist_id.clone();
 
             let on_topic_change = move |ev: web_sys::Event| {
                 let val = event_target_value(&ev);
                 set_panel.update(|p| {
                     if let Some(w) = p.get_widget_mut(wid) {
-                        if let Some(b) = w.bindings.get_mut(idx) {
-                            b.topic = val;
+                        while w.bindings.len() <= idx {
+                            w.bindings.push(ChannelBinding {
+                                direction: role.direction,
+                                topic: String::new(),
+                            });
                         }
-                    }
-                });
-            };
-
-            let on_remove_binding = move |_| {
-                set_panel.update(|p| {
-                    if let Some(w) = p.get_widget_mut(wid) {
-                        if idx < w.bindings.len() {
-                            w.bindings.remove(idx);
-                        }
+                        w.bindings[idx].direction = role.direction;
+                        w.bindings[idx].topic = val;
                     }
                 });
             };
 
             view! {
-                <div style="display:flex; gap:4px; margin-bottom:4px; align-items:center;">
-                    <select style="flex:0 0 70px; font-size:11px;"
-                        prop:value=dir_str
-                        on:change=on_dir_change
-                    >
-                        <option value="Input">"Input"</option>
-                        <option value="Output">"Output"</option>
-                    </select>
-                    <input type="text" style="flex:1; font-size:11px;"
+                <div style="margin-bottom:6px;">
+                    <div style="font-size:11px; color:#888;">
+                        {format!("{role_name} ({dir_label})")}
+                    </div>
+                    <input type="text" style="width:100%; font-size:11px;"
                         prop:value=topic
                         on:input=on_topic_change
-                        placeholder="topic/name"
+                        placeholder=if is_input { "select topic…" } else { "panel/…" }
+                        list=if is_input { list_id } else { String::new() }
                     />
-                    <button class="btn btn-danger" style="font-size:10px; padding:1px 4px;"
-                        on:click=on_remove_binding
-                    >"x"</button>
                 </div>
             }
         })
         .collect_view();
 
-    let on_add_binding = move |_| {
-        set_panel.update(|p| {
-            if let Some(w) = p.get_widget_mut(wid) {
-                w.bindings.push(ChannelBinding {
-                    direction: BindingDirection::Input,
-                    topic: String::new(),
-                });
-            }
-        });
-    };
-
-    // Simulate writing a value for output bindings (for testing without MCU).
-    let on_sim_value = {
-        let widget_clone = widget.clone();
-        move |ev: web_sys::Event| {
-            let val: f64 = event_target_value(&ev).parse().unwrap_or(0.0);
-            for binding in &widget_clone.bindings {
-                if binding.direction == BindingDirection::Input && !binding.topic.is_empty() {
-                    let topic = binding.topic.clone();
-                    set_topic_values.update(|m| {
-                        m.insert(topic, val);
-                    });
-                }
-            }
+    // Datalist of currently-known topics (for Input binding autocomplete).
+    let datalist_view = {
+        let id = datalist_id_for_view;
+        view! {
+            <datalist id=id>
+                {move || {
+                    sim_topics.0.get()
+                        .keys()
+                        .cloned()
+                        .map(|t| view! { <option value=t.clone()>{t.clone()}</option> })
+                        .collect_view()
+                }}
+            </datalist>
         }
     };
 
@@ -654,20 +707,9 @@ fn render_inspector(
             {kind_params}
 
             <hr style="border-color:#444; margin:0.5rem 0;" />
-            <div class="card-title" style="font-size:12px;">"Channel Bindings"</div>
+            <div class="card-title" style="font-size:12px;">"Channels"</div>
             {bindings_view}
-            <button class="btn btn-secondary" style="width:100%; font-size:11px; margin-top:0.25rem;"
-                on:click=on_add_binding
-            >"+ Add Binding"</button>
-
-            <hr style="border-color:#444; margin:0.5rem 0;" />
-            <div style="margin-bottom:0.25rem;">
-                <label style="font-size:11px;">"Simulate Input Value"</label>
-                <input type="number" style="width:100%;"
-                    prop:value="0"
-                    on:input=on_sim_value
-                />
-            </div>
+            {datalist_view}
 
             <hr style="border-color:#444; margin:0.5rem 0;" />
             <button class="btn btn-danger" style="width:100%;" on:click=on_delete>
