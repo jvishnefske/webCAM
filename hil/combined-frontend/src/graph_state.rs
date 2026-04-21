@@ -150,6 +150,7 @@ impl GraphState {
             }
         });
         self.bump_revision();
+        publish_block_updated(&self.blocks, sel);
     }
 
     /// Move a block to a new position.
@@ -176,27 +177,91 @@ impl GraphState {
                 Some(b) => b.clone(),
                 None => return,
             };
-            let block = match pb.reconstruct() {
-                Some(b) => b,
+            let ch = match channel_at(&pb, ChannelDirection::Output, from_port) {
+                Some(c) => c,
                 None => return,
             };
-            let channels = block.declared_channels();
-            let out_channels: Vec<_> = channels
-                .iter()
-                .filter(|c| c.direction == ChannelDirection::Output)
-                .collect();
-            if let Some(out_ch) = out_channels.get(from_port) {
-                if let Some(key) = find_config_key_for_channel(&pb.config, &out_ch.name) {
-                    if let Some(src) = blks.iter_mut().find(|b| b.id == from_block_id) {
-                        if let serde_json::Value::Object(ref mut map) = src.config {
-                            map.insert(key, serde_json::Value::String(String::new()));
-                        }
+            if let Some(key) = find_config_key_for_channel(&pb.config, &ch.name) {
+                if let Some(src) = blks.iter_mut().find(|b| b.id == from_block_id) {
+                    if let serde_json::Value::Object(ref mut map) = src.config {
+                        map.insert(key, serde_json::Value::String(String::new()));
                     }
                 }
             }
         });
         self.set_selected_id.set(None);
         self.bump_revision();
+    }
+
+    /// Connect an output port to an input port by writing a shared auto-topic
+    /// into both blocks' config JSON.
+    ///
+    /// Edges in this model are "virtual": two blocks share a matching topic
+    /// name. This method generates `wire_{from_block}_{from_port}` and sets it
+    /// on both the source block's output config key and the destination block's
+    /// input config key. On success, bumps the revision (triggers auto-save).
+    ///
+    /// Returns `Err` with a short description on self-loop, missing block,
+    /// out-of-range port, type mismatch, or missing config key.
+    pub fn connect_edge(
+        &self,
+        from_block: usize,
+        from_port: usize,
+        to_block: usize,
+        to_port: usize,
+    ) -> Result<(), String> {
+        use configurable_blocks::schema::ChannelDirection;
+
+        if from_block == to_block {
+            return Err("self-loop".to_string());
+        }
+
+        let blks = self.blocks.get_untracked();
+        let src_pb = blks
+            .iter()
+            .find(|b| b.id == from_block)
+            .ok_or_else(|| "source block not found".to_string())?
+            .clone();
+        let dst_pb = blks
+            .iter()
+            .find(|b| b.id == to_block)
+            .ok_or_else(|| "dest block not found".to_string())?
+            .clone();
+        drop(blks);
+
+        let src_ch = channel_at(&src_pb, ChannelDirection::Output, from_port)
+            .ok_or_else(|| "source port out of range".to_string())?;
+        let dst_ch = channel_at(&dst_pb, ChannelDirection::Input, to_port)
+            .ok_or_else(|| "dest port out of range".to_string())?;
+
+        if !types_compatible(&src_ch.channel_type, &dst_ch.channel_type) {
+            let s = src_ch.channel_type.as_deref().unwrap_or("any");
+            let d = dst_ch.channel_type.as_deref().unwrap_or("any");
+            return Err(format!("type mismatch: {s} -> {d}"));
+        }
+
+        let src_key = find_config_key_for_channel(&src_pb.config, &src_ch.name)
+            .ok_or_else(|| "source config key missing".to_string())?;
+        let dst_key = find_config_key_for_channel(&dst_pb.config, &dst_ch.name)
+            .ok_or_else(|| "dest config key missing".to_string())?;
+
+        let auto_topic = format!("wire_{from_block}_{from_port}");
+
+        self.set_blocks.update(|blks| {
+            if let Some(src_mut) = blks.iter_mut().find(|b| b.id == from_block) {
+                if let serde_json::Value::Object(ref mut map) = src_mut.config {
+                    map.insert(src_key, serde_json::Value::String(auto_topic.clone()));
+                }
+            }
+            if let Some(dst_mut) = blks.iter_mut().find(|b| b.id == to_block) {
+                if let serde_json::Value::Object(ref mut map) = dst_mut.config {
+                    map.insert(dst_key, serde_json::Value::String(auto_topic.clone()));
+                }
+            }
+        });
+        self.bump_revision();
+        publish_connection_created(from_block, from_port, to_block, to_port);
+        Ok(())
     }
 
     /// Delete the currently selected block.
@@ -300,6 +365,42 @@ impl GraphState {
     pub fn list_projects() -> Vec<String> {
         list_local_storage_keys(STORAGE_PREFIX)
     }
+
+    /// Create a new empty project in localStorage with an auto-generated name,
+    /// leaving the in-memory canvas untouched. Returns the new project's name.
+    ///
+    /// "New" in most editors means "wipe the canvas"; here the user asked for
+    /// the opposite: create a new entry in the sidebar without discarding the
+    /// current document. Pair this with `save_to_storage(current_name)` in the
+    /// caller to checkpoint unsaved work before advancing.
+    pub fn create_new_project(&self) -> String {
+        let name = next_project_name();
+        let snapshot = ProjectSnapshot {
+            blocks: Vec::new(),
+            next_id: 1,
+        };
+        if let Ok(json) = serde_json::to_string(&snapshot) {
+            let key = format!("{STORAGE_PREFIX}{name}");
+            let _ = set_local_storage(&key, &json);
+        }
+        name
+    }
+}
+
+/// Pick the lowest unused "project N" name among existing projects. Scans
+/// only names that match the `project <n>` pattern so user-chosen names
+/// (e.g. "experiment-2025") never collide.
+fn next_project_name() -> String {
+    let taken: std::collections::BTreeSet<u32> = GraphState::list_projects()
+        .iter()
+        .filter_map(|n| n.strip_prefix("project "))
+        .filter_map(|rest| rest.parse::<u32>().ok())
+        .collect();
+    let mut n = 1_u32;
+    while taken.contains(&n) {
+        n += 1;
+    }
+    format!("project {n}")
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +506,85 @@ pub fn find_config_key_for_channel(
     None
 }
 
+/// Reconstruct a block, filter by direction, and return the nth declared channel.
+fn channel_at(
+    pb: &PlacedBlock,
+    dir: configurable_blocks::schema::ChannelDirection,
+    idx: usize,
+) -> Option<configurable_blocks::schema::DeclaredChannel> {
+    let block = pb.reconstruct()?;
+    block
+        .declared_channels()
+        .into_iter()
+        .filter(|c| c.direction == dir)
+        .nth(idx)
+}
+
+/// Decide whether two port type tags can be wired together.
+///
+/// Rule: if both sides declare a concrete type, they must match exactly.
+/// If either side is `None` (untyped — currently the default for all blocks),
+/// the connection is permitted.
+fn types_compatible(src: &Option<String>, dst: &Option<String>) -> bool {
+    match (src, dst) {
+        (Some(a), Some(b)) => a == b,
+        _ => true,
+    }
+}
+
+/// Publish a `TelemetryBlockUpdated` CBOR frame over the WebSocket. Best-effort
+/// — silently no-ops if no server is connected. Only active under WASM; on
+/// native targets this is a no-op so unit tests do not depend on `web_sys`.
+fn publish_block_updated(blocks: &ReadSignal<Vec<PlacedBlock>>, block_id: usize) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let blks = blocks.get_untracked();
+        if let Some(pb) = blks.iter().find(|b| b.id == block_id) {
+            let config_json = serde_json::to_string(&pb.config).unwrap_or_default();
+            let _ =
+                crate::ws_client::send_request(&crate::messages::Request::TelemetryBlockUpdated {
+                    block_id: pb.id as u32,
+                    block_type: pb.block_type.clone(),
+                    config_json,
+                });
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (blocks, block_id);
+    }
+}
+
+/// Publish a `TelemetryConnectionCreated` CBOR frame. Best-effort; no-op on
+/// native. `channel_id` is a deterministic pack of the four endpoints so the
+/// same edge always reports the same id within a session.
+fn publish_connection_created(
+    from_block: usize,
+    from_port: usize,
+    to_block: usize,
+    to_port: usize,
+) {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let channel_id = ((from_block as u32 & 0xFF) << 24)
+            | ((from_port as u32 & 0xFF) << 16)
+            | ((to_block as u32 & 0xFF) << 8)
+            | (to_port as u32 & 0xFF);
+        let _ =
+            crate::ws_client::send_request(&crate::messages::Request::TelemetryConnectionCreated {
+                from_block: from_block as u32,
+                from_port: from_port as u32,
+                to_block: to_block as u32,
+                to_port: to_port as u32,
+                channel_id,
+            });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let _ = (from_block, from_port, to_block, to_port);
+    }
+}
+
 /// Offset all NodeId references in an Op by a given amount.
 pub fn offset_op(op: &dag_core::op::Op, offset: u16) -> dag_core::op::Op {
     use dag_core::op::Op;
@@ -496,6 +676,35 @@ mod tests {
         gs.delete_selected();
         let r2 = gs.revision.get_untracked();
         assert!(r2 > r1);
+    }
+
+    #[test]
+    fn next_project_name_picks_lowest_free_slot() {
+        // On non-wasm, list_projects() returns empty, so the first name is always
+        // "project 1". The interesting collision cases live behind the wasm cfg,
+        // so here we just verify the fallback name and that the helper is pure.
+        assert_eq!(next_project_name(), "project 1");
+        // Repeated calls with no state change produce the same name (no side
+        // effects until create_new_project actually writes storage).
+        assert_eq!(next_project_name(), "project 1");
+    }
+
+    #[test]
+    fn create_new_project_leaves_graph_state_untouched() {
+        let gs = GraphState::new();
+        gs.add_block("constant");
+        let blocks_before = gs.blocks.get_untracked().len();
+        let next_id_before = gs.next_id.get_untracked();
+        let name_before = gs.project_name.get_untracked();
+
+        let created = gs.create_new_project();
+        // Name scheme is "project N" — non-empty and prefixed.
+        assert!(created.starts_with("project "));
+
+        // In-memory state is unchanged; the current document survives.
+        assert_eq!(gs.blocks.get_untracked().len(), blocks_before);
+        assert_eq!(gs.next_id.get_untracked(), next_id_before);
+        assert_eq!(gs.project_name.get_untracked(), name_before);
     }
 
     #[test]
@@ -626,9 +835,96 @@ mod tests {
         let gs = GraphState::new();
         gs.add_block("constant");
         gs.move_block(999, 100.0, 200.0); // no panic
-        // Block at id=1 should not have moved
+                                          // Block at id=1 should not have moved
         let blks = gs.blocks.get_untracked();
         assert!(blks[0].x < 100.0); // still at original position
+    }
+
+    /// Build a two-block graph (constant -> add) with `constant.publish_topic` set so
+    /// that `constant` declares an output port at index 0. Returns `(gs, constant_id, add_id)`.
+    fn two_block_graph() -> (GraphState, usize, usize) {
+        let gs = GraphState::new();
+        let const_id = gs.add_block("constant").expect("constant registered");
+        // Select the constant and give it a non-empty publish_topic so it declares an output.
+        gs.set_selected_id.set(Some(const_id));
+        gs.update_config("publish_topic".to_string(), serde_json::json!("const_out"));
+        let add_id = gs.add_block("add").expect("add registered");
+        (gs, const_id, add_id)
+    }
+
+    #[test]
+    fn connect_edge_happy_path() {
+        let (gs, from, to) = two_block_graph();
+        let rev0 = gs.revision.get_untracked();
+
+        gs.connect_edge(from, 0, to, 0).expect("connects");
+
+        let blks = gs.blocks.get_untracked();
+        let src = blks.iter().find(|b| b.id == from).unwrap();
+        let dst = blks.iter().find(|b| b.id == to).unwrap();
+        let expected = format!("wire_{from}_0");
+        assert_eq!(
+            src.config.get("publish_topic").and_then(|v| v.as_str()),
+            Some(expected.as_str()),
+            "source output topic should be auto-wire name"
+        );
+        assert_eq!(
+            dst.config.get("input_a_topic").and_then(|v| v.as_str()),
+            Some(expected.as_str()),
+            "dest input_a_topic should match auto-wire name"
+        );
+        assert!(
+            gs.revision.get_untracked() > rev0,
+            "revision should bump on connect"
+        );
+    }
+
+    #[test]
+    fn connect_edge_self_loop_rejected() {
+        let (gs, from, _to) = two_block_graph();
+        let err = gs.connect_edge(from, 0, from, 0).unwrap_err();
+        assert_eq!(err, "self-loop");
+    }
+
+    #[test]
+    fn connect_edge_missing_source_block() {
+        let (gs, _from, to) = two_block_graph();
+        let err = gs.connect_edge(999, 0, to, 0).unwrap_err();
+        assert_eq!(err, "source block not found");
+    }
+
+    #[test]
+    fn connect_edge_missing_dest_block() {
+        let (gs, from, _to) = two_block_graph();
+        let err = gs.connect_edge(from, 0, 999, 0).unwrap_err();
+        assert_eq!(err, "dest block not found");
+    }
+
+    #[test]
+    fn connect_edge_source_port_out_of_range() {
+        let (gs, from, to) = two_block_graph();
+        let err = gs.connect_edge(from, 99, to, 0).unwrap_err();
+        assert_eq!(err, "source port out of range");
+    }
+
+    #[test]
+    fn connect_edge_dest_port_out_of_range() {
+        let (gs, from, to) = two_block_graph();
+        let err = gs.connect_edge(from, 0, to, 99).unwrap_err();
+        assert_eq!(err, "dest port out of range");
+    }
+
+    #[test]
+    fn types_compatible_rule() {
+        // Both None: permitted.
+        assert!(types_compatible(&None, &None));
+        // One side typed, other None: permitted.
+        assert!(types_compatible(&Some("f64".into()), &None));
+        assert!(types_compatible(&None, &Some("f64".into())));
+        // Both typed, same: permitted.
+        assert!(types_compatible(&Some("f64".into()), &Some("f64".into())));
+        // Both typed, different: rejected.
+        assert!(!types_compatible(&Some("f64".into()), &Some("bool".into())));
     }
 
     #[test]
@@ -637,18 +933,12 @@ mod tests {
         // Add a pubsub_bridge block (has publish_topic as its output channel)
         gs.add_block("pubsub_bridge");
         // Set its publish_topic to "my_wire"
-        gs.update_config(
-            "publish_topic".to_string(),
-            serde_json::json!("my_wire"),
-        );
+        gs.update_config("publish_topic".to_string(), serde_json::json!("my_wire"));
 
         // Verify the publish topic is set
         let blks = gs.blocks.get_untracked();
         assert_eq!(
-            blks[0]
-                .config
-                .get("publish_topic")
-                .and_then(|v| v.as_str()),
+            blks[0].config.get("publish_topic").and_then(|v| v.as_str()),
             Some("my_wire")
         );
         drop(blks);

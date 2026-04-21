@@ -1,8 +1,14 @@
 .PHONY: build wasm lint test ts ci release serve serve-leptos clean help verify \
        hil-firmware hil-stm32 hil-pi-zero hil-jlink-flash hil-verify all \
-       dag-frontend combined-frontend embed-assets ts-combined version hil-e2e
+       dag-frontend combined-frontend embed-assets ts-combined version hil-e2e \
+       require-wasm-assets test-frontend-wasm
 
 WASM_TARGET = wasm32-unknown-unknown
+
+# Prefer rustup-managed toolchain (in ~/.cargo/bin) over the system rustc,
+# which on Red Hat / Fedora ships without the wasm32-unknown-unknown target.
+# Without this, `trunk build` fails with "can't find crate for `core`".
+export PATH := $(HOME)/.cargo/bin:$(PATH)
 
 # Crates excluded from host workspace builds:
 # - Firmware binaries require embedded ARM targets and activate conflicting
@@ -84,6 +90,9 @@ serve-dataflow: wasm-dataflow ts-dataflow ## (deprecated) Build and serve Datafl
 serve-leptos: ## Serve Leptos frontend via Trunk (primary)
 	cd hil/combined-frontend && trunk serve --port 3000
 
+test-frontend-wasm: ## Run Leptos frontend wasm-bindgen tests (headless chrome)
+	cd hil/combined-frontend && wasm-pack test --headless --chrome
+
 serve-native: combined-frontend ## Build Leptos frontend + run native server with mock HAL
 	cargo build -p native-server
 	@echo "Starting native-server at http://localhost:3000"
@@ -128,9 +137,30 @@ hil-firmware: ## Build Pico firmware
 combined-frontend: ## Build combined Leptos frontend (WASM) via Trunk
 	cd hil/combined-frontend && trunk build --release
 
-hil-pico2: combined-frontend dag-frontend ## Build Pico 2 firmware with DAG runtime
+hil-pico2: combined-frontend dag-frontend require-wasm-assets ## Build Pico 2 firmware with DAG runtime
 	EMBASSY_USB_MAX_INTERFACE_COUNT=16 EMBASSY_USB_MAX_HANDLER_COUNT=8 \
 	cargo build -p board-support-pico2 --target thumbv8m.main-none-eabihf --release
+
+# Guard: the Pico 2 build.rs silently falls back to empty byte strings when
+# hil/combined-frontend/dist/ is missing — the firmware then boots but serves
+# a blank page. Fail early instead.
+require-wasm-assets: ## Verify Leptos wasm/js/css assets exist in hil/combined-frontend/dist/
+	@ls hil/combined-frontend/dist/*.wasm >/dev/null 2>&1 || { \
+		echo "ERROR: hil/combined-frontend/dist/*.wasm missing — run 'make combined-frontend'"; \
+		exit 1; \
+	}
+	@ls hil/combined-frontend/dist/combined-frontend-*.js >/dev/null 2>&1 || { \
+		echo "ERROR: hil/combined-frontend/dist/combined-frontend-*.js missing — run 'make combined-frontend'"; \
+		exit 1; \
+	}
+	@ls hil/combined-frontend/dist/*.html >/dev/null 2>&1 || { \
+		echo "ERROR: hil/combined-frontend/dist/*.html missing — run 'make combined-frontend'"; \
+		exit 1; \
+	}
+	@ls hil/combined-frontend/dist/style-*.css >/dev/null 2>&1 || { \
+		echo "ERROR: hil/combined-frontend/dist/style-*.css missing — run 'make combined-frontend'"; \
+		exit 1; \
+	}
 
 hil-pico2-flash: hil-pico2 ## Flash Pico 2 via probe-rs
 	probe-rs download --chip RP235x target/thumbv8m.main-none-eabihf/release/board-support-pico2

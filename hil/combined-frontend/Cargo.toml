@@ -35,6 +35,7 @@ web-sys = { version = "0.3", features = [
     "FileList",
     "ProgressEvent",
     "MouseEvent",
+    "MouseEventInit",
     "KeyboardEvent",
     "SvgElement",
     "Element",
@@ -72,3 +73,6 @@ deployment = { path = "../../deployment" }
 rustcam = { path = "../../crates/rustcam" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

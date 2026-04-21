@@ -68,6 +68,38 @@ pub enum Request {
     },
     /// Mark the current firmware as successfully booted.
     FwMarkBooted,
+    /// Telemetry: a block's config was updated on the DAG canvas.
+    ///
+    /// Wire format (CBOR tag 52 per
+    /// `docs/superpowers/specs/2026-04-03-pubsub-telemetry-design.md`):
+    /// `{0:52, 1:blockId, 2:blockType, 3:configJson}`.
+    /// The config is emitted as a serialized JSON string because the server's
+    /// telemetry parser handles scalar values only; the full config can be
+    /// recovered by re-parsing the string.
+    TelemetryBlockUpdated {
+        /// Block id on the canvas.
+        block_id: u32,
+        /// Block kind (e.g. `"gain"`, `"adc"`).
+        block_type: String,
+        /// Current config as JSON, serialized once at emit time.
+        config_json: String,
+    },
+    /// Telemetry: an edge was connected between two ports.
+    ///
+    /// Wire format (CBOR tag 53): `{0:53, 1:fromBlock, 2:fromPort, 3:toBlock,
+    /// 4:toPort, 5:channelId}`.
+    TelemetryConnectionCreated {
+        /// Source block id.
+        from_block: u32,
+        /// Output port index on the source block.
+        from_port: u32,
+        /// Destination block id.
+        to_block: u32,
+        /// Input port index on the destination block.
+        to_port: u32,
+        /// Per-session identifier for this edge (hash of endpoints).
+        channel_id: u32,
+    },
 }
 
 /// Response messages received from the Pico.
@@ -289,6 +321,64 @@ pub fn encode_request(req: &Request) -> Vec<u8> {
                 .u32(23)
                 .expect("tag");
         }
+        Request::TelemetryBlockUpdated {
+            block_id,
+            block_type,
+            config_json,
+        } => {
+            enc.map(4)
+                .expect("map")
+                .u32(0)
+                .expect("k0")
+                .u32(52)
+                .expect("tag")
+                .u32(1)
+                .expect("k1")
+                .u32(*block_id)
+                .expect("blockId")
+                .u32(2)
+                .expect("k2")
+                .str(block_type)
+                .expect("blockType")
+                .u32(3)
+                .expect("k3")
+                .str(config_json)
+                .expect("config");
+        }
+        Request::TelemetryConnectionCreated {
+            from_block,
+            from_port,
+            to_block,
+            to_port,
+            channel_id,
+        } => {
+            enc.map(6)
+                .expect("map")
+                .u32(0)
+                .expect("k0")
+                .u32(53)
+                .expect("tag")
+                .u32(1)
+                .expect("k1")
+                .u32(*from_block)
+                .expect("fromBlock")
+                .u32(2)
+                .expect("k2")
+                .u32(*from_port)
+                .expect("fromPort")
+                .u32(3)
+                .expect("k3")
+                .u32(*to_block)
+                .expect("toBlock")
+                .u32(4)
+                .expect("k4")
+                .u32(*to_port)
+                .expect("toPort")
+                .u32(5)
+                .expect("k5")
+                .u32(*channel_id)
+                .expect("channelId");
+        }
     }
     buf
 }
@@ -488,6 +578,54 @@ mod tests {
         enc.u32(0).expect("k").u32(99).expect("v");
         let result = decode_response(&buf);
         assert!(matches!(result, Err(DecodeError::UnknownTag(99))));
+    }
+
+    #[test]
+    fn encode_telemetry_block_updated_tag_and_fields() {
+        let req = Request::TelemetryBlockUpdated {
+            block_id: 7,
+            block_type: "gain".to_string(),
+            config_json: "{\"k\":1}".to_string(),
+        };
+        let encoded = encode_request(&req);
+        let mut dec = minicbor::Decoder::new(&encoded);
+        let map_len = dec.map().expect("map").expect("len");
+        assert_eq!(map_len, 4);
+        assert_eq!(dec.u32().expect("k"), 0);
+        assert_eq!(dec.u32().expect("tag"), 52);
+        assert_eq!(dec.u32().expect("k"), 1);
+        assert_eq!(dec.u32().expect("blockId"), 7);
+        assert_eq!(dec.u32().expect("k"), 2);
+        assert_eq!(dec.str().expect("blockType"), "gain");
+        assert_eq!(dec.u32().expect("k"), 3);
+        assert_eq!(dec.str().expect("config"), "{\"k\":1}");
+    }
+
+    #[test]
+    fn encode_telemetry_connection_created_tag_and_fields() {
+        let req = Request::TelemetryConnectionCreated {
+            from_block: 1,
+            from_port: 0,
+            to_block: 2,
+            to_port: 3,
+            channel_id: 0xABCD,
+        };
+        let encoded = encode_request(&req);
+        let mut dec = minicbor::Decoder::new(&encoded);
+        let map_len = dec.map().expect("map").expect("len");
+        assert_eq!(map_len, 6);
+        assert_eq!(dec.u32().expect("k"), 0);
+        assert_eq!(dec.u32().expect("tag"), 53);
+        assert_eq!(dec.u32().expect("k"), 1);
+        assert_eq!(dec.u32().expect("fromBlock"), 1);
+        assert_eq!(dec.u32().expect("k"), 2);
+        assert_eq!(dec.u32().expect("fromPort"), 0);
+        assert_eq!(dec.u32().expect("k"), 3);
+        assert_eq!(dec.u32().expect("toBlock"), 2);
+        assert_eq!(dec.u32().expect("k"), 4);
+        assert_eq!(dec.u32().expect("toPort"), 3);
+        assert_eq!(dec.u32().expect("k"), 5);
+        assert_eq!(dec.u32().expect("channelId"), 0xABCD);
     }
 
     #[test]
