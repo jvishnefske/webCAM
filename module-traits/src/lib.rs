@@ -15,6 +15,7 @@
 extern crate alloc;
 
 pub mod analysis;
+pub mod async_block;
 pub mod codegen_trait;
 pub mod deployment;
 pub mod function_def;
@@ -27,6 +28,7 @@ pub mod tick;
 pub mod value;
 
 pub use analysis::{AnalysisMetadata, AnalysisModel};
+pub use async_block::{AsyncBlock, BlockContext};
 pub use codegen_trait::Codegen;
 pub use function_def::{
     builtin_function_defs, FuncPortDef, FunctionDef, FunctionOp, ParamDef, ParamKind,
