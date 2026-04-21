@@ -19,6 +19,24 @@ pub enum ScanDirection {
     Y,
 }
 
+/// Traversal pattern for the 3-D surface strategy.
+///
+/// `ZigZag` alternates scan direction row-to-row without retracting.
+/// `OneWay` always cuts in the same direction, retracting to safe Z
+/// between rows. `Spiral` emits a rectangular offset spiral from the mesh
+/// bounding box inward.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Pattern {
+    /// Back-and-forth, no retract between rows (default).
+    #[default]
+    ZigZag,
+    /// All rows cut in the same direction; retract-and-return between
+    /// rows.
+    OneWay,
+    /// Outer-to-inner rectangular offset spiral.
+    Spiral,
+}
+
 /// Parameters for 3D surface machining strategies.
 #[derive(Debug, Clone)]
 pub struct SurfaceParams<'a> {
@@ -28,15 +46,30 @@ pub struct SurfaceParams<'a> {
     pub cut_params: CutParams,
     /// Direction to scan (X or Y).
     pub scan_direction: ScanDirection,
+    /// Traversal pattern.
+    pub pattern: Pattern,
 }
 
 impl<'a> SurfaceParams<'a> {
-    /// Create new surface parameters.
+    /// Create new surface parameters with the default traversal pattern
+    /// (`Pattern::ZigZag`). Preserved as a 3-argument constructor for
+    /// backwards compatibility with existing call sites.
     pub fn new(mesh: &'a Mesh, cut_params: CutParams, scan_direction: ScanDirection) -> Self {
+        Self::new_with_pattern(mesh, cut_params, scan_direction, Pattern::default())
+    }
+
+    /// Create new surface parameters with an explicit traversal pattern.
+    pub fn new_with_pattern(
+        mesh: &'a Mesh,
+        cut_params: CutParams,
+        scan_direction: ScanDirection,
+        pattern: Pattern,
+    ) -> Self {
         Self {
             mesh,
             cut_params,
             scan_direction,
+            pattern,
         }
     }
 }
@@ -47,6 +80,7 @@ impl<'a> From<(&'a Mesh, &CutParams)> for SurfaceParams<'a> {
             mesh,
             cut_params: cut_params.clone(),
             scan_direction: ScanDirection::default(),
+            pattern: Pattern::default(),
         }
     }
 }
@@ -258,162 +292,159 @@ impl ToolpathStrategy for PerimeterStrategy {
     }
 }
 
-// ── Zigzag Surface strategy (3D raster) ───────────────────────────────
+// ── Surface 3-D strategy (raster + spiral, disc-projected) ────────────
 
-use crate::geometry::Vec3;
-use crate::slicer::{mesh_height_at, surface_normal_at};
+use crate::slicer::{project_ball_tool, project_flat_tool};
 use crate::tool::ToolType;
 
-/// Compute ball-end tool contact point offset based on surface normal.
-///
-/// For a ball-end tool, the contact point shifts along the surface normal.
-/// Returns (dx, dy, dz) offset to apply to the tool center position.
-fn ball_end_offset(normal: Vec3, radius: f64) -> (f64, f64, f64) {
-    // Normalize the normal vector
-    let len = (normal.x * normal.x + normal.y * normal.y + normal.z * normal.z).sqrt();
-    if len < 1e-10 {
-        return (0.0, 0.0, 0.0);
-    }
+/// 3-D surface strategy: projects the tool shape (flat cylinder for
+/// `EndMill` / `FaceMill`, sphere for `BallEnd`) onto the mesh from +Z and
+/// emits a toolpath following the chosen [`Pattern`].
+pub struct Surface3dStrategy;
 
-    let nx = normal.x / len;
-    let ny = normal.y / len;
-    let nz = normal.z / len;
+/// Back-compat alias for the former name.
+pub use self::Surface3dStrategy as ZigzagSurfaceStrategy;
 
-    // For a flat surface (normal = +Z), no XY offset, Z offset = radius
-    // For angled surface, offset tool center along normal direction
-    // The contact point is at distance radius from tool center along -normal
-    // So tool center is at: contact_point + radius * normal
-
-    // X and Y offset: move tool center in direction of normal's XY component
-    let dx = radius * nx;
-    let dy = radius * ny;
-    // Z offset: the difference from flat case (radius * (1 - nz))
-    // For flat (nz=1): dz = 0, for 45° (nz=0.707): dz = radius * 0.293
-    let dz = radius * (1.0 - nz);
-
-    (dx, dy, dz)
-}
-
-/// Zigzag surface strategy rasters across the mesh surface.
-pub struct ZigzagSurfaceStrategy;
-
-impl ZigzagSurfaceStrategy {
-    /// Sample a surface point with optional ball-end compensation.
+impl Surface3dStrategy {
+    /// Project the tool shape at `(x, y)` onto the mesh and return the
+    /// tool-center Z, or `None` if the disc lies entirely off the mesh.
     fn sample_point(
         mesh: &Mesh,
         x: f64,
         y: f64,
-        is_ball_end: bool,
+        tool_type: &ToolType,
         tool_radius: f64,
     ) -> Option<(f64, f64, f64)> {
-        mesh_height_at(mesh, x, y).map(|z| {
-            if is_ball_end {
-                if let Some(normal) = surface_normal_at(mesh, x, y) {
-                    let (dx, dy, dz) = ball_end_offset(normal, tool_radius);
-                    (x + dx, y + dy, z + dz)
-                } else {
-                    (x, y, z)
-                }
-            } else {
-                (x, y, z)
+        let z = match tool_type {
+            ToolType::BallEnd => project_ball_tool(mesh, x, y, tool_radius),
+            ToolType::EndMill | ToolType::FaceMill { .. } => {
+                project_flat_tool(mesh, x, y, tool_radius)
             }
-        })
+        }?;
+        Some((x, y, z))
     }
 
-    /// Generate 3D surface toolpath from mesh.
+    /// Generate 3-D surface toolpath from the mesh.
     ///
-    /// The tool stays on the surface between rows, cutting directly from the
-    /// end of one row to the start of the next instead of retracting to safe Z.
-    /// This produces a continuous back-and-forth surface movement.
-    ///
-    /// # Panics
-    ///
-    /// Panics if an internal scanline row is empty (should not happen in practice).
+    /// Dispatches to the pattern selected by `params.pattern`.
     pub fn generate_surface(&self, params: &SurfaceParams) -> Vec<Toolpath> {
+        match params.pattern {
+            Pattern::ZigZag => self.generate_zigzag(params),
+            Pattern::OneWay => self.generate_one_way(params),
+            Pattern::Spiral => self.generate_spiral(params),
+        }
+    }
+
+    /// One-way pattern: every row is cut in the same direction, with a
+    /// rapid retract to `safe_z` at the end of each row and a rapid plunge
+    /// at the start of the next row. This sacrifices efficiency for a
+    /// consistent cutting direction (useful when climb vs. conventional
+    /// cutting matters for the whole surface).
+    fn generate_one_way(&self, params: &SurfaceParams) -> Vec<Toolpath> {
+        let rows = collect_surface_rows(params, /*alternate=*/ false);
+        let safe_z = params.cut_params.safe_z;
+        let mut toolpaths = Vec::new();
+        for row in &rows {
+            let (x0, y0, z0) = row[0];
+            let mut tp = Toolpath::new();
+            tp.rapid(x0, y0, safe_z);
+            tp.cut(x0, y0, z0);
+            for &(x, y, z) in &row[1..] {
+                tp.cut(x, y, z);
+            }
+            let (xe, ye, _) = *row.last().unwrap();
+            tp.rapid(xe, ye, safe_z);
+            toolpaths.push(tp);
+        }
+        toolpaths
+    }
+
+    /// Rectangular offset spiral pattern: walks the mesh XY bounding
+    /// rectangle outer-to-inner, offsetting inward by `step_over` each
+    /// loop. Emits a single `Toolpath` with one initial rapid + plunge and
+    /// one final retract; all intermediate moves are cutting moves.
+    fn generate_spiral(&self, params: &SurfaceParams) -> Vec<Toolpath> {
         let bounds = match &params.mesh.bounds {
             Some(b) => b,
             None => return Vec::new(),
         };
-
         let step = params.cut_params.step_over.max(0.1);
         let safe_z = params.cut_params.safe_z;
-
-        let is_ball_end = matches!(params.cut_params.tool.tool_type, ToolType::BallEnd);
+        let tool_type = params.cut_params.tool.tool_type.clone();
         let tool_radius = params.cut_params.tool.diameter / 2.0;
 
-        // Collect all rows/columns of surface points
-        let rows: Vec<Vec<(f64, f64, f64)>> = match params.scan_direction {
-            ScanDirection::X => {
-                let y_min = bounds.min.y;
-                let y_max = bounds.max.y;
-                let x_min = bounds.min.x;
-                let x_max = bounds.max.x;
-                let mut rows = Vec::new();
-                let mut y = y_min;
-                let mut forward = true;
-
-                while y <= y_max {
-                    let x_range: Vec<f64> = if forward {
-                        float_range(x_min, x_max, step).collect()
-                    } else {
-                        float_range(x_min, x_max, step)
-                            .collect::<Vec<_>>()
-                            .into_iter()
-                            .rev()
-                            .collect()
-                    };
-
-                    let row: Vec<(f64, f64, f64)> = x_range
-                        .into_iter()
-                        .filter_map(|x| {
-                            Self::sample_point(params.mesh, x, y, is_ball_end, tool_radius)
-                        })
-                        .collect();
-
-                    if !row.is_empty() {
-                        rows.push(row);
-                    }
-                    forward = !forward;
-                    y += step;
-                }
-                rows
+        let mut samples: Vec<(f64, f64, f64)> = Vec::new();
+        let mut k = 0usize;
+        loop {
+            let offset = (k as f64) * step;
+            let x_lo = bounds.min.x + offset;
+            let x_hi = bounds.max.x - offset;
+            let y_lo = bounds.min.y + offset;
+            let y_hi = bounds.max.y - offset;
+            if x_hi - x_lo <= step || y_hi - y_lo <= step {
+                break;
             }
-            ScanDirection::Y => {
-                let x_min = bounds.min.x;
-                let x_max = bounds.max.x;
-                let y_min = bounds.min.y;
-                let y_max = bounds.max.y;
-                let mut rows = Vec::new();
-                let mut x = x_min;
-                let mut forward = true;
 
-                while x <= x_max {
-                    let y_range: Vec<f64> = if forward {
-                        float_range(y_min, y_max, step).collect()
-                    } else {
-                        float_range(y_min, y_max, step)
-                            .collect::<Vec<_>>()
-                            .into_iter()
-                            .rev()
-                            .collect()
-                    };
-
-                    let col: Vec<(f64, f64, f64)> = y_range
-                        .into_iter()
-                        .filter_map(|y| {
-                            Self::sample_point(params.mesh, x, y, is_ball_end, tool_radius)
-                        })
-                        .collect();
-
-                    if !col.is_empty() {
-                        rows.push(col);
-                    }
-                    forward = !forward;
-                    x += step;
+            // Walk the four edges CCW, dropping the final point of each
+            // edge to avoid duplicate samples at the corners.
+            let mut x = x_lo;
+            while x < x_hi - 1e-9 {
+                if let Some(p) = Self::sample_point(params.mesh, x, y_lo, &tool_type, tool_radius) {
+                    samples.push(p);
                 }
-                rows
+                x += step;
             }
-        };
+            let mut y = y_lo;
+            while y < y_hi - 1e-9 {
+                if let Some(p) = Self::sample_point(params.mesh, x_hi, y, &tool_type, tool_radius) {
+                    samples.push(p);
+                }
+                y += step;
+            }
+            let mut x = x_hi;
+            while x > x_lo + 1e-9 {
+                if let Some(p) = Self::sample_point(params.mesh, x, y_hi, &tool_type, tool_radius) {
+                    samples.push(p);
+                }
+                x -= step;
+            }
+            let mut y = y_hi;
+            while y > y_lo + 1e-9 {
+                if let Some(p) = Self::sample_point(params.mesh, x_lo, y, &tool_type, tool_radius) {
+                    samples.push(p);
+                }
+                y -= step;
+            }
+
+            k += 1;
+        }
+
+        if samples.is_empty() {
+            return Vec::new();
+        }
+
+        let mut tp = Toolpath::new();
+        let (x0, y0, z0) = samples[0];
+        tp.rapid(x0, y0, safe_z);
+        tp.cut(x0, y0, z0);
+        for &(x, y, z) in &samples[1..] {
+            tp.cut(x, y, z);
+        }
+        let (xe, ye, _) = *samples.last().unwrap();
+        tp.rapid(xe, ye, safe_z);
+        vec![tp]
+    }
+
+    /// Zig-zag pattern: stay on surface between rows, alternating
+    /// direction row to row.
+    ///
+    /// # Panics
+    ///
+    /// Panics if an internal scanline row is empty (should not happen in
+    /// practice).
+    fn generate_zigzag(&self, params: &SurfaceParams) -> Vec<Toolpath> {
+        let rows = collect_surface_rows(params, /*alternate=*/ true);
+        let safe_z = params.cut_params.safe_z;
 
         // Build toolpaths: one per row for clear preview rendering.
         // Between rows, the tool stays on the surface (no retract to safe Z).
@@ -458,6 +489,80 @@ impl ZigzagSurfaceStrategy {
 
         toolpaths
     }
+}
+
+/// Collect tool-center sample rows from the mesh bounding box, using the
+/// disc-projected sample at each grid point. When `alternate` is true the
+/// scan direction reverses row-to-row (used by zig-zag); when false every
+/// row is walked in the same direction (used by one-way).
+///
+/// Rows that contain no on-mesh samples are dropped. Returns an empty
+/// `Vec` for a mesh with no bounding box.
+fn collect_surface_rows(params: &SurfaceParams, alternate: bool) -> Vec<Vec<(f64, f64, f64)>> {
+    let bounds = match &params.mesh.bounds {
+        Some(b) => b,
+        None => return Vec::new(),
+    };
+    let step = params.cut_params.step_over.max(0.1);
+    let tool_type = params.cut_params.tool.tool_type.clone();
+    let tool_radius = params.cut_params.tool.diameter / 2.0;
+    let mut rows = Vec::new();
+    let mut forward = true;
+    match params.scan_direction {
+        ScanDirection::X => {
+            let (x_min, x_max) = (bounds.min.x, bounds.max.x);
+            let (y_min, y_max) = (bounds.min.y, bounds.max.y);
+            let mut y = y_min;
+            while y <= y_max {
+                let xs: Vec<f64> = if forward {
+                    float_range(x_min, x_max, step).collect()
+                } else {
+                    let fwd: Vec<f64> = float_range(x_min, x_max, step).collect();
+                    fwd.into_iter().rev().collect()
+                };
+                let row: Vec<(f64, f64, f64)> = xs
+                    .into_iter()
+                    .filter_map(|x| {
+                        Surface3dStrategy::sample_point(params.mesh, x, y, &tool_type, tool_radius)
+                    })
+                    .collect();
+                if !row.is_empty() {
+                    rows.push(row);
+                }
+                if alternate {
+                    forward = !forward;
+                }
+                y += step;
+            }
+        }
+        ScanDirection::Y => {
+            let (x_min, x_max) = (bounds.min.x, bounds.max.x);
+            let (y_min, y_max) = (bounds.min.y, bounds.max.y);
+            let mut x = x_min;
+            while x <= x_max {
+                let ys: Vec<f64> = if forward {
+                    float_range(y_min, y_max, step).collect()
+                } else {
+                    let fwd: Vec<f64> = float_range(y_min, y_max, step).collect();
+                    fwd.into_iter().rev().collect()
+                };
+                let col: Vec<(f64, f64, f64)> = ys
+                    .into_iter()
+                    .filter_map(|y| {
+                        Surface3dStrategy::sample_point(params.mesh, x, y, &tool_type, tool_radius)
+                    })
+                    .collect();
+                if !col.is_empty() {
+                    rows.push(col);
+                }
+                if alternate {
+                    forward = !forward;
+                }
+                x += step;
+            }
+        }
+    }
+    rows
 }
 
 // ── Laser cut strategy ──────────────────────────────────────────────
@@ -757,6 +862,372 @@ mod tests {
         assert!(surface.mesh.bounds.is_some());
     }
 
+    // ── Task-002 tests: Pattern enum + SurfaceParams extension ───────────
+
+    #[test]
+    fn test_req_002_pattern_default_is_zigzag() {
+        assert_eq!(Pattern::default(), Pattern::ZigZag);
+    }
+
+    #[test]
+    fn test_req_002_new_fills_default_pattern() {
+        let mesh = make_simple_mesh();
+        let cut_params = CutParams::default();
+        let surface = SurfaceParams::new(&mesh, cut_params, ScanDirection::X);
+        assert_eq!(surface.pattern, Pattern::ZigZag);
+    }
+
+    #[test]
+    fn test_req_002_from_tuple_fills_default_pattern() {
+        let mesh = make_simple_mesh();
+        let cut_params = CutParams::default();
+        let surface: SurfaceParams = (&mesh, &cut_params).into();
+        assert_eq!(surface.pattern, Pattern::ZigZag);
+    }
+
+    // ── Task-003 tests: Surface3dStrategy + disc-projected sampling ─────
+
+    fn make_peak_surface_mesh() -> Mesh {
+        use crate::geometry::{Triangle, Vec3};
+        // Pyramid: 10x10 base at z=5 rising to apex at (5, 5, 7), built
+        // from four triangular walls.
+        let apex = Vec3::new(5.0, 5.0, 7.0);
+        let c1 = Vec3::new(0.0, 0.0, 5.0);
+        let c2 = Vec3::new(10.0, 0.0, 5.0);
+        let c3 = Vec3::new(10.0, 10.0, 5.0);
+        let c4 = Vec3::new(0.0, 10.0, 5.0);
+        let n = Vec3::new(0.0, 0.0, 1.0);
+        let t1 = Triangle {
+            normal: n,
+            v0: c1,
+            v1: c2,
+            v2: apex,
+        };
+        let t2 = Triangle {
+            normal: n,
+            v0: c2,
+            v1: c3,
+            v2: apex,
+        };
+        let t3 = Triangle {
+            normal: n,
+            v0: c3,
+            v1: c4,
+            v2: apex,
+        };
+        let t4 = Triangle {
+            normal: n,
+            v0: c4,
+            v1: c1,
+            v2: apex,
+        };
+        Mesh::new(vec![t1, t2, t3, t4])
+    }
+
+    #[test]
+    fn test_req_003_surface3d_flat_tool_does_not_gouge_peak() {
+        use crate::slicer::mesh_height_at;
+        use crate::tool::{Tool, ToolType};
+        let mesh = make_peak_surface_mesh();
+        let tool = Tool::new(ToolType::EndMill, 2.0, 10.0, 0.0);
+        let cut_params = CutParams {
+            tool,
+            step_over: 1.0,
+            ..CutParams::default()
+        };
+        let surface = SurfaceParams::new(&mesh, cut_params, ScanDirection::X);
+        let toolpaths = Surface3dStrategy.generate_surface(&surface);
+        let max_z: f64 = toolpaths
+            .iter()
+            .flat_map(|tp| tp.moves.iter())
+            .filter(|m| !m.rapid)
+            .map(|m| m.z)
+            .fold(f64::NEG_INFINITY, f64::max);
+        // Apex is at 7.0; the flat disc projection must lift the center at
+        // the apex to exactly the apex Z.
+        let apex_z = mesh_height_at(&mesh, 5.0, 5.0).unwrap();
+        assert!(
+            (max_z - apex_z).abs() < 1e-6,
+            "flat end mill must sit on the z=7 apex; got max_z = {}",
+            max_z
+        );
+    }
+
+    #[test]
+    fn test_req_003_surface3d_flat_disc_catches_off_center_peak() {
+        use crate::slicer::mesh_height_at;
+        use crate::tool::{Tool, ToolType};
+        let mesh = make_peak_surface_mesh();
+        // (4, 5) is on the west-facing slope, below the apex.
+        let pointwise = mesh_height_at(&mesh, 4.0, 5.0).expect("on slope");
+        assert!(
+            pointwise < 7.0 - 1e-6,
+            "precondition: (4, 5) slope should be below apex; got {}",
+            pointwise
+        );
+        let tool = Tool::new(ToolType::EndMill, 2.0, 10.0, 0.0); // radius 1.0
+        let cut_params = CutParams {
+            tool,
+            step_over: 1.0,
+            ..CutParams::default()
+        };
+        let surface = SurfaceParams::new(&mesh, cut_params, ScanDirection::X);
+        let toolpaths = Surface3dStrategy.generate_surface(&surface);
+        // The grid places a tool-center sample at (4, 5); the disc of
+        // radius 1 reaches the apex at (5, 5, 7), so Z at that move is 7.
+        let found = toolpaths.iter().flat_map(|tp| tp.moves.iter()).any(|m| {
+            !m.rapid
+                && (m.x - 4.0).abs() < 0.01
+                && (m.y - 5.0).abs() < 0.01
+                && (m.z - 7.0).abs() < 1e-6
+        });
+        assert!(
+            found,
+            "disc-projected flat tool at (4, 5) must lift to the z=7 apex (regression guard against pointwise sampling)"
+        );
+    }
+
+    #[test]
+    fn test_req_003_surface3d_ball_lifts_plateau_by_radius() {
+        use crate::tool::{Tool, ToolType};
+        let mesh = make_flat_surface_mesh();
+        let r = 1.0;
+        let tool = Tool::new(ToolType::BallEnd, 2.0 * r, 10.0, r);
+        let cut_params = CutParams {
+            tool,
+            step_over: 2.0,
+            ..CutParams::default()
+        };
+        let surface = SurfaceParams::new(&mesh, cut_params, ScanDirection::X);
+        let toolpaths = Surface3dStrategy.generate_surface(&surface);
+        let cuts: Vec<_> = toolpaths
+            .iter()
+            .flat_map(|tp| tp.moves.iter())
+            .filter(|m| !m.rapid)
+            .collect();
+        assert!(!cuts.is_empty(), "strategy must emit cuts on a flat plate");
+        for m in cuts {
+            assert!(
+                (m.z - (5.0 + r)).abs() < 1e-6,
+                "ball mill on z=5 plateau with radius {} must yield z = {}, got z = {}",
+                r,
+                5.0 + r,
+                m.z
+            );
+        }
+    }
+
+    // ── Task-004 tests: one-way pattern ─────────────────────────────────
+
+    fn one_way_surface(mesh: &Mesh) -> (CutParams, SurfaceParams<'_>) {
+        let cut_params = CutParams {
+            step_over: 2.0,
+            ..CutParams::default()
+        };
+        let surface = SurfaceParams::new_with_pattern(
+            mesh,
+            cut_params.clone(),
+            ScanDirection::X,
+            Pattern::OneWay,
+        );
+        (cut_params, surface)
+    }
+
+    #[test]
+    fn test_req_004_one_way_emits_two_rapids_per_row() {
+        let mesh = make_flat_surface_mesh();
+        let (_, surface) = one_way_surface(&mesh);
+        let toolpaths = Surface3dStrategy.generate_surface(&surface);
+        let rapid_count: usize = toolpaths
+            .iter()
+            .flat_map(|tp| tp.moves.iter())
+            .filter(|m| m.rapid)
+            .count();
+        let row_count = toolpaths.len();
+        assert!(row_count > 0, "expected at least one row of cuts");
+        assert_eq!(
+            rapid_count,
+            row_count * 2,
+            "one-way emits plunge + retract per row (rows={}, rapids={})",
+            row_count,
+            rapid_count
+        );
+        // And crucially: strictly more rapids than zig-zag over the same mesh
+        // (zig-zag emits exactly 2 rapids total).
+        let zigzag_surface = SurfaceParams::new_with_pattern(
+            &mesh,
+            CutParams {
+                step_over: 2.0,
+                ..CutParams::default()
+            },
+            ScanDirection::X,
+            Pattern::ZigZag,
+        );
+        let zigzag_rapids: usize = Surface3dStrategy
+            .generate_surface(&zigzag_surface)
+            .iter()
+            .flat_map(|tp| tp.moves.iter())
+            .filter(|m| m.rapid)
+            .count();
+        assert_eq!(zigzag_rapids, 2);
+        assert!(rapid_count > zigzag_rapids);
+    }
+
+    #[test]
+    fn test_req_004_one_way_cuts_are_monotonically_forward() {
+        let mesh = make_flat_surface_mesh();
+        let (_, surface) = one_way_surface(&mesh);
+        let toolpaths = Surface3dStrategy.generate_surface(&surface);
+        // For ScanDirection::X, within each toolpath the non-rapid moves
+        // must have non-decreasing X.
+        for tp in &toolpaths {
+            let cuts: Vec<_> = tp.moves.iter().filter(|m| !m.rapid).collect();
+            for pair in cuts.windows(2) {
+                let dx = pair[1].x - pair[0].x;
+                assert!(
+                    dx >= -1e-9,
+                    "one-way row cuts must have non-decreasing X; got dx={}",
+                    dx
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_req_004_one_way_first_and_last_include_safe_z_rapid() {
+        let mesh = make_flat_surface_mesh();
+        let (cut_params, surface) = one_way_surface(&mesh);
+        let toolpaths = Surface3dStrategy.generate_surface(&surface);
+        assert!(toolpaths.len() >= 2, "need multiple rows to test");
+        let first = &toolpaths[0];
+        let last = toolpaths.last().unwrap();
+        assert!(
+            first
+                .moves
+                .iter()
+                .any(|m| m.rapid && (m.z - cut_params.safe_z).abs() < 1e-9),
+            "first toolpath must include a rapid to safe_z"
+        );
+        assert!(
+            last.moves
+                .iter()
+                .any(|m| m.rapid && (m.z - cut_params.safe_z).abs() < 1e-9),
+            "last toolpath must include a rapid to safe_z"
+        );
+    }
+
+    // ── Task-005 tests: spiral pattern ──────────────────────────────────
+
+    fn spiral_surface(mesh: &Mesh) -> SurfaceParams<'_> {
+        SurfaceParams::new_with_pattern(
+            mesh,
+            CutParams {
+                step_over: 1.0,
+                ..CutParams::default()
+            },
+            ScanDirection::X,
+            Pattern::Spiral,
+        )
+    }
+
+    #[test]
+    fn test_req_005_spiral_completes_multiple_loops() {
+        // 10x10 flat surface with step_over=1 should fit an outer ring
+        // plus at least one inner ring before termination (loops count
+        // ≈ (side_length / 2) / step_over ≈ 5). We require ≥ 2.
+        let mesh = make_flat_surface_mesh();
+        let surface = spiral_surface(&mesh);
+        let toolpaths = Surface3dStrategy.generate_surface(&surface);
+        assert_eq!(toolpaths.len(), 1, "spiral emits a single toolpath");
+        let cuts: Vec<_> = toolpaths[0].moves.iter().filter(|m| !m.rapid).collect();
+        // An outer loop of a 10x10 box at step=1 contains ~40 points
+        // (4 sides × 10). Two loops ⇒ ≥ 2*(perimeter/step) points.
+        assert!(
+            cuts.len() >= 40,
+            "expected at least two full loops; got {} cut moves",
+            cuts.len()
+        );
+    }
+
+    #[test]
+    fn test_req_005_spiral_inward_progression() {
+        // The last sampled point must be strictly closer to the bounding
+        // box center than the first. A stronger test — all inter-point
+        // distance changes stay within tolerance `step_over * sqrt(2)` —
+        // guards against any outward jumps in the path.
+        let mesh = make_flat_surface_mesh(); // bounds: [0,10]x[0,10]
+        let surface = spiral_surface(&mesh);
+        let toolpaths = Surface3dStrategy.generate_surface(&surface);
+        let cuts: Vec<_> = toolpaths[0].moves.iter().filter(|m| !m.rapid).collect();
+        let center = (5.0, 5.0);
+        let dist = |m: &&crate::geometry::ToolpathMove| -> f64 {
+            ((m.x - center.0).powi(2) + (m.y - center.1).powi(2)).sqrt()
+        };
+        let d_first = dist(&cuts[0]);
+        let d_last = dist(&cuts[cuts.len() - 1]);
+        assert!(
+            d_last < d_first,
+            "spiral end ({}) must be closer to center than start ({})",
+            d_last,
+            d_first
+        );
+        // No single step should exceed step_over * sqrt(2) + small slack
+        // (diagonal of one step). This rules out large outward jumps.
+        let step = 1.0_f64;
+        let slack = step * core::f64::consts::SQRT_2 + 1e-6;
+        for pair in cuts.windows(2) {
+            let dx = pair[1].x - pair[0].x;
+            let dy = pair[1].y - pair[0].y;
+            let d = (dx * dx + dy * dy).sqrt();
+            assert!(
+                d <= slack,
+                "spiral hop between consecutive points must be ≤ one diagonal step; got {}",
+                d
+            );
+        }
+    }
+
+    #[test]
+    fn test_req_005_spiral_has_exactly_two_rapids() {
+        let mesh = make_flat_surface_mesh();
+        let surface = spiral_surface(&mesh);
+        let toolpaths = Surface3dStrategy.generate_surface(&surface);
+        let rapid_count: usize = toolpaths
+            .iter()
+            .flat_map(|tp| tp.moves.iter())
+            .filter(|m| m.rapid)
+            .count();
+        assert_eq!(
+            rapid_count, 2,
+            "spiral emits exactly one initial rapid + one final retract"
+        );
+    }
+
+    #[test]
+    fn test_req_003_zigzag_alias_still_resolves() {
+        // The `pub use` shim must keep the old name usable.
+        let _alias = ZigzagSurfaceStrategy;
+        // And it must be the same type as the new name.
+        fn assert_same<T>(_a: T, _b: T) {}
+        assert_same(Surface3dStrategy, ZigzagSurfaceStrategy);
+    }
+
+    #[test]
+    fn test_req_002_new_with_pattern_round_trips_all_variants() {
+        let mesh = make_simple_mesh();
+        let cut_params = CutParams::default();
+        for expected in [Pattern::ZigZag, Pattern::OneWay, Pattern::Spiral] {
+            let surface = SurfaceParams::new_with_pattern(
+                &mesh,
+                cut_params.clone(),
+                ScanDirection::Y,
+                expected,
+            );
+            assert_eq!(surface.pattern, expected);
+            assert_eq!(surface.scan_direction, ScanDirection::Y);
+        }
+    }
+
     // ── Task-010 tests: PerimeterStrategy ────────────────────────────────
 
     #[test]
@@ -1038,29 +1509,9 @@ mod tests {
     }
 
     // ── Task-008 tests: Ball-end compensation ────────────────────────────
-
-    #[test]
-    fn test_req_008_ball_end_offset_flat_surface() {
-        // For flat surface (normal = +Z), only Z offset
-        let normal = Vec3::new(0.0, 0.0, 1.0);
-        let (dx, dy, dz) = ball_end_offset(normal, 3.0);
-        assert!(dx.abs() < 0.001, "No X offset for flat surface");
-        assert!(dy.abs() < 0.001, "No Y offset for flat surface");
-        assert!(dz.abs() < 0.001, "No Z adjustment for flat surface");
-    }
-
-    #[test]
-    fn test_req_008_ball_end_offset_angled() {
-        // 45-degree ramp (normal at 45° in Y-Z plane)
-        let normal = Vec3::new(0.0, -0.707, 0.707);
-        let radius = 3.0;
-        let (dx, dy, dz) = ball_end_offset(normal, radius);
-
-        // Should have Y offset and Z adjustment
-        assert!(dx.abs() < 0.001, "No X offset for Y ramp");
-        assert!(dy < -0.5, "Should have negative Y offset: {}", dy);
-        assert!(dz > 0.5, "Should have positive Z adjustment: {}", dz);
-    }
+    // (Former tests for the normal-based `ball_end_offset` helper were
+    // deleted in task-003. Disc-sampled ball projection replaces it; see
+    // slicer::project_ball_tool and the test_req_001_ball_* tests.)
 
     #[test]
     fn test_req_008_zigzag_with_ball_end() {

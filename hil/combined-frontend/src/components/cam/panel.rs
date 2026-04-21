@@ -29,8 +29,14 @@ const CNC_STRATEGIES: &[(&str, &str)] = &[
     ("contour", "Contour"),
     ("pocket", "Pocket"),
     ("slice", "Slice"),
-    ("zigzag", "Zigzag"),
+    ("surface3d", "Surface 3D"),
     ("perimeter", "Perimeter"),
+];
+
+const SURFACE_PATTERNS: &[(&str, &str)] = &[
+    ("zigzag", "Zig-zag"),
+    ("one_way", "One-way"),
+    ("spiral", "Spiral"),
 ];
 
 const LASER_STRATEGIES: &[(&str, &str)] = &[
@@ -360,6 +366,25 @@ pub fn CamPanel() -> impl IntoView {
                         }}
                     </select>
                 </fieldset>
+
+                // -- Pattern (Surface 3D only) --
+                <Show when=move || strategy.get() == "surface3d">
+                    <fieldset style="border: 1px solid #555; border-radius: 4px; padding: 0.5rem; min-width: 160px;">
+                        <legend>"Pattern"</legend>
+                        <select
+                            style="width: 100%; padding: 4px;"
+                            on:change=move |ev| {
+                                let val = event_target_value(&ev);
+                                update_param(Box::new(move |p: &mut CamParams| p.pattern = val.clone()));
+                            }
+                            prop:value=move || params.get().pattern
+                        >
+                            {SURFACE_PATTERNS.iter().map(|(value, label)| {
+                                view! { <option value=*value>{*label}</option> }
+                            }).collect_view()}
+                        </select>
+                    </fieldset>
+                </Show>
 
                 // -- Tool config (CNC only) --
                 <Show when=move || !is_laser.get()>

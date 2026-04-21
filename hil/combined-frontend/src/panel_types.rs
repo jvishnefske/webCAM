@@ -32,6 +32,32 @@ impl WidgetKind {
             Self::Indicator => "Indicator",
         }
     }
+
+    /// Fixed set of binding roles for this kind.
+    ///
+    /// The number and direction of bindings is a property of the widget, not a
+    /// user-editable list: a Slider emits exactly one output; a Gauge reads one
+    /// input. The user chooses the topic (for Input) or accepts/edits the
+    /// auto-generated topic name (for Output), but cannot add or remove roles.
+    pub fn binding_schema(&self) -> &'static [BindingRole] {
+        match self {
+            Self::Toggle | Self::Slider { .. } | Self::Button => &[BindingRole {
+                name: "value",
+                direction: BindingDirection::Output,
+            }],
+            Self::Gauge { .. } | Self::Label | Self::Indicator => &[BindingRole {
+                name: "value",
+                direction: BindingDirection::Input,
+            }],
+        }
+    }
+}
+
+/// A slot in a widget's binding schema.
+#[derive(Debug, Clone, Copy)]
+pub struct BindingRole {
+    pub name: &'static str,
+    pub direction: BindingDirection,
 }
 
 // ---------------------------------------------------------------------------
@@ -39,7 +65,7 @@ impl WidgetKind {
 // ---------------------------------------------------------------------------
 
 /// Whether the binding reads from or writes to a topic.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BindingDirection {
     Input,
     Output,
@@ -102,6 +128,14 @@ impl PanelModel {
         self.next_id += 1;
 
         let (width, height) = default_size(&kind);
+        let bindings = kind
+            .binding_schema()
+            .iter()
+            .map(|role| ChannelBinding {
+                direction: role.direction,
+                topic: default_topic(&kind, id, role),
+            })
+            .collect();
 
         self.widgets.push(Widget {
             id,
@@ -111,7 +145,7 @@ impl PanelModel {
             y: 20.0,
             width,
             height,
-            bindings: Vec::new(),
+            bindings,
         });
 
         id
@@ -132,6 +166,25 @@ impl PanelModel {
     /// Mutable lookup by id.
     pub fn get_widget_mut(&mut self, id: u32) -> Option<&mut Widget> {
         self.widgets.iter_mut().find(|w| w.id == id)
+    }
+}
+
+/// Auto-generated default topic for a widget's Output binding, or empty string
+/// for Input bindings (user must pick a topic to read from).
+fn default_topic(kind: &WidgetKind, id: u32, role: &BindingRole) -> String {
+    match role.direction {
+        BindingDirection::Input => String::new(),
+        BindingDirection::Output => {
+            let slug = match kind {
+                WidgetKind::Slider { .. } => "slider",
+                WidgetKind::Toggle => "toggle",
+                WidgetKind::Button => "button",
+                WidgetKind::Gauge { .. } => "gauge",
+                WidgetKind::Label => "label",
+                WidgetKind::Indicator => "indicator",
+            };
+            format!("panel/{slug}_{id}")
+        }
     }
 }
 
@@ -242,11 +295,14 @@ mod tests {
 
         assert_eq!(back.name, "Roundtrip");
         assert_eq!(back.widgets.len(), 2);
-        assert_eq!(back.widgets[0].bindings.len(), 1);
-        assert_eq!(
-            back.widgets[0].bindings[0].direction,
-            BindingDirection::Output
-        );
+        // Widget id=1 (Toggle) has one schema-derived binding plus the
+        // pushed one = 2. Both directions are Output (Toggle's schema is
+        // Output; the pushed binding is also Output).
+        assert_eq!(back.widgets[0].bindings.len(), 2);
+        assert!(back.widgets[0]
+            .bindings
+            .iter()
+            .all(|b| b.direction == BindingDirection::Output));
     }
 
     #[test]

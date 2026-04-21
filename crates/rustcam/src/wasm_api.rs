@@ -66,15 +66,15 @@ pub fn process_stl_progress(
     };
 
     let toolpaths: Vec<geometry::Toolpath> = match config.strategy.as_str() {
-        "zigzag" => {
+        "surface3d" | "zigzag" => {
             report_progress(on_progress, 0, 1);
-            let strategy = toolpath::ZigzagSurfaceStrategy;
-            let surface_params = toolpath::SurfaceParams::new(
+            let surface_params = toolpath::SurfaceParams::new_with_pattern(
                 &mesh,
                 cut_params,
                 scan_direction_from_config(&config),
+                crate::pattern_from_config(&config),
             );
-            let result = strategy.generate_surface(&surface_params);
+            let result = toolpath::Surface3dStrategy.generate_surface(&surface_params);
             report_progress(on_progress, 1, 1);
             result
         }
