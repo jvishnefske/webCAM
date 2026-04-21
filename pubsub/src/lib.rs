@@ -103,16 +103,20 @@ extern crate alloc;
 
 pub mod addr;
 pub mod broker;
+pub mod discovery;
 pub mod frame;
 pub mod node;
 pub mod payload;
+pub mod router;
 pub mod topic;
 pub mod transport;
 
 // Re-export key types at crate root for convenience.
 pub use addr::NodeAddr;
 pub use broker::{Broker, BrokerError, MessageHandler, SubHandle};
+pub use discovery::{SubscribeAnnouncement, SUBSCRIBE_TOPIC, UNSUBSCRIBE_TOPIC};
 pub use frame::{Frame, FrameError, MAX_FRAME_PAYLOAD};
 pub use node::{CompositeTransport, Node};
+pub use router::{MeshError, MeshRouter, PollOutcome};
 pub use topic::TopicId;
 pub use transport::{Transport, TransportError};
