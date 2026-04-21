@@ -49,6 +49,7 @@ impl MachineProfile {
                     "pocket".into(),
                     "slice".into(),
                     "zigzag".into(),
+                    "surface3d".into(),
                     "perimeter".into(),
                 ],
                 has_spindle: true,
@@ -121,7 +122,9 @@ impl MachineProfile {
     /// Returns an error message if the strategy is rejected.
     pub fn validate_strategy(&self, strategy: &str) -> Result<(), String> {
         // 3D strategies are not valid for laser cutters
-        if self.machine_type == MachineType::LaserCutter && matches!(strategy, "zigzag" | "slice") {
+        if self.machine_type == MachineType::LaserCutter
+            && matches!(strategy, "zigzag" | "surface3d" | "slice")
+        {
             return Err(format!(
                 "Strategy '{}' requires Z-axis which laser cutter does not have",
                 strategy

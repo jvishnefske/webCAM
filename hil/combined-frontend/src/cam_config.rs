@@ -20,6 +20,8 @@ pub struct CamParams {
     pub safe_z: f64,
     pub cut_depth: f64,
     pub scan_direction: String,
+    /// Surface-3D traversal pattern: "zigzag", "one_way", or "spiral".
+    pub pattern: String,
     pub climb_cut: bool,
     pub perimeter_passes: u32,
     pub laser_power: f64,
@@ -42,6 +44,7 @@ impl Default for CamParams {
             safe_z: 5.0,
             cut_depth: -1.0,
             scan_direction: "x".into(),
+            pattern: "zigzag".into(),
             climb_cut: false,
             perimeter_passes: 1,
             laser_power: 100.0,
@@ -134,11 +137,12 @@ pub fn build_cam_config(
     }
 
     // Strategy-specific fields.
-    if strategy == "zigzag" {
+    if strategy == "zigzag" || strategy == "surface3d" {
         obj.insert(
             "scan_direction".into(),
             serde_json::json!(params.scan_direction),
         );
+        obj.insert("pattern".into(), serde_json::json!(params.pattern));
     }
     if strategy == "perimeter" {
         obj.insert("climb_cut".into(), serde_json::json!(params.climb_cut));
@@ -252,6 +256,34 @@ mod tests {
         };
         let config = build_cam_config("cnc_mill", "zigzag", &params);
         assert_eq!(config["scan_direction"], "y");
+    }
+
+    #[test]
+    fn test_req_006_surface3d_pattern_round_trip() {
+        // Each of the three supported pattern values must survive the
+        // round trip from CamParams → JSON → rustcam::CamConfig.
+        for pattern in ["zigzag", "one_way", "spiral"] {
+            let params = CamParams {
+                pattern: pattern.into(),
+                ..default_cnc_params()
+            };
+            let json = build_cam_config("cnc_mill", "surface3d", &params);
+            assert_eq!(
+                json["pattern"], pattern,
+                "pattern {} must appear in JSON",
+                pattern
+            );
+            let parsed: rustcam::CamConfig =
+                serde_json::from_value(json).expect("JSON must deserialize as CamConfig");
+            assert_eq!(parsed.pattern, pattern);
+            assert_eq!(parsed.strategy, "surface3d");
+        }
+    }
+
+    #[test]
+    fn test_req_006_default_pattern_is_zigzag() {
+        let params = default_cnc_params();
+        assert_eq!(params.pattern, "zigzag");
     }
 
     #[test]

@@ -39,8 +39,8 @@ use machine::{MachineProfile, MachineType};
 use serde::{Deserialize, Serialize};
 use tool::Tool;
 use toolpath::{
-    ContourStrategy, CutParams, LaserCutStrategy, LaserEngraveStrategy, PerimeterStrategy,
-    PocketStrategy, ScanDirection, SurfaceParams, ToolpathStrategy, ZigzagSurfaceStrategy,
+    ContourStrategy, CutParams, LaserCutStrategy, LaserEngraveStrategy, Pattern, PerimeterStrategy,
+    PocketStrategy, ScanDirection, Surface3dStrategy, SurfaceParams, ToolpathStrategy,
 };
 
 // ── Public parameter struct (JSON from JS) ───────────────────────────
@@ -77,6 +77,10 @@ pub struct CamConfig {
     pub perimeter_passes: u32,
     #[serde(default = "default_scan_direction")]
     pub scan_direction: String,
+    /// Surface-strategy traversal pattern: `"zigzag"` (default), `"one_way"`,
+    /// or `"spiral"`. Ignored for non-surface strategies.
+    #[serde(default = "default_pattern")]
+    pub pattern: String,
     #[serde(default = "default_machine_type")]
     pub machine_type: String,
     #[serde(default)]
@@ -120,6 +124,9 @@ fn default_cut_depth() -> f64 {
 fn default_scan_direction() -> String {
     "x".into()
 }
+fn default_pattern() -> String {
+    "zigzag".into()
+}
 fn default_strategy() -> String {
     "contour".into()
 }
@@ -145,6 +152,7 @@ impl Default for CamConfig {
             climb_cut: false,
             perimeter_passes: default_perimeter_passes(),
             scan_direction: default_scan_direction(),
+            pattern: default_pattern(),
             machine_type: default_machine_type(),
             laser_power: None,
             passes: None,
@@ -158,6 +166,16 @@ pub(crate) fn scan_direction_from_config(config: &CamConfig) -> ScanDirection {
     match config.scan_direction.as_str() {
         "y" | "Y" => ScanDirection::Y,
         _ => ScanDirection::X,
+    }
+}
+
+/// Parse the surface traversal pattern from config string. Unknown values
+/// fall back to `Pattern::ZigZag`.
+pub(crate) fn pattern_from_config(config: &CamConfig) -> Pattern {
+    match config.pattern.as_str() {
+        "one_way" | "oneway" => Pattern::OneWay,
+        "spiral" => Pattern::Spiral,
+        _ => Pattern::ZigZag,
     }
 }
 
@@ -296,11 +314,14 @@ pub fn process_stl_impl(data: &[u8], config_json: &str) -> Result<String, String
             }
             all
         }
-        "zigzag" => {
-            let strategy = ZigzagSurfaceStrategy;
-            let surface_params =
-                SurfaceParams::new(&mesh, cut_params, scan_direction_from_config(&config));
-            strategy.generate_surface(&surface_params)
+        "surface3d" | "zigzag" => {
+            let surface_params = SurfaceParams::new_with_pattern(
+                &mesh,
+                cut_params,
+                scan_direction_from_config(&config),
+                pattern_from_config(&config),
+            );
+            Surface3dStrategy.generate_surface(&surface_params)
         }
         "perimeter" => {
             let layers = slicer::slice_mesh(&mesh, config.step_down);
@@ -465,12 +486,16 @@ fn build_toolpaths_stl(mesh: &geometry::Mesh, config: &CamConfig) -> Vec<Toolpat
         perimeter_passes: config.perimeter_passes,
     };
 
-    // Handle zigzag separately (3D surface strategy)
-    if config.strategy == "zigzag" {
-        let strategy = ZigzagSurfaceStrategy;
-        let surface_params =
-            SurfaceParams::new(mesh, cut_params, scan_direction_from_config(config));
-        return strategy.generate_surface(&surface_params);
+    // Handle the 3D surface strategy separately (accepts both the legacy
+    // "zigzag" name and the new "surface3d" name with pattern selection).
+    if config.strategy == "zigzag" || config.strategy == "surface3d" {
+        let surface_params = SurfaceParams::new_with_pattern(
+            mesh,
+            cut_params,
+            scan_direction_from_config(config),
+            pattern_from_config(config),
+        );
+        return Surface3dStrategy.generate_surface(&surface_params);
     }
 
     let layers = slicer::slice_mesh(mesh, config.step_down);

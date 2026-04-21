@@ -96,6 +96,83 @@ pub fn surface_normal_at(mesh: &Mesh, x: f64, y: f64) -> Option<Vec3> {
     best.map(|(_, normal)| normal)
 }
 
+/// Number of samples placed around the tool-disc perimeter for the flat
+/// and ball projection routines. The full disc is sampled as: the center,
+/// `DISC_SAMPLES` points at the full radius, and `DISC_SAMPLES / 2` points
+/// at half the radius. Tunable in one place without touching call sites.
+const DISC_SAMPLES: usize = 16;
+
+/// Lowest legal tool-center Z for a flat cylinder end mill of radius
+/// `radius` centered at `(x, y)`.
+///
+/// Walks a polar grid (center + `DISC_SAMPLES` at `r` + `DISC_SAMPLES/2`
+/// at `r/2`) and returns the maximum `mesh_height_at` over those samples.
+/// Samples that fall off the mesh are ignored; if no sample hits the mesh
+/// the result is `None`.
+///
+/// A zero radius collapses to pure pointwise `mesh_height_at`. A negative
+/// radius is rejected with `None`.
+pub fn project_flat_tool(mesh: &Mesh, x: f64, y: f64, radius: f64) -> Option<f64> {
+    if radius < 0.0 {
+        return None;
+    }
+    let mut best: Option<f64> = None;
+    for (sx, sy, _d) in disc_samples(x, y, radius) {
+        if let Some(sz) = mesh_height_at(mesh, sx, sy) {
+            best = Some(best.map_or(sz, |m| m.max(sz)));
+        }
+    }
+    best
+}
+
+/// Lowest legal tool-center Z for a ball-end mill of radius `radius`
+/// centered at `(x, y)`.
+///
+/// Each disc sample at planar distance `d` from the tool axis contributes
+/// `sz + sqrt(radius^2 - d^2)` — the Z at which a sphere of radius
+/// `radius` would sit tangent to that sample point. The maximum of these
+/// contributions is the tool-center Z.
+///
+/// Returns `None` for a negative radius or when no sample overlaps the
+/// mesh.
+pub fn project_ball_tool(mesh: &Mesh, x: f64, y: f64, radius: f64) -> Option<f64> {
+    if radius < 0.0 {
+        return None;
+    }
+    let r2 = radius * radius;
+    let mut best: Option<f64> = None;
+    for (sx, sy, d) in disc_samples(x, y, radius) {
+        if let Some(sz) = mesh_height_at(mesh, sx, sy) {
+            // d <= radius is always true by construction of disc_samples.
+            let lift = (r2 - d * d).max(0.0).sqrt();
+            let candidate = sz + lift;
+            best = Some(best.map_or(candidate, |m| m.max(candidate)));
+        }
+    }
+    best
+}
+
+/// Enumerate the `(x, y, d)` triples for the disc sampling grid around
+/// `(cx, cy)`, where `d` is the planar distance from the center. For
+/// `radius == 0` only the center sample is yielded.
+fn disc_samples(cx: f64, cy: f64, radius: f64) -> Vec<(f64, f64, f64)> {
+    let mut out = Vec::with_capacity(1 + DISC_SAMPLES + DISC_SAMPLES / 2);
+    out.push((cx, cy, 0.0));
+    if radius > 0.0 {
+        let mid = radius * 0.5;
+        for i in 0..DISC_SAMPLES {
+            let theta = (i as f64) * core::f64::consts::TAU / (DISC_SAMPLES as f64);
+            out.push((cx + radius * theta.cos(), cy + radius * theta.sin(), radius));
+        }
+        let inner_count = DISC_SAMPLES / 2;
+        for i in 0..inner_count {
+            let theta = (i as f64) * core::f64::consts::TAU / (inner_count as f64);
+            out.push((cx + mid * theta.cos(), cy + mid * theta.sin(), mid));
+        }
+    }
+    out
+}
+
 /// Query the mesh height at an XY point by casting a vertical ray downward.
 ///
 /// Returns the highest Z coordinate where the ray intersects the mesh,
@@ -323,6 +400,154 @@ mod tests {
         let mesh = make_box_mesh();
         let normal = surface_normal_at(&mesh, 20.0, 20.0);
         assert!(normal.is_none());
+    }
+
+    // -------- Task-001: disc-sampled tool-shape projection -------------
+
+    /// Flat base triangle at z=5 covering a large quad in XY.
+    fn make_flat_base(z: f64) -> Vec<Triangle> {
+        let t1 = Triangle {
+            normal: Vec3::new(0.0, 0.0, 1.0),
+            v0: Vec3::new(-10.0, -10.0, z),
+            v1: Vec3::new(10.0, -10.0, z),
+            v2: Vec3::new(10.0, 10.0, z),
+        };
+        let t2 = Triangle {
+            normal: Vec3::new(0.0, 0.0, 1.0),
+            v0: Vec3::new(-10.0, -10.0, z),
+            v1: Vec3::new(10.0, 10.0, z),
+            v2: Vec3::new(-10.0, 10.0, z),
+        };
+        vec![t1, t2]
+    }
+
+    /// A 2x2 horizontal bump at z=7 centered at origin, sitting on top of a
+    /// flat base at z=5. Useful for verifying that the disc projection
+    /// catches raised features the pointwise `mesh_height_at` would miss.
+    fn make_bump_mesh() -> Mesh {
+        let mut tris = make_flat_base(5.0);
+        let bump1 = Triangle {
+            normal: Vec3::new(0.0, 0.0, 1.0),
+            v0: Vec3::new(-1.0, -1.0, 7.0),
+            v1: Vec3::new(1.0, -1.0, 7.0),
+            v2: Vec3::new(1.0, 1.0, 7.0),
+        };
+        let bump2 = Triangle {
+            normal: Vec3::new(0.0, 0.0, 1.0),
+            v0: Vec3::new(-1.0, -1.0, 7.0),
+            v1: Vec3::new(1.0, 1.0, 7.0),
+            v2: Vec3::new(-1.0, 1.0, 7.0),
+        };
+        tris.push(bump1);
+        tris.push(bump2);
+        Mesh::new(tris)
+    }
+
+    #[test]
+    fn test_req_001_flat_projection_on_horizontal_triangle() {
+        // On a flat plane at z=5, project_flat_tool returns 5.0 at any point
+        // whose disc overlaps the plane.
+        let mesh = Mesh::new(make_flat_base(5.0));
+        let z = project_flat_tool(&mesh, 0.0, 0.0, 1.0).expect("center on plane");
+        assert!((z - 5.0).abs() < 1e-6, "expected 5.0, got {}", z);
+    }
+
+    #[test]
+    fn test_req_001_flat_projection_outside_mesh_returns_none() {
+        let mesh = Mesh::new(make_flat_base(5.0));
+        // Far outside the base + tool radius.
+        let z = project_flat_tool(&mesh, 100.0, 100.0, 0.5);
+        assert!(z.is_none(), "expected None off-mesh, got {:?}", z);
+    }
+
+    #[test]
+    fn test_req_001_flat_projection_catches_peak_in_disc() {
+        // Tool center is on the base (z=5) but disc reaches into the z=7
+        // bump. The disc-sampled projection must return 7, even though
+        // pointwise mesh_height_at at the tool center is only 5.
+        let mesh = make_bump_mesh();
+        let center_z = mesh_height_at(&mesh, 1.5, 0.0).expect("center on base");
+        assert!(
+            (center_z - 5.0).abs() < 1e-6,
+            "precondition: pointwise center should read the base, got {}",
+            center_z
+        );
+        // Disc of radius 0.6 from (1.5, 0) reaches x=0.9 which is inside
+        // the [-1, 1] bump.
+        let z = project_flat_tool(&mesh, 1.5, 0.0, 0.6).expect("disc overlaps bump");
+        assert!(
+            (z - 7.0).abs() < 1e-6,
+            "flat disc projection must pick up the z=7 bump, got {}",
+            z
+        );
+    }
+
+    #[test]
+    fn test_req_001_ball_projection_on_horizontal_plane() {
+        // Sphere of radius r sits tangent on a horizontal plane: tool
+        // center is at z_plane + r.
+        let mesh = Mesh::new(make_flat_base(5.0));
+        let r = 0.75;
+        let z = project_ball_tool(&mesh, 0.0, 0.0, r).expect("on plane");
+        assert!(
+            (z - (5.0 + r)).abs() < 1e-6,
+            "expected {}, got {}",
+            5.0 + r,
+            z
+        );
+    }
+
+    #[test]
+    fn test_req_001_ball_projection_higher_than_flat_over_peak() {
+        // With the tool center sitting directly above the z=7 bump, the
+        // sphere lifts by its radius (disc samples that stay on the bump
+        // plateau contribute sz + sqrt(r^2 - d^2), max at center).
+        let mesh = make_bump_mesh();
+        let r = 0.4;
+        let flat = project_flat_tool(&mesh, 0.0, 0.0, r).expect("flat on bump");
+        let ball = project_ball_tool(&mesh, 0.0, 0.0, r).expect("ball on bump");
+        assert!(
+            ball > flat + 1e-6,
+            "expected ball ({}) strictly greater than flat ({})",
+            ball,
+            flat
+        );
+        assert!(
+            (ball - (7.0 + r)).abs() < 1e-6,
+            "ball over bump plateau should equal z_peak + radius, got {}",
+            ball
+        );
+    }
+
+    #[test]
+    fn test_req_001_zero_radius_flat_collapses_to_pointwise() {
+        // Radius 0 means a degenerate disc; the projection must equal
+        // mesh_height_at at the query point.
+        let mesh = make_bump_mesh();
+        for &(x, y) in &[(0.0, 0.0), (1.5, 0.0), (2.5, 2.5)] {
+            let pointwise = mesh_height_at(&mesh, x, y);
+            let projected = project_flat_tool(&mesh, x, y, 0.0);
+            assert_eq!(
+                pointwise, projected,
+                "zero-radius projection at ({}, {}) should match pointwise",
+                x, y
+            );
+        }
+    }
+
+    #[test]
+    fn test_req_001_negative_radius_returns_none() {
+        // Guard: negative radii are nonsensical and return None for both.
+        let mesh = Mesh::new(make_flat_base(5.0));
+        assert!(project_flat_tool(&mesh, 0.0, 0.0, -1.0).is_none());
+        assert!(project_ball_tool(&mesh, 0.0, 0.0, -0.1).is_none());
+    }
+
+    #[test]
+    fn test_req_001_ball_projection_outside_mesh_returns_none() {
+        let mesh = Mesh::new(make_flat_base(5.0));
+        let z = project_ball_tool(&mesh, 100.0, 100.0, 0.5);
+        assert!(z.is_none());
     }
 
     #[test]

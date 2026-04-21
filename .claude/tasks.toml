@@ -1,243 +1,264 @@
 version = 1
-status = "ready_for_implementation"
+status = "implementation_complete"
 
 [project]
-name = "leptos-dataflow-editor-v2"
-description = "Refactor Leptos DAG editor to match design spec: GraphState signals, HTML node components, separate Edge/Port/Node, proper pan/zoom layers"
+name = "surface-3d-milling"
+description = """
+Add a true 3D surface milling strategy to rustcam: projects the tool shape
+(flat cylinder for EndMill, sphere for BallEnd) from the +Z direction onto a
+triangle mesh, then emits G-code in one of three patterns (zig-zag, one-way,
+rectangular offset spiral). Replaces the existing pointwise-height-only
+ZigzagSurfaceStrategy, which gouges the surface for flat end mills because
+the tool center Z is not lifted to account for the disc footprint.
+
+Input: user-uploaded STL via the existing parser. User-controlled knobs:
+tool type (EndMill | BallEnd), tool diameter, stepover. Pattern selected by
+dropdown in the CAM panel.
+"""
 worktree_base = ".worktrees"
 
 # ============================================================================
-# Phase 1: GraphState — reactive wrapper with fine-grained signals
+# Phase 1: Tool-shape projection (pure functions, crate-local)
 # ============================================================================
 
 [[tasks]]
 id = "task-001"
-title = "Extract GraphState with RwSignal-based reactive wrapper"
+title = "Implement disc-sampled tool-shape projection onto the mesh"
+# status was bumped to complete after TDD cycle: 8 new req-001 tests
+# pass, all prior slicer tests still green, cargo clippy clean.
 acceptance = """
-- New hil/combined-frontend/src/graph_state.rs (NOT wasm32-gated, testable on host):
-  - GraphState struct wrapping GraphEngine with fine-grained signals:
-    - blocks: RwSignal<Vec<BlockSnapshot>> (derived from engine on mutation)
-    - channels: RwSignal<Vec<Channel>> (derived from engine on mutation)
-    - positions: RwSignal<HashMap<u32, (f64, f64)>>
-    - selected_block: RwSignal<Option<u32>>
-    - selected_edge: RwSignal<Option<u32>>
-    - tick_count: RwSignal<u64>
-    - topics: RwSignal<BTreeMap<String, f64>>
-  - Mutation methods that update signals:
-    - add_block(block_type, config, x, y) -> Option<u32>
-    - remove_block(id)
-    - update_config(id, key, value)
-    - connect(from_block, from_port, to_block, to_port) -> Option<u32>
-    - disconnect(channel_id)
-    - tick() -> Result<(), String>
-    - reset()
-    - inject_topic(topic, value)
-    - read_topic(topic) -> Option<f64>
-  - Each mutation calls engine method THEN updates relevant signals
-  - Provided via Leptos context (provide_context<GraphState>)
-- Remove the thread_local ENGINE pattern from editor.rs — GraphState replaces it
-- 10+ tests (pure logic, no Leptos signals in tests — test the engine delegation):
-  - add_block returns id, remove_block removes
-  - connect/disconnect work
-  - tick increments tick_count
-  - inject/read_topic round-trip
-  - reset clears state
-- cargo test -p combined-frontend
-- cargo clippy --target wasm32-unknown-unknown -p combined-frontend -- -D warnings
+- In crates/rustcam/src/slicer.rs add two pure functions:
+  - `pub fn project_flat_tool(mesh: &Mesh, x: f64, y: f64, radius: f64) -> Option<f64>`
+    Samples `mesh_height_at` over a polar grid covering the disc of radius
+    `radius` centred at `(x, y)` (center sample + 16 samples at `r` + 8
+    samples at `r/2`). Returns the maximum Z found, or None if no sample
+    lies over the mesh. Represents the lowest legal tool-center Z for a
+    flat cylinder end mill.
+  - `pub fn project_ball_tool(mesh: &Mesh, x: f64, y: f64, radius: f64) -> Option<f64>`
+    Same disc grid. For each sample at distance `d` from the disc centre,
+    contribute `mesh_height_at(sx, sy) + sqrt(radius^2 - d^2)` to the max.
+    Returns tool-center Z such that the sphere sits tangent to the highest
+    point it can reach within the disc footprint.
+- Both functions reuse the existing `mesh_height_at` without modifying it.
+- Disc sampling density lives in a `const DISC_SAMPLES` so it can be tuned
+  without touching call sites.
+- Unit tests in `slicer.rs` (minimum 8):
+  - Flat projection on a single horizontal triangle at z=5.0 returns 5.0 at
+    the centre, at the perimeter, and outside radius returns None.
+  - Flat projection on a ridge (two triangles meeting at higher z=7.0 along
+    x=0) returns 7.0 when queried with (x=0.4, y=0) and radius=0.6 even
+    though `mesh_height_at(0.4, 0)` is lower than 7.0.
+  - Ball projection on a flat horizontal triangle at z=5.0 returns
+    `5.0 + radius` at the centre.
+  - Ball projection over a ridge returns a value higher than the flat
+    projection at the same point (sphere + lift > flat disc max).
+  - Projection returns None when the whole disc lies off the mesh.
+  - Zero-radius flat projection collapses to pointwise `mesh_height_at`.
+  - Negative tool radius returns None (guard). Zero is a valid degenerate
+    case, not an error.
+- `cargo test -p rustcam slicer::tests` all pass.
+- `cargo clippy -p rustcam --all-targets -- -D warnings` clean.
 """
 deps = []
 status = "pending"
 
 # ============================================================================
-# Phase 2: Component decomposition — Node, Edge, Port as separate components
+# Phase 2: Pattern enum + SurfaceParams extension
 # ============================================================================
 
 [[tasks]]
 id = "task-002"
-title = "Create Node component with HTML div rendering and drag"
+title = "Add Pattern enum and extend SurfaceParams with default ZigZag"
+# Deviation from literal spec: instead of renaming new() to 4-arg and
+# forcing callers to switch to new_with_defaults(), kept new() as the
+# 3-arg default-pattern constructor and added new_with_pattern() as the
+# 4-arg opt-in. Same API surface, zero churn at call sites.
 acceptance = """
-- New hil/combined-frontend/src/components/dag/node.rs (wasm32-gated):
-  - #[component] fn Node(block_id: u32) -> impl IntoView
-  - Reads GraphState from Leptos context
-  - Renders as HTML <div> (NOT SVG <g>) with CSS transform for positioning
-  - Structure: <div class="df-node"> with header, type label, input ports, output ports
-  - Port circles rendered as small <div> elements positioned absolutely
-  - Selection: click sets selected_block on GraphState
-  - Drag: pointerdown starts drag (3px threshold), pointermove updates position,
-    pointerup finalizes. Uses GraphState.positions signal.
-  - Output value labels update reactively via tick_count subscription
-  - Node height dynamic based on max(input_count, output_count) * PORT_SPACING
-  - CSS classes: df-node, df-node.selected, df-node-header, df-node-type
-- Register in dag/mod.rs
-- trunk build --release succeeds
+- In crates/rustcam/src/toolpath.rs:
+  - Add `pub enum Pattern { ZigZag, OneWay, Spiral }` with `#[derive(Debug,
+    Clone, Copy, PartialEq, Default)]` where `ZigZag` is the default.
+  - Add `pattern: Pattern` field to `SurfaceParams`.
+  - Keep `SurfaceParams::new(mesh, cut_params, scan_direction)` for
+    backwards compatibility; it fills `Pattern::default()`.
+  - Add `SurfaceParams::new_with_pattern(mesh, cut_params, scan_direction,
+    pattern)` for explicit pattern selection.
+  - Update the `From<(&Mesh, &CutParams)>` impl to set `pattern:
+    Pattern::default()`.
+- `Pattern` is reachable as `rustcam::toolpath::Pattern`.
+- Unit tests in `toolpath.rs`:
+  - `Pattern::default() == Pattern::ZigZag`.
+  - `SurfaceParams::new` yields a struct whose `pattern` is `ZigZag`.
+  - Constructing with each of the three variants round-trips via equality.
+- `cargo test -p rustcam` passes (existing ZigzagSurfaceStrategy tests
+  continue to work because they hit the default pattern).
+- `cargo clippy -p rustcam --all-targets -- -D warnings` clean.
 """
-deps = ["task-001"]
-status = "pending"
+deps = []
+status = "complete"
+
+# ============================================================================
+# Phase 3: Strategy rename + tool-shape wiring
+# ============================================================================
 
 [[tasks]]
 id = "task-003"
-title = "Create Edge component with SVG Bezier path"
+title = "Rename ZigzagSurfaceStrategy to Surface3dStrategy and wire tool projection"
 acceptance = """
-- New hil/combined-frontend/src/components/dag/edge.rs (wasm32-gated):
-  - #[component] fn Edge(channel_id: u32) -> impl IntoView
-  - Reads GraphState from context
-  - Renders SVG <path> with cubic Bezier curve between source output port and dest input port
-  - Path recomputes reactively when either endpoint block moves (positions signal)
-  - Bezier control points: cpX = max(dx * 0.5, min(|dy|, 50))
-  - Edge selection: click on path sets selected_edge, highlights (dashed, brighter)
-  - Fat invisible hit-area path (stroke-width 12) behind visible path for easier clicking
-  - CSS classes: df-edge, df-edge.selected, df-edge-hit
-- Register in dag/mod.rs
-- trunk build --release succeeds
+- In crates/rustcam/src/toolpath.rs rename `ZigzagSurfaceStrategy` to
+  `Surface3dStrategy`. Keep a `pub use Surface3dStrategy as
+  ZigzagSurfaceStrategy;` shim so downstream code (lib.rs re-exports,
+  wasm_api.rs, www/src/cam.ts bindings, existing tests) still resolves.
+- Inside `Surface3dStrategy::sample_point`, dispatch on the tool type:
+  - `ToolType::EndMill` or `ToolType::FaceMill { .. }` → call
+    `slicer::project_flat_tool(mesh, x, y, tool_radius)`.
+  - `ToolType::BallEnd` → call `slicer::project_ball_tool(mesh, x, y,
+    tool_radius)`. The existing normal-offset path is removed; disc
+    sampling replaces it.
+- `generate_surface` still honours `scan_direction` and returns the
+  zig-zag path when `params.pattern == Pattern::ZigZag`. Dispatch to the
+  one-way and spiral helpers (stubbed `unimplemented!()` returning an
+  empty `Vec<Toolpath>` is acceptable here; filled in by task-004 and
+  task-005).
+- Unit tests added or updated (minimum 4 new):
+  - A peak mesh (pyramid) produces a path whose maximum Z equals the
+    pyramid apex Z + (0 for flat, radius for ball), confirming the tool
+    rides over the peak without gouging.
+  - With `ToolType::EndMill` + nonzero radius, the path Z at the peak is
+    strictly greater than `mesh_height_at(apex_x, apex_y) - epsilon`
+    would have produced. (Regression guard against pointwise sampling.)
+  - Switching `ToolType::BallEnd` lifts the same path by exactly the
+    tool radius on a horizontal plateau.
+  - `pub use ZigzagSurfaceStrategy` still resolves (compile-only test).
+- `cargo test -p rustcam` passes including the existing
+  `test_surface_*` suite (which must remain green under the renamed
+  strategy via the shim).
+- `cargo clippy -p rustcam --all-targets -- -D warnings` clean.
 """
-deps = ["task-001"]
-status = "pending"
+deps = ["task-001", "task-002"]
+status = "complete"
+
+# ============================================================================
+# Phase 4: One-way pattern
+# ============================================================================
 
 [[tasks]]
 id = "task-004"
-title = "Create Port component with wire drag interaction"
+title = "Implement one-way scan pattern"
 acceptance = """
-- New hil/combined-frontend/src/components/dag/port.rs (wasm32-gated):
-  - #[component] fn Port(block_id: u32, index: usize, side: &'static str, name: String) -> impl IntoView
-  - Renders as absolutely-positioned <div> circle (12x12, border-radius 50%)
-  - Port color by type (float=blue, bytes=orange, text=green, etc.)
-  - Label text next to port (left for inputs, right for outputs)
-  - Wire drag state machine:
-    - pointerdown on output port starts wire drag
-    - Provides WireDragState signal via context: { from_block, from_port, cursor_x, cursor_y }
-    - Editor renders dashed SVG path following cursor during drag
-    - pointerup on input port completes connection via GraphState.connect()
-    - pointerup elsewhere cancels
-    - Ports highlight on hover when compatible with active wire drag
-  - Output ports show live value label (subscribes to tick_count)
-- Register in dag/mod.rs
-- trunk build --release succeeds
+- Add `fn generate_one_way(params: &SurfaceParams) -> Vec<Toolpath>` as a
+  private method on `Surface3dStrategy`.
+- Path shape per scan row:
+  1. Rapid to (row_start_x, row_start_y, safe_z).
+  2. Plunge to sampled surface Z at row start.
+  3. Cut forward through all samples in the row.
+  4. Rapid up to safe_z and over to the next row start — never cut
+     backwards.
+- All rows are traversed in the same scan direction (no alternation, in
+  contrast to ZigZag).
+- Called from `generate_surface` when `params.pattern == Pattern::OneWay`.
+- Unit tests (minimum 3):
+  - For a mesh with rows R0, R1, R2, the emitted Toolpaths contain at
+    least `rows * 2` rapid moves (one at the end of each row + one at
+    the start of the next), whereas the ZigZag path has 2 rapids total
+    (first plunge and final retract).
+  - Every in-row cut segment has dx>=0 for `ScanDirection::X` (strictly
+    forward; no reverse cuts).
+  - First and last emitted toolpaths both include a rapid to safe_z.
+- `cargo test -p rustcam` passes.
+- `cargo clippy -p rustcam --all-targets -- -D warnings` clean.
 """
-deps = ["task-002", "task-003"]
-status = "pending"
+deps = ["task-003"]
+status = "complete"
 
 # ============================================================================
-# Phase 3: Editor workspace with layers
+# Phase 5: Rectangular offset spiral pattern
 # ============================================================================
 
 [[tasks]]
 id = "task-005"
-title = "Refactor Editor with separate grid/edge/node layers and <For> rendering"
+title = "Implement rectangular offset spiral scan pattern"
 acceptance = """
-- Rewrite hil/combined-frontend/src/components/dag/editor.rs:
-  - Uses GraphState from context (no thread_local ENGINE)
-  - Three stacked layers (absolute positioned):
-    1. df-grid: CSS background grid (20px, adjusts with pan/zoom)
-    2. df-edge-layer: SVG element containing <For> over channels → Edge components
-    3. df-node-layer: HTML div containing <For> over block_ids → Node components
-  - Pan: shift+pointerdown or middle-button drag on workspace
-  - Zoom: wheel with focal point (zoom toward cursor)
-  - Double-click: show palette at click position
-  - Delete/Backspace: remove selected block or edge
-  - Wire drag preview path rendered in edge layer (dashed, follows cursor)
-  - <For> uses key function for efficient updates (block_id for nodes, channel_id for edges)
-  - All sidebar sections remain (project, blocks, inspector, transport, export, HIL, monitor)
-- CSS: df-workspace uses position:relative, layers use position:absolute inset:0
-  with appropriate z-index (grid=0, edges=1, nodes=2)
-- trunk build --release succeeds
+- Add `fn generate_spiral(params: &SurfaceParams) -> Vec<Toolpath>` as a
+  private method on `Surface3dStrategy`.
+- Spiral construction:
+  - Start at the outer rectangle of the mesh XY bounding box.
+  - Traverse its four edges with `step_over` sample spacing along each
+    edge, sampling via the same tool-shape projection as the other
+    patterns.
+  - Offset the rectangle inward by `step_over` and repeat until
+    width_remaining <= step_over or height_remaining <= step_over.
+  - All moves are cutting moves at the sampled Z; exactly one rapid
+    (initial plunge) and one retract (final lift) are emitted.
+- Called from `generate_surface` when `params.pattern == Pattern::Spiral`.
+- Unit tests (minimum 3):
+  - On a 20x20 mesh with step_over=5.0, the spiral contains at least
+    2 full loops (outer ring + one inner ring) before terminating.
+  - Consecutive spiral points monotonically decrease in distance to the
+    bounding box centre (within a tolerance of step_over).
+  - Only one initial rapid and one final retract are emitted for the
+    whole strategy.
+- `cargo test -p rustcam` passes.
+- `cargo clippy -p rustcam --all-targets -- -D warnings` clean.
 """
-deps = ["task-004"]
-status = "pending"
+deps = ["task-003"]
+status = "complete"
 
 # ============================================================================
-# Phase 4: Matching the TypeScript visual design
+# Phase 6: UI wiring
 # ============================================================================
 
 [[tasks]]
 id = "task-006"
-title = "Style nodes as HTML divs matching TypeScript node-view design"
+title = "Expose Surface3d strategy with pattern dropdown in CAM panel"
 acceptance = """
-- Update style.css for HTML-div node rendering:
-  - .df-node: absolute position, bg #1a1d27, border 1px #2a2d3a, rounded 6px,
-    min-width 140px, cursor grab, user-select none
-  - .df-node.selected: border 2px #4f8cff, box-shadow 0 0 12px rgba(79,140,255,0.25)
-  - .df-node:active: cursor grabbing
-  - .df-node-header: font 12px/semibold, color #e0e0e8, padding 10px 10px 2px 10px,
-    text-overflow ellipsis, overflow hidden, white-space nowrap
-  - .df-node-type: font 10px/monospace, color #8888a0, padding 0 10px 4px 10px
-  - .df-port: position absolute, width 12px, height 12px, border-radius 50%,
-    cursor crosshair, z-index 5
-  - .df-port-label: font 10px/monospace, color #8888a0, position absolute, white-space nowrap
-  - .df-port.input: left -6px, background #4f8cff
-  - .df-port.output: right -6px, background #4f8cff
-  - .df-port:hover: width 16px, height 16px, filter brightness(1.3)
-  - .df-output-value: font 10px/monospace, color #55ff88, position absolute
-- Port spacing: PORT_OFFSET_Y = 30px from top, PORT_SPACING = 20px between ports
-- Node height = 40px + max(inputs, outputs) * 20px
-- Edge path: stroke based on output port type color, stroke-width 2/3/4 (normal/selected/hover)
-- Edge Bezier: M x1,y1 C x1+cpX,y1 x2-cpX,y2 x2,y2 where cpX = max(dx*0.5, min(|dy|, 50))
-- Edge hover: brightness(1.3), edge selected: dashed "6 3", brightness(1.5)
-- All dimensions and colors match the TypeScript editor screenshot
-- trunk build --release succeeds
+- In hil/combined-frontend/src/components/cam/panel.rs:
+  - Replace the `("zigzag", "Zigzag")` entry in `CNC_STRATEGIES` with
+    `("surface3d", "Surface 3D")`.
+  - Add a second `<select>` labelled "Pattern" bound to a new
+    `signal("zigzag" | "one_way" | "spiral")`; show only when the
+    currently-selected strategy is `surface3d`.
+- In hil/combined-frontend/src/cam_config.rs:
+  - Extend `CamParams` with `pattern: String` (default "zigzag").
+  - Thread the value through `build_cam_config` so it reaches the
+    rustcam wasm boundary.
+- In crates/rustcam/src/wasm_api.rs: parse the new pattern string from
+  the CAM config JSON and populate `SurfaceParams.pattern` accordingly.
+  Accept the same three values the UI emits; any other value falls back
+  to `ZigZag` with a console warning.
+- At least one host-side unit test in `cam_config.rs` verifying the
+  round-trip of `pattern` through `build_cam_config` for each of the
+  three values.
+- `trunk build --release` in `hil/combined-frontend/` succeeds.
+- Manual smoke test documented in the PR description: upload a sample
+  STL, pick Surface 3D + one-way, confirm G-code output differs from
+  zig-zag and spiral for the same file.
 """
-deps = ["task-005"]
-status = "pending"
+deps = ["task-003", "task-004", "task-005"]
+status = "complete"
 
 # ============================================================================
-# Phase 5: Tick loop and output display
+# Phase 7: End-to-end integration test
 # ============================================================================
 
 [[tasks]]
 id = "task-007"
-title = "Implement tick loop with output values on ports and plot component"
+title = "Add end-to-end G-code integration test across the three patterns"
 acceptance = """
-- Transport controls use GraphState.tick():
-  - Play: requestAnimationFrame loop (60Hz) or gloo_timers Interval (configurable dt)
-  - Pause: stop loop
-  - Step: single tick
-  - Reset: GraphState.reset()
-  - Live mode: tick on inject_topic (from task-011 SimMode)
-- Output value display on ports:
-  - Output port label shows formatted value (Float: 2 decimal, Text: truncated 12 chars,
-    Series: "[length]")
-  - Updates reactively by subscribing to tick_count signal
-  - Value label positioned right of output port circle
-- Plot component: canvas sparkline for Series-typed output ports
-  - 200-sample scrolling buffer
-  - Auto-scaling Y axis
-  - Updates on tick_count change
-- Monitor panel: shows all pubsub topics and values from GraphState.topics signal
-- 5+ tests:
-  - GraphState.tick() increments tick_count
-  - After tick, topics signal has published values
-  - Reset clears tick_count and topics
-- trunk build --release succeeds
+- New `crates/rustcam/tests/surface_3d_integration.rs`:
+  - Loads a small, version-controlled test STL (e.g. a 10x10 pyramid
+    written inline as a binary STL byte literal; no new binary assets
+    checked in).
+  - For each `Pattern` variant and each `ToolType` in {EndMill,
+    BallEnd}, runs `Surface3dStrategy::generate_surface` and then the
+    existing gcode emitter, asserting:
+    - Resulting G-code is non-empty.
+    - All `G1` Z values are >= the pyramid apex Z (no gouging).
+    - Spiral emits exactly one `G0` to safe_z at start and one at end.
+    - One-way emits `2 * row_count` rapids (approximate match).
+    - Zig-zag emits exactly 2 rapids (start and end).
+- Runs as part of `make verify`.
+- `cargo test -p rustcam --test surface_3d_integration` passes.
+- `cargo clippy -p rustcam --all-targets -- -D warnings` clean.
 """
 deps = ["task-006"]
-status = "pending"
-
-# ============================================================================
-# Phase 6: Storage, sidebar, state machine editor, HIL
-# ============================================================================
-
-[[tasks]]
-id = "task-008"
-title = "Wire storage, sidebar, state machine editor, and HIL into new editor"
-acceptance = """
-- All existing components integrated with GraphState:
-  - ProjectSidebar: save/load uses GraphState snapshot/restore
-  - Auto-save: Effect watches GraphState mutation, debounces 2s save
-  - BlockPalette: uses GraphState.add_block()
-  - ConfigPanel: uses GraphState.update_config()
-  - StateMachineEditor: uses GraphState.update_config() for FSM blocks
-  - TransportBar: uses GraphState.tick()/reset(), SimMode
-  - MonitorPanel: reads GraphState.topics signal
-  - ExportPanel: reads GraphState snapshot for codegen
-  - BoardManager: reads block list from GraphState
-  - HilClient: deploy sends GraphState DAG to MCU
-- Mode switching (CAM/Sketch/Dataflow/Panel) preserves GraphState
-  - GraphState provided at App level, not inside editor component
-  - Switching modes doesn't destroy GraphState
-- Keyboard shortcuts scope correctly:
-  - Delete: removes selected in Dataflow mode only
-  - Space: play/pause in Dataflow mode only
-- trunk build --release succeeds
-- All existing 188+ combined-frontend tests pass
-"""
-deps = ["task-007"]
-status = "pending"
+status = "complete"
