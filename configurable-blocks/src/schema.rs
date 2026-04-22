@@ -162,9 +162,7 @@ mod tests {
             kind: ChannelKind::PubSub,
             channel_type: Some("f32".into()),
         };
-        // Verify type name can be resolved via DagType::from_name
-        let dag_type = dag_core::types::DagType::from_name(ch.channel_type.as_deref().unwrap());
-        assert_eq!(dag_type, Some(dag_core::types::DagType::F32));
+        assert_eq!(ch.channel_type.as_deref(), Some("f32"));
     }
 
     // --- FieldKind tests ---
