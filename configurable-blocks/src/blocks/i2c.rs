@@ -118,12 +118,14 @@ impl ConfigurableBlock for I2cMuxBlock {
                 name: self.bus_topic.clone(),
                 direction: ChannelDirection::Input,
                 kind: ChannelKind::Hardware,
+                channel_type: None,
             },
             // Channel select — pubsub input (runtime selects active channel)
             DeclaredChannel {
                 name: self.select_topic.clone(),
                 direction: ChannelDirection::Input,
                 kind: ChannelKind::PubSub,
+                channel_type: None,
             },
         ];
 
@@ -133,6 +135,7 @@ impl ConfigurableBlock for I2cMuxBlock {
                 name: format!("{}/ch{}", self.bus_topic, i),
                 direction: ChannelDirection::Output,
                 kind: ChannelKind::Hardware,
+                channel_type: None,
             });
         }
 

@@ -13,7 +13,7 @@ use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::app::Tab;
+use crate::app::DataflowTab;
 
 /// Keyboard action signals, provided via Leptos context.
 ///
@@ -31,7 +31,7 @@ pub struct KeyboardActions {
 /// Install the document-level `keydown` listener and provide [`KeyboardActions`] context.
 ///
 /// Must be called once from the root App component, after `active_tab` is available.
-pub fn install_keyboard_handler(active_tab: ReadSignal<Tab>) {
+pub fn install_keyboard_handler(active_tab: ReadSignal<DataflowTab>) {
     let (delete_pressed, set_delete_pressed) = signal(0_u64);
     let (toggle_play_pressed, set_toggle_play_pressed) = signal(0_u64);
 
@@ -43,7 +43,7 @@ pub fn install_keyboard_handler(active_tab: ReadSignal<Tab>) {
     let closure =
         Closure::<dyn FnMut(web_sys::KeyboardEvent)>::new(move |ev: web_sys::KeyboardEvent| {
             // Only handle shortcuts when on the DAG Editor tab.
-            if active_tab.get_untracked() != Tab::DagEditor {
+            if active_tab.get_untracked() != DataflowTab::DagEditor {
                 return;
             }
 

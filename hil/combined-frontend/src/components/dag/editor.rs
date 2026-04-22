@@ -362,7 +362,7 @@ pub fn DagEditorPanel() -> impl IntoView {
             if let Some(ref mut s) = *sim {
                 // Inject panel-side inputs into topics before evaluating.
                 for (k, v) in external_inputs_rw.get_untracked() {
-                    s.set_topic(&k, v);
+                    s.inject(&k, v);
                 }
                 s.tick(&dag);
                 set_sim_topics.set(s.topics().clone());
@@ -427,7 +427,7 @@ pub fn DagEditorPanel() -> impl IntoView {
                 SIM.with(|cell| {
                     if let Some(ref mut s) = *cell.borrow_mut() {
                         for (k, v) in external_inputs_rw.get_untracked() {
-                            s.set_topic(&k, v);
+                            s.inject(&k, v);
                         }
                         s.tick(&dag);
                         set_topics.set(s.topics().clone());
