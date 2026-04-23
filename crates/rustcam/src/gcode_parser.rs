@@ -607,10 +607,8 @@ pub fn validate_command(
                 }
             }
         }
-        GCodeCommand::Dwell { seconds } => {
-            if *seconds < 0.0 {
-                return Err(ValidationError::InvalidDwellTime(*seconds));
-            }
+        GCodeCommand::Dwell { seconds } if *seconds < 0.0 => {
+            return Err(ValidationError::InvalidDwellTime(*seconds));
         }
         GCodeCommand::SetSpindle(ctrl) => {
             if let Some(speed) = ctrl.speed() {
