@@ -184,7 +184,7 @@ mod tests {
 
     #[test]
     fn test_format_axis_label_pi() {
-        assert_eq!(format_axis_label(3.14159), "3.14");
+        assert_eq!(format_axis_label(std::f64::consts::PI), "3.14");
     }
 
     #[test]

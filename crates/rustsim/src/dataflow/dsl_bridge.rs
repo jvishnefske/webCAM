@@ -15,12 +15,10 @@ use crate::dataflow::graph::{BlockSnapshot, GraphSnapshot};
 pub fn ast_to_snapshot(graph: &parser::ast::Graph) -> Result<GraphSnapshot, String> {
     let mut blocks = Vec::new();
     let mut name_to_id: HashMap<String, BlockId> = HashMap::new();
-    let mut next_id: u32 = 1;
 
     // Pass 1: create blocks and build the name -> id map.
-    for decl in &graph.blocks {
+    for (next_id, decl) in (1_u32..).zip(graph.blocks.iter()) {
         let id = BlockId(next_id);
-        next_id += 1;
         name_to_id.insert(decl.id.clone(), id);
 
         let config_json = config_to_json(&decl.block_type, &decl.config);
@@ -59,9 +57,8 @@ pub fn ast_to_snapshot(graph: &parser::ast::Graph) -> Result<GraphSnapshot, Stri
 
     // Pass 2: resolve connections.
     let mut channels = Vec::new();
-    let mut next_ch_id: u32 = 1;
 
-    for conn in &graph.connections {
+    for (next_ch_id, conn) in (1_u32..).zip(graph.connections.iter()) {
         let from_block = *name_to_id
             .get(&conn.from_block)
             .ok_or_else(|| format!("unknown block '{}'", conn.from_block))?;
@@ -106,7 +103,6 @@ pub fn ast_to_snapshot(graph: &parser::ast::Graph) -> Result<GraphSnapshot, Stri
             to_block,
             to_port,
         });
-        next_ch_id += 1;
     }
 
     Ok(GraphSnapshot {
@@ -165,15 +161,11 @@ fn inject_defaults(block_type: &str, map: &mut serde_json::Map<String, serde_jso
                 map.insert("param2".into(), serde_json::json!(0.0));
             }
         }
-        "adc_source" => {
-            if !map.contains_key("resolution_bits") {
-                map.insert("resolution_bits".into(), serde_json::json!(12));
-            }
+        "adc_source" if !map.contains_key("resolution_bits") => {
+            map.insert("resolution_bits".into(), serde_json::json!(12));
         }
-        "pwm_sink" => {
-            if !map.contains_key("frequency_hz") {
-                map.insert("frequency_hz".into(), serde_json::json!(1000));
-            }
+        "pwm_sink" if !map.contains_key("frequency_hz") => {
+            map.insert("frequency_hz".into(), serde_json::json!(1000));
         }
         _ => {}
     }

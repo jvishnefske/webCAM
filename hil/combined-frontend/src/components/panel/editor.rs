@@ -682,7 +682,6 @@ fn render_inspector(
                 {move || {
                     sim_topics.0.get()
                         .keys()
-                        .cloned()
                         .map(|t| view! { <option value=t.clone()>{t.clone()}</option> })
                         .collect_view()
                 }}
