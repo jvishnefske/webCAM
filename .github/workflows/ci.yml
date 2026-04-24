@@ -9,8 +9,6 @@ on:
 
 permissions:
   contents: write
-  pages: write
-  id-token: write
   pull-requests: write
 
 jobs:
@@ -23,46 +21,18 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
           components: clippy
-      - uses: jetli/wasm-pack-action@v0.4.0
-      - run: cargo install cargo-llvm-cov --locked
-      - uses: actions/setup-node@v5
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/trunk-action@v0.5.0
         with:
-          node-version: 22
+          version: latest
+      - run: cargo install cargo-llvm-cov --locked
       - run: make lint
       - run: make test
-      - run: make wasm
-      - run: make ts
-      - run: |
-          echo '{"sha":"'"${GITHUB_SHA::8}"'","date":"'"$(date -u +%FT%TZ)"'","ref":"'"$GITHUB_REF_NAME"'"}' > www/version.json
-      - name: Remove build-only files from www
-        run: rm -rf www/node_modules www/src www/package.json www/package-lock.json www/tsconfig.json www/vitest.config.ts www/esbuild.config.mjs
-      - run: cd www && zip -r ../rustcam.zip .
-      - uses: actions/upload-artifact@v5
-        with:
-          name: rustcam
-          path: rustcam.zip
-      - uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/v')
-        with:
-          files: rustcam.zip
-          generate_release_notes: true
-
-  deploy:
-    needs: build
-    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    concurrency:
-      group: deploy-pages
-      cancel-in-progress: true
-    steps:
-      - uses: actions/download-artifact@v5
-        with:
-          name: rustcam
-      - run: unzip -o rustcam.zip -d site
-      - uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./site
+      - name: Clippy (combined-frontend, wasm32)
+        run: cargo clippy -p combined-frontend --target wasm32-unknown-unknown --all-targets -- -D warnings
+      - name: Sanity build (combined-frontend)
+        working-directory: hil/combined-frontend
+        run: trunk build --release
 
   deploy-external:
     needs: build
@@ -75,20 +45,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - uses: jetli/wasm-pack-action@v0.4.0
-      - uses: actions/setup-node@v5
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/trunk-action@v0.5.0
         with:
-          node-version: 22
-      - run: make wasm ts
-      - run: |
-          echo '{"sha":"'"${GITHUB_SHA::8}"'","date":"'"$(date -u +%FT%TZ)"'","ref":"'"$GITHUB_REF_NAME"'"}' > www/version.json
-      - name: Remove build-only files
-        run: rm -rf www-cam/node_modules www-dataflow/node_modules www/node_modules
+          version: latest
+      - name: Build combined-frontend for /cam/
+        working-directory: hil/combined-frontend
+        run: trunk build --release --public-url /cam/
+      - name: Write version.json
+        run: |
+          echo '{"sha":"'"${GITHUB_SHA::8}"'","date":"'"$(date -u +%FT%TZ)"'","ref":"'"$GITHUB_REF_NAME"'"}' \
+            > hil/combined-frontend/dist/version.json
       - uses: peaceiris/actions-gh-pages@v4
         with:
           deploy_key: ${{ secrets.CAM_DEPLOY_KEY }}
           external_repository: jvishnefske/cam
-          publish_dir: ./www
+          publish_dir: ./hil/combined-frontend/dist
           publish_branch: gh-pages
           keep_files: true
 
@@ -104,20 +76,27 @@ jobs:
       cancel-in-progress: true
     steps:
       - uses: actions/checkout@v5
-
-      - uses: actions/download-artifact@v5
+        if: github.event.action != 'closed'
+      - uses: dtolnay/rust-toolchain@stable
         if: github.event.action != 'closed'
         with:
-          name: rustcam
-      - run: mkdir -p www && cd www && unzip -o ../rustcam.zip
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
         if: github.event.action != 'closed'
-
+      - uses: jetli/trunk-action@v0.5.0
+        if: github.event.action != 'closed'
+        with:
+          version: latest
+      - name: Build combined-frontend for PR preview
+        if: github.event.action != 'closed'
+        working-directory: hil/combined-frontend
+        run: trunk build --release --public-url /cam/pr-preview/pr-${{ github.event.pull_request.number }}/
       - uses: peaceiris/actions-gh-pages@v4
         if: github.event.action != 'closed'
         with:
           deploy_key: ${{ secrets.CAM_DEPLOY_KEY }}
           external_repository: jvishnefske/cam
-          publish_dir: ./www
+          publish_dir: ./hil/combined-frontend/dist
           publish_branch: gh-pages
           destination_dir: pr-preview/pr-${{ github.event.pull_request.number }}
           keep_files: true
@@ -162,3 +141,26 @@ jobs:
             git commit -m "Remove preview for PR #$PR"
             git push
           fi
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+      - uses: jetli/trunk-action@v0.5.0
+        with:
+          version: latest
+      - name: Build release artifact
+        working-directory: hil/combined-frontend
+        run: trunk build --release
+      - name: Zip dist
+        run: cd hil/combined-frontend/dist && zip -r ../../../rustcam-combined.zip .
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: rustcam-combined.zip
+          generate_release_notes: true

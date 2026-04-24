@@ -192,7 +192,7 @@ fn ConfigFieldEditor(
         }
         FieldKind::TypeSelector => {
             let key = field.key.clone();
-            let type_options = vec!["f64", "f32", "i32", "u8", "u16", "bool"];
+            let type_options = ["f64", "f32", "i32", "u8", "u16", "bool"];
             view! {
                 <div class="form-group">
                     <label>{label}</label>

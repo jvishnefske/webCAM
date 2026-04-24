@@ -603,7 +603,7 @@ mod tests {
     fn test_snapshot_roundtrip_json() {
         let mut engine = GraphEngine::new();
         let a = engine
-            .add_block("constant", serde_json::json!({"value": 3.14}))
+            .add_block("constant", serde_json::json!({"value": 2.5}))
             .unwrap();
         let b = engine.add_block("gain", serde_json::json!({})).unwrap();
         engine.connect(a, 0, b, 0);

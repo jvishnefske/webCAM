@@ -713,7 +713,7 @@ mod tests {
             blocks: vec![PlacedBlock {
                 id: 1,
                 block_type: "constant".to_string(),
-                config: serde_json::json!({"value": 3.14}),
+                config: serde_json::json!({"value": 2.5}),
                 x: 10.0,
                 y: 20.0,
             }],
@@ -757,9 +757,9 @@ mod tests {
     #[test]
     fn offset_op_const_unchanged() {
         use dag_core::op::Op;
-        let op = Op::Const(3.14);
+        let op = Op::Const(2.5);
         let adjusted = offset_op(&op, 10);
-        assert_eq!(adjusted, Op::Const(3.14));
+        assert_eq!(adjusted, Op::Const(2.5));
     }
 
     #[test]
@@ -819,7 +819,6 @@ mod tests {
         let id = gs.add_block("constant").unwrap();
         let blks = gs.blocks.get_untracked();
         let orig_x = blks[0].x;
-        let orig_y = blks[0].y;
         drop(blks);
 
         gs.move_block(id, 300.0, 400.0);
